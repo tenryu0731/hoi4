@@ -190,6 +190,7 @@ export class MapRenderer {
 
     this.units = new UnitLayer(this.index);
     this.world.addChild(this.units.container);
+    this.world.addChild(this.labels.topContainer);
   }
 
   /**

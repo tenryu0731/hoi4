@@ -41,6 +41,18 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/**
+ * Collapses repeats into counts.
+ *
+ * A motorised division listing its six identical battalions in full wrapped to
+ * four lines and broke mid-compound, which is not a thing anyone ships.
+ */
+function tally(names: string[]): string {
+  const counts = new Map<string, number>();
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
+  return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join('・');
+}
+
 function setText(node: HTMLElement, value: string): void {
   if (node.textContent !== value) node.textContent = value;
 }
@@ -289,9 +301,11 @@ export const armyPanel: Panel = {
       b.append(
         el('span', 'panel-build-title', tpl.name),
         el('span', 'panel-build-sub',
-          `${tpl.battalions.map((x) => BATTALION[x]).join('・')}` +
-          (tpl.supports.length > 0 ? ` + ${tpl.supports.map((x) => SUPPORT[x]).join('・')}` : '') +
-          ` · ${formatNumber(tpl.manpowerNeed)}名`),
+          `${tally(tpl.battalions.map((x) => BATTALION[x]))}` +
+          (tpl.supports.length > 0
+            ? `\n${tpl.supports.map((x) => SUPPORT[x]).join('・')}`
+            : '') +
+          `\n${formatNumber(tpl.manpowerNeed)}名`),
         // Refreshed every tick with the equipment that is holding this template
         // back. A recruit button that silently does nothing is the worst
         // possible answer to "why can I not build an army".

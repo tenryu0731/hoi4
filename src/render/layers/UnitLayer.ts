@@ -166,8 +166,13 @@ export class UnitLayer {
       rects.push({
         x: camera.worldToScreenX(p.centerX),
         y: camera.worldToScreenY(p.centerY - liftWorld),
-        w: targetPx,
-        h: (targetPx * PLATE_H) / PLATE_W + 10,
+        // Aggregated counters stand in for a whole state, so they claim a
+        // little less than they occupy -- but they must still claim. Returning
+        // nothing let labels draw straight underneath, and a country name with
+        // its first character covered is not a degraded label, it is a
+        // different word: Germany read as "イツ".
+        w: targetPx * (byState ? 0.8 : 1),
+        h: ((targetPx * PLATE_H) / PLATE_W + 10) * (byState ? 0.8 : 1),
       });
 
       const color = rgbToHex(state.countries[s.owner].color);
@@ -190,9 +195,7 @@ export class UnitLayer {
     }
 
     for (let i = stacks.length; i < this.pool.length; i++) this.pool[i].root.visible = false;
-    // Only claim space against labels when counters are per-province. While
-    // aggregated, place names matter more than exact unit positions.
-    return byState ? [] : rects;
+    return rects;
   }
 
   /**

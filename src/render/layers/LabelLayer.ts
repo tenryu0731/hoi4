@@ -51,11 +51,15 @@ function installFonts(): void {
   BitmapFont.install({
     name: FONT_COUNTRY,
     style: {
-      fontFamily: 'Georgia, "Times New Roman", "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif',
+      fontFamily: '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Helvetica Neue", Arial, sans-serif',
       fontSize: 44,
       fontWeight: 'bold',
       fill: 0xffffff,
-      letterSpacing: 2,
+      // A halo, not an offset shadow. A shadow separates a label from the map
+      // on two sides and leaves the other two touching, which is why names
+      // disappeared into pale country fills; a stroke baked into the atlas
+      // costs nothing per label and works in every direction.
+      stroke: { color: 0x0e0b06, width: 5, join: 'round' },
     },
     chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], LATIN_GLYPHS + COUNTRY_GLYPHS],
     resolution: 2,
@@ -66,6 +70,7 @@ function installFonts(): void {
       fontFamily: 'Georgia, "Times New Roman", serif',
       fontSize: 30,
       fill: 0xffffff,
+      stroke: { color: 0x0e0b06, width: 4, join: 'round' },
       letterSpacing: 1,
     },
     chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], LATIN_GLYPHS],
@@ -77,6 +82,7 @@ function installFonts(): void {
       fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif',
       fontSize: 26,
       fill: 0xffffff,
+      stroke: { color: 0x0e0b06, width: 4, join: 'round' },
     },
     chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], LATIN_GLYPHS],
     resolution: 2,
@@ -85,7 +91,6 @@ function installFonts(): void {
 
 interface LabelEntry {
   text: BitmapText;
-  shadow: BitmapText;
   worldX: number;
   worldY: number;
   /** Lowest LOD step at which this label is shown. */
@@ -99,10 +104,30 @@ interface LabelEntry {
   shapeH: number;
   /** Font size the bitmap atlas was built at. */
   baseSize: number;
+  /**
+   * Unscaled width in atlas units, captured once at construction.
+   *
+   * `BitmapText.width` returns scale-applied bounds, and `place()` writes a
+   * scale every frame -- so reading it during the fit test measured the width
+   * the label had last frame, inflated by roughly 1/zoom. Every country name
+   * then failed its own fit test at the zoom levels that matter: the
+   * whole-continent view carried no country labels at all, and the survivors
+   * blinked as the camera moved.
+   */
+  baseW: number;
 }
 
 export class LabelLayer {
   readonly container = new Container();
+  /**
+   * Country names, drawn above the unit counters.
+   *
+   * Placement alone is not enough to keep them: the counters are a later
+   * sibling, so they paint over whatever the label claimed and the first
+   * character of a name disappears under a stack -- Germany read as "イツ".
+   * A country name is the top-level read on a strategy map, so it goes above.
+   */
+  readonly topContainer = new Container();
   readonly countryLabels: LabelEntry[] = [];
   readonly provinceLabels: LabelEntry[] = [];
   readonly cityLabels: LabelEntry[] = [];
@@ -117,6 +142,7 @@ export class LabelLayer {
   ) {
     installFonts();
     this.container.eventMode = 'none';
+    this.topContainer.eventMode = 'none';
     this.build();
   }
 
@@ -125,22 +151,18 @@ export class LabelLayer {
     minStep: number, pxSize: number, priority: number,
     shapeW: number, shapeH: number, into: LabelEntry[],
   ): void {
-    const shadow = new BitmapText({ text: value, style: { fontFamily: font } });
-    shadow.anchor.set(0.5);
-    shadow.tint = PALETTE.textShadow;
-    shadow.alpha = 0.75;
-
     const text = new BitmapText({ text: value, style: { fontFamily: font } });
     text.anchor.set(0.5);
     text.tint = font === FONT_COUNTRY ? PALETTE.textPrimary : PALETTE.textCity;
     if (font === FONT_PROVINCE) text.alpha = 0.88;
 
-    this.container.addChild(shadow);
-    this.container.addChild(text);
+    (font === FONT_COUNTRY ? this.topContainer : this.container).addChild(text);
     into.push({
-      text, shadow, worldX: x, worldY: y, minStep, pxSize, priority,
+      text, worldX: x, worldY: y, minStep, pxSize, priority,
       shapeW, shapeH,
       baseSize: font === FONT_COUNTRY ? 44 : font === FONT_PROVINCE ? 30 : 26,
+      // Measured before anything scales it.
+      baseW: text.width,
     });
   }
 
@@ -271,7 +293,6 @@ export class LabelLayer {
     const view = camera.visibleRect();
     const pad = 200 / zoom;
     this.occupied.clear();
-    for (const r of reserved) this.claim(r.x, r.y, r.w, r.h);
 
     const place = (e: LabelEntry, fitToShape: boolean): boolean => {
       if (this.step < e.minStep) return false;
@@ -279,7 +300,9 @@ export class LabelLayer {
       if (e.worldY < view.minY - pad || e.worldY > view.maxY + pad) return false;
 
       // Label size is constant on screen, so its pixel width is independent of
-      // zoom: width(local) * pxSize / atlasFontSize.
+      // zoom: atlasWidth * pxSize / atlasFontSize. The width has to be the
+      // unscaled one captured at construction -- `text.width` carries the
+      // scale this label was given on the previous frame.
       //
       // Both sides of the fit test are rounded to whole pixels. Glyph metrics
       // come from a canvas-rasterised atlas and vary by a fraction of a pixel
@@ -287,7 +310,7 @@ export class LabelLayer {
       // threshold appears in one render and not the next, which is a visual
       // regression the eye cannot see but a pixel diff can.
       const k = e.pxSize / e.baseSize;
-      let wPx = Math.round(e.text.width * k);
+      let wPx = Math.round(e.baseW * k);
       let hPx = e.pxSize;
 
       if (fitToShape) {
@@ -318,25 +341,28 @@ export class LabelLayer {
       const s = (hPx / e.baseSize) / zoom;
       e.text.position.set(e.worldX, e.worldY);
       e.text.scale.set(s);
-      e.shadow.position.set(e.worldX + 2 * s, e.worldY + 2 * s);
-      e.shadow.scale.set(s);
       return true;
     };
 
+    // Country names are placed against a clear grid, ahead of the unit
+    // counters. On a strategy map the name of the nation you are looking at
+    // outranks a stack marker; reserving counter space first meant a counter
+    // standing on a capital could delete its country's name, which is how the
+    // continental view ended up captioned with Latin city names and no
+    // countries at all.
     for (const e of this.countryLabels) {
       const ok = place(e, true);
       e.text.visible = ok;
-      e.shadow.visible = ok;
     }
+    // Everything below a country name yields to the counters.
+    for (const r of reserved) this.claim(r.x, r.y, r.w, r.h);
     for (const e of this.provinceLabels) {
       const ok = place(e, true);
       e.text.visible = ok;
-      e.shadow.visible = ok;
     }
     for (const e of this.cityLabels) {
       const ok = place(e, false);
       e.text.visible = ok;
-      e.shadow.visible = ok;
     }
   }
 

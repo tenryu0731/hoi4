@@ -21,9 +21,9 @@ html, body {
   overflow: hidden;
   background: #0b1622;
   color: var(--ink);
-  font-family: "Helvetica Neue", Helvetica, Arial, "Hiragino Kaku Gothic ProN",
-    "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Noto Sans CJK JP", Meiryo,
-    "Noto Sans", sans-serif;
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+    "Noto Sans CJK JP", Meiryo, "Yu Gothic UI", "Helvetica Neue", Arial,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
   /* The map handles its own gestures; the page must never scroll or zoom. */
@@ -66,7 +66,7 @@ html, body {
 .boot-sub {
   margin-top: 4px;
   font-size: 13px;
-  letter-spacing: 4px;
+  letter-spacing: 0;
   color: var(--ink-dim);
   text-transform: uppercase;
 }
@@ -84,7 +84,7 @@ html, body {
   background: var(--accent);
   transition: width 260ms ease;
 }
-.boot-status { font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; }
+.boot-status { font-size: 12px; color: var(--ink-dim); letter-spacing: 0; }
 /* Only ever populated by the boot guard, when startup has failed. */
 .boot-detail {
   margin: 10px auto 0;

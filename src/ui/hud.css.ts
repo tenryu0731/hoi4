@@ -26,15 +26,18 @@ export const HUD_CSS = `
 }
 .hud-country { min-width: 0; flex: 0 0 auto; }
 .hud-country-name {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+  font-size: 13px; font-weight: 700; letter-spacing: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 74px;
 }
-.hud-country-tag { font-size: 8px; color: var(--ink-dim); letter-spacing: 1.4px; }
+.hud-country-tag { font-size: 9px; color: var(--ink-dim); letter-spacing: 1.4px; }
 
 .hud-stats { display: flex; gap: 9px; flex: 1 1 auto; justify-content: center; }
 .hud-stat { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
-.hud-stat-v { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.hud-stat-l { font-size: 7px; color: var(--ink-dim); letter-spacing: 0.8px; }
+.hud-stat-v {
+  font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+  min-width: 4ch; text-align: center;
+}
+.hud-stat-l { font-size: 10px; color: var(--ink-dim); letter-spacing: 0; text-align: center; }
 
 .hud-clock { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: 0 0 auto; }
 .hud-date { font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -57,17 +60,35 @@ export const HUD_CSS = `
   position: absolute; top: calc(var(--safe-top) + 48px); left: 0; right: 0;
   display: flex; gap: 5px; padding: 0 10px; overflow-x: auto;
   scrollbar-width: none; pointer-events: auto;
+  /* Six chips do not fit 412px. Fading the trailing edge is what tells the
+     player the row continues, rather than the last chip being guillotined by
+     the screen edge with no affordance at all. */
+  -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent);
+          mask-image: linear-gradient(90deg, #000 90%, transparent);
 }
 .hud-resources::-webkit-scrollbar { display: none; }
 .hud-res {
-  display: flex; align-items: center; gap: 3px;
-  background: rgba(16,19,25,0.86); border: 1px solid rgba(58,61,69,0.75);
-  border-radius: 3px; padding: 2px 5px; white-space: nowrap;
+  display: flex; align-items: center; gap: 4px;
+  /* Opaque: at 0.86 the map showed through, and unit counters were legible
+     behind the numbers they were supposed to be read against. */
+  background: #12151b; border: 1px solid rgba(58,61,69,0.75);
+  border-radius: 3px; padding: 3px 6px; white-space: nowrap;
 }
-.hud-res-icon { width: 12px; height: 12px; opacity: 0.8; }
-.hud-res-v { font-size: 10px; font-variant-numeric: tabular-nums; }
+/* Masked rather than drawn: see iconNode. The background supplies the colour,
+   so these tint with whatever colour the enclosing control carries. */
+.hud-res-icon, .hud-nav-icon {
+  display: inline-block; flex: none;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+          mask: var(--icon) center / contain no-repeat;
+}
+.hud-res-icon { width: 14px; height: 14px; color: #a89b80; }
+.hud-res-v {
+  font-size: 11px; font-variant-numeric: tabular-nums;
+  min-width: 3ch; text-align: right;
+}
 .hud-res-v.is-short { color: var(--danger); font-weight: 700; }
-.hud-res-l { font-size: 7px; color: var(--ink-dim); letter-spacing: 0.4px; }
+.hud-res-l { font-size: 10px; color: var(--ink-dim); letter-spacing: 0; }
 
 /* Map modes hug the top-right so the centre of the screen stays gesture-only. */
 .hud-modes {
@@ -76,7 +97,7 @@ export const HUD_CSS = `
 }
 .hud-mode {
   min-width: 58px; min-height: 26px; padding: 0 7px;
-  font-size: 8px; letter-spacing: 0.6px; text-transform: uppercase;
+  font-size: 11px; letter-spacing: 0;
   background: rgba(16,19,25,0.82); color: var(--ink-dim);
   border: 1px solid rgba(58,61,69,0.85); border-radius: 3px; cursor: pointer;
 }
@@ -122,7 +143,7 @@ export const HUD_CSS = `
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 12px 6px; flex: 0 0 auto;
 }
-.hud-sheet-title { font-size: 14px; font-weight: 600; }
+.hud-sheet-title { font-size: 15px; font-weight: 700; }
 .hud-sheet-close {
   width: 32px; height: 32px; font-size: 20px; line-height: 1;
   background: transparent; color: var(--ink-dim); border: none; cursor: pointer;
@@ -136,7 +157,7 @@ export const HUD_CSS = `
 }
 .panel-sub { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
 .panel-label {
-  font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
+  font-size: 11px; letter-spacing: 0;
   color: var(--ink-dim); margin: 10px 0 5px;
 }
 .panel-list { display: flex; flex-direction: column; gap: 3px; }
@@ -148,10 +169,10 @@ export const HUD_CSS = `
 .panel-row.is-dead { opacity: 0.45; }
 .panel-row-main { flex: 1 1 auto; min-width: 0; }
 .panel-row-title {
-  font-size: 11px; font-weight: 600; text-transform: capitalize;
+  font-size: 13px; font-weight: 700;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.panel-row-sub { font-size: 9px; color: var(--ink-dim); margin-top: 1px; }
+.panel-row-sub { font-size: 11px; color: var(--ink-dim); margin-top: 2px; line-height: 1.6; }
 .panel-row-controls { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .panel-swatch {
   width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto;
@@ -184,12 +205,15 @@ export const HUD_CSS = `
   border: 1px solid var(--line); border-radius: 3px; cursor: pointer;
 }
 .panel-build:disabled { opacity: 0.35; }
-.panel-build-title { font-size: 11px; font-weight: 600; }
-.panel-build-sub { font-size: 9px; color: var(--ink-dim); }
+.panel-build-title { font-size: 13px; font-weight: 700; }
+.panel-build-sub {
+  font-size: 11px; color: var(--ink-dim); line-height: 1.7;
+  white-space: pre-line; line-break: strict; overflow-wrap: normal;
+}
 /* The blocking reason, so a disabled recruit button says what it is waiting
    for instead of just refusing. */
 .panel-build-note {
-  display: block; margin-top: 4px; font-size: 9px; letter-spacing: 0.4px;
+  display: block; margin-top: 5px; font-size: 11px; letter-spacing: 0;
   color: var(--accent);
 }
 .panel-build.is-blocked { opacity: 0.55; }
@@ -214,9 +238,17 @@ export const HUD_CSS = `
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   background: transparent; border: none; color: var(--ink-dim); cursor: pointer;
 }
-.hud-nav-btn.is-active { color: var(--accent); background: rgba(216,176,74,0.1); }
+/* An indicator, not a block. The full-height olive rectangle it replaces had
+   square corners and no relationship to anything else on screen, so it read as
+   a compositing seam rather than a selected tab. */
+.hud-nav-btn { position: relative; }
+.hud-nav-btn.is-active { color: var(--accent); background: transparent; }
+.hud-nav-btn.is-active::before {
+  content: ''; position: absolute; top: 0; left: 22%; right: 22%;
+  height: 2px; background: var(--accent); border-radius: 0 0 2px 2px;
+}
 .hud-nav-icon { width: 20px; height: 20px; }
-.hud-nav-label { font-size: 8px; letter-spacing: 0.6px; text-transform: uppercase; }
+.hud-nav-label { font-size: 11px; letter-spacing: 0; }
 
 /* --- outcome ------------------------------------------------------------- */
 .hud-outcome {
@@ -225,14 +257,22 @@ export const HUD_CSS = `
   opacity: 0; pointer-events: none; transition: opacity 600ms ease;
 }
 .hud-outcome.is-shown { opacity: 1; pointer-events: auto; }
+.hud-outcome-card { display: flex; flex-direction: column; align-items: center; }
 .hud-outcome-title {
   font-family: Georgia, "Times New Roman", "Hiragino Mincho ProN", "Yu Mincho",
     "Noto Serif JP", serif;
-  font-size: 40px; letter-spacing: 12px; color: var(--good); text-align: center;
+  /* No tracking: it is applied after the final glyph too, so centred CJK
+     drifts left by half a letter-space. */
+  font-size: 44px; color: var(--good); text-align: center;
+}
+.hud-outcome-again {
+  margin-top: 22px; padding: 10px 26px; min-height: 44px;
+  background: rgba(216,176,74,0.12); border: 1px solid var(--accent);
+  border-radius: 3px; color: var(--accent); font-size: 13px;
 }
 .hud-outcome.is-defeat .hud-outcome-title { color: var(--danger); }
 .hud-outcome-sub {
-  margin-top: 8px; font-size: 12px; color: var(--ink-dim);
+  margin-top: 10px; font-size: 13px; color: var(--ink-dim);
   text-align: center; max-width: 80vw;
 }
 
@@ -244,4 +284,8 @@ export const HUD_CSS = `
   .hud-sheet { max-height: 44vh; }
   .panel-kvs { grid-template-columns: 1fr 1fr 1fr; }
 }
+
+button { transition: background 90ms ease, transform 90ms ease, color 90ms ease; }
+button:active { transform: scale(0.96); }
+.hud-pip:active, .hud-nav-btn:active { transform: none; }
 `;

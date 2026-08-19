@@ -4,7 +4,7 @@ import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
 import { PANELS, formatNumber, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
-import { RESOURCE_SHORT, UI, country, eventText } from './strings';
+import { RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
 
 /**
  * The heads-up display.
@@ -49,6 +49,22 @@ function setText(node: HTMLElement, value: string): void {
 
 function assetUrl(path: string): string {
   return `${import.meta.env.BASE_URL}assets/${path}`;
+}
+
+/**
+ * An icon that takes its colour from the surrounding text.
+ *
+ * Not an `<img>`: `stroke="currentColor"` inside an image-referenced SVG
+ * resolves against that SVG document's own `color`, which defaults to black
+ * and does not inherit from the host page. Every icon in the HUD was therefore
+ * rendering pure black on a near-black chrome -- 1.09:1 against a 3:1 floor.
+ * Masking a `currentColor` fill makes the icon inherit properly, and gets
+ * hover and active states for free.
+ */
+function iconNode(cls: string, path: string): HTMLElement {
+  const node = el('i', cls);
+  node.style.setProperty('--icon', `url("${assetUrl(path)}")`);
+  return node;
 }
 
 export function mountHud(game: Game, root: HTMLElement): () => void {
@@ -102,11 +118,15 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const resNodes: Partial<Record<ResourceType, HTMLElement>> = {};
   for (const r of RESOURCE_TYPES) {
     const chip = el('div', 'hud-res');
-    const icon = el('img', 'hud-res-icon');
-    icon.src = assetUrl(`icons/resource-${r}.svg`);
-    icon.alt = '';
+    const icon = iconNode('hud-res-icon', `icons/resource-${r}.svg`);
     const v = el('span', 'hud-res-v', '0');
-    chip.append(icon, v, el('span', 'hud-res-l', RESOURCE_SHORT[r]));
+    // Icon and number only. Six labelled chips need 493px on a 412px screen,
+    // so the last resource was simply cut off by the screen edge; the icon
+    // already identifies the resource, and the name stays as the accessible
+    // label for anyone who needs it.
+    chip.title = RESOURCE_SHORT[r];
+    chip.setAttribute('aria-label', RESOURCE_SHORT[r]);
+    chip.append(icon, v);
     resStrip.append(chip);
     resNodes[r] = v;
   }
@@ -145,10 +165,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   for (const [id, label, icon] of NAV) {
     const b = el('button', 'hud-nav-btn');
     b.dataset.panel = id;
-    const img = el('img', 'hud-nav-icon');
-    img.src = assetUrl(`icons/${icon}.svg`);
-    img.alt = '';
-    b.append(img, el('span', 'hud-nav-label', label));
+    b.append(iconNode('hud-nav-icon', `icons/${icon}.svg`), el('span', 'hud-nav-label', label));
     b.addEventListener('click', () => togglePanel(id));
     navButtons.push(b);
     nav.append(b);
@@ -159,9 +176,16 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
   // --- outcome -------------------------------------------------------------
   const outcome = el('div', 'hud-outcome');
+  // One child, not two: `place-items: center` on a two-child grid builds an
+  // implicit two-row track and centres each child in its own row, which put
+  // the title and its reason four hundred pixels apart.
+  const outcomeCard = el('div', 'hud-outcome-card');
   const outcomeTitle = el('div', 'hud-outcome-title', '');
   const outcomeSub = el('div', 'hud-outcome-sub', '');
-  outcome.append(outcomeTitle, outcomeSub);
+  const outcomeAgain = el('button', 'hud-outcome-again', UI.restart);
+  outcomeAgain.addEventListener('click', () => location.reload());
+  outcomeCard.append(outcomeTitle, outcomeSub, outcomeAgain);
+  outcome.append(outcomeCard);
 
   root.append(top, resStrip, modeBar, toasts, sheet, nav, outcome);
 
@@ -279,9 +303,14 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     for (const r of RESOURCE_TYPES) {
       const flow = me.economy.resources[r];
       const node = resNodes[r]!;
-      const net = Math.round(flow.produced - flow.consumed);
+      // The shortfall, not the balance. A shortage used to render as a red
+      // zero -- production and consumption net out at the point supply is
+      // capped -- and a red nought tells the player nothing about how short
+      // they are or whether it is getting worse.
+      const short = flow.deficit > 0.001;
+      const net = Math.round(short ? -flow.deficit : flow.produced - flow.consumed);
       setText(node, net > 0 ? `+${net}` : String(net));
-      node.classList.toggle('is-short', flow.deficit > 0.001);
+      node.classList.toggle('is-short', short);
     }
 
     setText(dateNode, formatDateLong(state.clock));
@@ -326,8 +355,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       if (status === 'playing') {
         outcome.classList.remove('is-shown');
       } else {
-        setText(outcomeTitle, status === 'victory' ? 'VICTORY' : 'DEFEAT');
-        setText(outcomeSub, 'reason' in state.outcome ? state.outcome.reason : '');
+        setText(outcomeTitle, status === 'victory' ? UI.victory : UI.defeat);
+        setText(outcomeSub,
+          'reason' in state.outcome ? outcomeReason(state.outcome.reason) : '');
         outcome.classList.add('is-shown');
         outcome.classList.toggle('is-defeat', status === 'defeat');
       }
