@@ -10,8 +10,16 @@ declare global {
   interface Window {
     __game?: Game;
     __gameReady?: boolean;
+    /** Set the instant this module runs, so the boot guard can tell a slow
+     *  load apart from a bundle that never executed at all. */
+    __bootStarted?: boolean;
+    __bootFail?: (title: string, detail?: string) => void;
+    /** Present only in the single-file build, which has no server to fetch from. */
+    __INLINE_MAP__?: MapDataJson;
   }
 }
+
+window.__bootStarted = true;
 
 const params = new URLSearchParams(location.search);
 const staticMode = params.get('static') === '1';
@@ -27,11 +35,26 @@ function progress(pct: number, label: string): void {
   statusEl.textContent = label;
 }
 
+/**
+ * The map is the one thing the game cannot start without, and the one request
+ * most likely to fail on someone else's hosting, so it reports precisely which
+ * URL it asked for.
+ */
+async function loadMapData(): Promise<MapDataJson> {
+  const url = `${import.meta.env.BASE_URL}data/map.json`;
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    throw new Error(`could not reach ${url} (${String(err)})`);
+  }
+  if (!res.ok) throw new Error(`${url} returned HTTP ${res.status}`);
+  return (await res.json()) as MapDataJson;
+}
+
 async function main(): Promise<void> {
   progress(15, 'Loading theatre map…');
-  const res = await fetch(`${import.meta.env.BASE_URL}data/map.json`);
-  if (!res.ok) throw new Error(`map.json: HTTP ${res.status}`);
-  const mapData = (await res.json()) as MapDataJson;
+  const mapData = window.__INLINE_MAP__ ?? (await loadMapData());
 
   progress(55, 'Deploying forces…');
   const game = await Game.create({
@@ -66,8 +89,12 @@ async function main(): Promise<void> {
   onResize();
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   console.error(err);
-  statusEl.textContent = `Failed to start: ${String(err)}`;
-  statusEl.style.color = '#d2453a';
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  if (window.__bootFail) window.__bootFail('Failed to start.', detail);
+  else {
+    statusEl.textContent = `Failed to start: ${detail}`;
+    statusEl.style.color = '#d2453a';
+  }
 });

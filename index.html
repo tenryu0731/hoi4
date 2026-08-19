@@ -23,6 +23,53 @@
       </div>
     </div>
   </div>
+  <script>
+/* Boot guard. Runs as a classic script so it executes even when the module
+   bundle below fails to load or parse -- which is the one failure the boot
+   screen cannot otherwise report, because its static text is identical to the
+   first progress message. */
+(function () {
+  var reported = false;
+  function show(title, detail) {
+    if (reported) return;
+    reported = true;
+    var el = document.getElementById('boot-status');
+    if (!el) return;
+    el.textContent = title;
+    el.style.color = '#d2453a';
+    var d = document.createElement('div');
+    d.className = 'boot-detail';
+    d.textContent = detail || '';
+    el.parentNode.appendChild(d);
+  }
+  window.__bootFail = show;
+  window.addEventListener('error', function (e) {
+    var t = e.target;
+    if (t && t !== window && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+      show('Could not load the game code.',
+        'The browser refused ' + (t.src || t.href) + '. If you are serving the ' +
+        'repository directly, TypeScript sources are not runnable: build first ' +
+        '(npm run build) and serve dist/, or open the single-file build.');
+      return;
+    }
+    show('Startup error.', String((e && e.message) || e));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    show('Startup error.', String((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+  });
+  setTimeout(function () {
+    if (!window.__bootStarted) {
+      show('The game code never started.',
+        'index.html loaded but its script did not run. Serve a production build ' +
+        '(npm run build && npm run preview) or the dev server (npm run dev) -- ' +
+        'opening index.html from the file system, or from a plain static server ' +
+        'pointed at the repository, cannot execute it.');
+    } else if (!window.__gameReady) {
+      show('Still loading.', 'The map data is taking unusually long to arrive.');
+    }
+  }, 10000);
+})();
+</script>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
