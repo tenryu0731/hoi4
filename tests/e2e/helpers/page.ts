@@ -176,12 +176,14 @@ export async function swipe(
 }
 
 /** Taps a screen point using the touch pipeline rather than a synthetic click. */
-export async function tapAt(page: Page, x: number, y: number): Promise<void> {
+export async function tapAt(
+  page: Page, x: number, y: number, holdMs = 60,
+): Promise<void> {
   const client = await touchSession(page);
   await client.send('Input.dispatchTouchEvent', {
     type: 'touchStart', touchPoints: [{ x, y, id: 1 }],
   });
-  await page.waitForTimeout(60);
+  await page.waitForTimeout(holdMs);
   await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await page.waitForTimeout(120);
 }

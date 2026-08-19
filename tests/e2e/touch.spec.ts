@@ -115,6 +115,25 @@ test.describe('touch input', () => {
     await expect(page.locator('.panel-sub')).toContainText('フランス');
   });
 
+  test('a slow tap still selects', async ({ page }) => {
+    // A thumb resting for a third of a second is an ordinary tap, not a
+    // gesture. This used to fall between the tap deadline and the hold timer
+    // and register as nothing at all.
+    await bootGame(page);
+    await page.evaluate(() => {
+      const g = window.__game!;
+      const p = g.index.provinces.find((q) => q.ownerTag === 'FRA')!;
+      g.renderer.camera.centerOn(p.centerX, p.centerY);
+      g.renderer.camera.zoom = 0.25;
+      g.tickFrame(16);
+    });
+    const pos = await provinceScreenPos(page, 'FRA');
+    await tapAt(page, pos.x, pos.y, 360);
+
+    expect(await page.evaluate(() => window.__game!.selection.province)).toBe(pos.id);
+    await expect(page.locator('.hud-sheet')).toHaveClass(/is-open/);
+  });
+
   test('a drag does not register as a tap', async ({ page }) => {
     await bootGame(page);
     await setCamera(page, 0, 0, 0.2);
