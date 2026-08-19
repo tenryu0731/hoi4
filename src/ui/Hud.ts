@@ -52,15 +52,8 @@ function setText(node: HTMLElement, value: string): void {
   if (node.textContent !== value) node.textContent = value;
 }
 
-declare global {
-  interface Window {
-    /** path -> data URI. Present only in the single-file build. */
-    __INLINE_ASSETS__?: Record<string, string>;
-  }
-}
-
 function assetUrl(path: string): string {
-  return window.__INLINE_ASSETS__?.[path] ?? `${import.meta.env.BASE_URL}assets/${path}`;
+  return `${import.meta.env.BASE_URL}assets/${path}`;
 }
 
 export function mountHud(game: Game, root: HTMLElement): () => void {

@@ -34,7 +34,6 @@ jobs:
       # bundle step -- no Natural Earth download, and no chance of the published
       # map drifting from the one the tests were verified against.
       - run: npm run build:app
-      - run: npm run build:single && cp play.html dist/play.html
       - run: touch dist/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
