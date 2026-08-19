@@ -145,18 +145,6 @@ export function createGrainTexture(size = 256, seed = 77): Texture {
   return Texture.from(canvas);
 }
 
-/** Soft radial disc used for the coastal halo and for selection glows. */
-export function createGlowTexture(size = 128): Texture {
-  const { canvas, ctx } = makeCanvas(size);
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  return Texture.from(canvas);
-}
-
 /** 1x64 vertical gradient, stretched to fade panels and the ocean depth ramp. */
 export function createVerticalRamp(stops: [number, string][], height = 64): Texture {
   const canvas = document.createElement('canvas');

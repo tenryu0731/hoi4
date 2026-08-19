@@ -16,13 +16,11 @@ export type FlagSpec =
   | { kind: 'vertical'; bands: string[] }
   | { kind: 'nordic'; field: string; cross: string; outline?: string }
   | { kind: 'cross'; field: string; cross: string }
-  | { kind: 'saltire'; field: string; cross: string }
   | { kind: 'canton'; field: string; canton: string; charge?: string }
   | { kind: 'disc'; field: string; disc: string; ring?: string }
   | { kind: 'plain'; field: string; emblem?: string }
   | { kind: 'union' }
-  | { kind: 'crescent'; field: string; charge: string }
-  | { kind: 'triband-charge'; bands: string[]; charge: string };
+  | { kind: 'crescent'; field: string; charge: string };
 
 export const FLAGS: Record<string, FlagSpec> = {
   // The black-white-red tricolour, co-official through 1933-1935 and the
@@ -195,13 +193,11 @@ export function renderFlag(spec: FlagSpec): string {
     case 'vertical': body = vertical(spec.bands); break;
     case 'nordic': body = nordic(spec.field, spec.cross, spec.outline); break;
     case 'cross': body = centredCross(spec.field, spec.cross); break;
-    case 'saltire': body = centredCross(spec.field, spec.cross); break;
     case 'canton': body = canton(spec.field, spec.canton, spec.charge); break;
     case 'disc': body = disc(spec.field, spec.disc, spec.ring); break;
     case 'plain': body = plain(spec.field, spec.emblem); break;
     case 'union': body = union(); break;
     case 'crescent': body = crescent(spec.field, spec.charge); break;
-    case 'triband-charge': body = horizontal(spec.bands); break;
   }
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
