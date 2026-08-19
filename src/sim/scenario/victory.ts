@@ -80,7 +80,10 @@ export function evaluateOutcome(state: GameState): Outcome {
     const mine = blocScore(state, player);
     let bestEnemy = 0;
     for (const id of enemies) bestEnemy = Math.max(bestEnemy, blocScore(state, id));
-    if (enemies.length === 0 || mine >= bestEnemy) {
+    // Deliberately not `enemies.length === 0 || ...`: a nation that never
+    // declared war and was never attacked used to be handed the campaign for
+    // sitting still, which made "do nothing" the strongest opening.
+    if (enemies.length > 0 && mine >= bestEnemy) {
       return { status: 'victory', reason: 'aheadOnPoints', day };
     }
     return { status: 'defeat', reason: 'behindOnPoints', day };

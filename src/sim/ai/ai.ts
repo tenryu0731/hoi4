@@ -84,7 +84,14 @@ function requiredEquipment(c: Country): Set<EquipmentType> {
 /** Fraction of new divisions the AI wants to be armoured. */
 const ARMOUR_FRACTION = 0.2;
 /** Share of industry reserved for aircraft, which no ground template consumes. */
-const AIR_SHARE = 0.09;
+/**
+ * Share of industry spent on aircraft.
+ *
+ * Zero: fighters and CAS have no stats and there is no air layer to fly them
+ * in, so anything above zero is every nation burning a tenth of its economy on
+ * items that cannot affect a single battle.
+ */
+const AIR_SHARE = 0;
 
 /**
  * Factory allocation, derived from what the army actually eats.

@@ -215,7 +215,10 @@ export class Simulation {
 function tickResearchDaily(state: GameState): void {
   for (const c of state.countries) {
     if (c.capitulated) continue;
-    const branches = ['infantry', 'armor', 'air', 'industry'] as const;
+    // Industry leads: it is the branch the economy actually reads, and behind
+    // 'air' it sat at index 3 while no country has more than 3 slots -- so it
+    // was never researched by anyone, in any campaign.
+    const branches = ['industry', 'infantry', 'armor', 'air'] as const;
     // A country researches as many branches at once as it has slots.
     for (let i = 0; i < Math.min(c.research.slots, branches.length); i++) {
       const b = branches[i];

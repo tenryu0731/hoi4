@@ -236,7 +236,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
   // --- toasts --------------------------------------------------------------
   let lastLogLength = game.state.log.length;
+  // Wars, capitulations and the outcome concern everyone; a finished factory
+  // concerns only its owner. Without that filter the player's first five
+  // minutes are a hundred and thirty toasts about Belgian construction.
   const TOAST_KINDS = new Set(['war', 'capitulation', 'construction', 'outcome']);
+  const OWN_ONLY = new Set(['construction', 'production']);
 
   function pushToast(e: GameEvent): void {
     const node = el('div', `hud-toast kind-${e.kind}`,
@@ -308,7 +312,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     if (state.log.length !== lastLogLength) {
       const fresh = state.log.slice(Math.max(0, lastLogLength));
       lastLogLength = state.log.length;
-      for (const e of fresh) if (TOAST_KINDS.has(e.kind)) pushToast(e);
+      for (const e of fresh) {
+        if (!TOAST_KINDS.has(e.kind)) continue;
+        if (OWN_ONLY.has(e.kind) && e.country !== state.meta.playerCountry) continue;
+        pushToast(e);
+      }
     }
 
     // Outcome overlay.

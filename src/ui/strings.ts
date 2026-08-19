@@ -47,6 +47,9 @@ export const UI = {
   addFactory: '工場を追加',
   removeFactory: '工場を削除',
   perDay: '/日',
+  efficiency: '効率',
+  addLine: '生産ラインを追加',
+  allLinesOpen: '全ての装備が生産中です。',
   stockpile: '備蓄',
 
   // Construction panel
@@ -69,6 +72,8 @@ export const UI = {
   templates: '師団テンプレート',
   recruit: '編成',
   equipmentShortage: '装備不足',
+  shortage: '不足',
+  ready: '編成可能',
 
   // Diplomacy panel
   worldTension: '世界緊張度',

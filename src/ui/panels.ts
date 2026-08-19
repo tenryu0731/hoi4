@@ -4,7 +4,7 @@ import {
 } from '../sim/core/data';
 import {
   EQUIPMENT_TYPES, RESOURCE_TYPES,
-  type BuildingType, type ResourceType,
+  type BuildingType, type EquipmentType, type ResourceType,
 } from '../sim/core/types';
 import { canQueueBuilding } from '../sim/economy/production';
 import { occupationRatio } from '../sim/diplomacy/diplomacy';
@@ -96,8 +96,8 @@ export const productionPanel: Panel = {
       const minus = el('button', 'panel-btn', '−');
       const count = el('span', 'panel-count', String(line.assignedFactories));
       const plus = el('button', 'panel-btn', '+');
-      minus.setAttribute('aria-label', `Fewer factories on ${EQUIPMENT_LABEL[line.equipment]}`);
-      plus.setAttribute('aria-label', `More factories on ${EQUIPMENT_LABEL[line.equipment]}`);
+      minus.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.removeFactory}`);
+      plus.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.addFactory}`);
       minus.addEventListener('click', () => {
         game.issue({
           t: 'setLineFactories', country: me.id, line: line.id,
@@ -117,8 +117,25 @@ export const productionPanel: Panel = {
     }
 
     if (me.productionLines.length === 0) {
-      list.append(el('div', 'panel-empty', 'No production lines.'));
+      list.append(el('div', 'panel-empty', UI.noProductionLines));
     }
+
+    // Without this the player is stuck with whatever lines the scenario dealt
+    // them: a template needing equipment nobody is building can never be
+    // recruited, and there was no way to start building it.
+    root.append(el('div', 'panel-label', UI.addLine));
+    const add = el('div', 'panel-grid');
+    for (const eq of EQUIPMENT_TYPES) {
+      if (me.productionLines.some((l) => l.equipment === eq)) continue;
+      const b = el('button', 'panel-build');
+      b.append(el('span', 'panel-build-title', EQUIPMENT_LABEL[eq]));
+      b.addEventListener('click', () => {
+        game.issue({ t: 'addProductionLine', country: me.id, equipment: eq });
+      });
+      add.append(b);
+    }
+    if (add.children.length === 0) add.append(el('div', 'panel-empty', UI.allLinesOpen));
+    root.append(add);
   },
   refresh(game, root) {
     const me = game.state.countries[game.state.meta.playerCountry];
@@ -135,8 +152,9 @@ export const productionPanel: Panel = {
         / EQUIPMENT[line.equipment].cost;
       setText(
         sub,
-        `${Math.round(line.efficiency * 100)}% efficiency · ` +
-        `${perDay.toFixed(1)}/day · ${formatNumber(me.economy.stockpile[line.equipment])} in stock`,
+        `${UI.efficiency} ${Math.round(line.efficiency * 100)}% · ` +
+        `${perDay.toFixed(1)}${UI.perDay} · ${UI.stockpile} ` +
+        `${formatNumber(me.economy.stockpile[line.equipment])}`,
       );
     }
   },
@@ -264,14 +282,20 @@ export const armyPanel: Panel = {
 
     root.append(el('div', 'panel-label', UI.recruit));
     const grid = el('div', 'panel-grid');
+    grid.dataset.role = 'templates';
     for (const tpl of me.templates) {
       const b = el('button', 'panel-build');
+      b.dataset.tpl = String(tpl.id);
       b.append(
         el('span', 'panel-build-title', tpl.name),
         el('span', 'panel-build-sub',
-          `${tpl.battalions.map((b) => BATTALION[b]).join('・')}` +
+          `${tpl.battalions.map((x) => BATTALION[x]).join('・')}` +
           (tpl.supports.length > 0 ? ` + ${tpl.supports.map((x) => SUPPORT[x]).join('・')}` : '') +
           ` · ${formatNumber(tpl.manpowerNeed)}名`),
+        // Refreshed every tick with the equipment that is holding this template
+        // back. A recruit button that silently does nothing is the worst
+        // possible answer to "why can I not build an army".
+        el('span', 'panel-build-note', ''),
       );
       b.addEventListener('click', () => {
         game.issue({
@@ -296,6 +320,33 @@ export const armyPanel: Panel = {
   refresh(game, root) {
     const state = game.state;
     const me = state.countries[state.meta.playerCountry];
+
+    const templates = root.querySelector<HTMLElement>('[data-role="templates"]');
+    if (templates) {
+      for (const tpl of me.templates) {
+        const b = templates.querySelector<HTMLButtonElement>(`[data-tpl="${tpl.id}"]`);
+        const note = b?.querySelector<HTMLElement>('.panel-build-note');
+        if (!b || !note) continue;
+        // Mirrors the gate in the simulation: half the equipment, and the
+        // manpower, or the order is refused.
+        let worst = 1;
+        let worstEq: EquipmentType | null = null;
+        for (const [eq, need] of Object.entries(tpl.equipmentNeed) as [EquipmentType, number][]) {
+          const r = (me.economy.stockpile[eq] ?? 0) / Math.max(1, need);
+          if (r < worst) { worst = r; worstEq = eq; }
+        }
+        const noManpower = me.economy.manpower < tpl.manpowerNeed / 1000;
+        const blocked = noManpower || worst < 0.5;
+        b.disabled = blocked;
+        b.classList.toggle('is-blocked', blocked);
+        setText(note, noManpower
+          ? `${UI.manpower}${UI.shortage}`
+          : worst < 0.5 && worstEq
+            ? `${EQUIPMENT_LABEL[worstEq]} ${Math.round(worst * 100)}%`
+            : UI.ready);
+      }
+    }
+
     const head = root.querySelector<HTMLElement>('[data-role="army-head"]');
     if (head) {
       let inCombat = 0;

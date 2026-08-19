@@ -297,11 +297,17 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
   for (const c of countries) {
     const mil = c.economy.militaryFactories;
     if (mil <= 0) continue;
+    // Every default template carries a recon company, and recon needs
+    // motorised transport, so a country without a motorised line can never
+    // raise a single division however many rifles it stockpiles.
+    const rifles = Math.max(1, Math.round(mil * 0.5));
+    const support = Math.max(1, Math.round(mil * 0.15));
+    const guns = Math.max(1, Math.round(mil * 0.2));
     const split: [EquipmentType, number][] = [
-      ['infantry_equipment', Math.max(1, Math.round(mil * 0.55))],
-      ['support_equipment', Math.max(0, Math.round(mil * 0.15))],
-      ['artillery', Math.max(0, Math.round(mil * 0.2))],
-      ['fighter', Math.max(0, mil - Math.round(mil * 0.55) - Math.round(mil * 0.15) - Math.round(mil * 0.2))],
+      ['infantry_equipment', rifles],
+      ['support_equipment', support],
+      ['artillery', guns],
+      ['motorized', Math.max(1, mil - rifles - support - guns)],
     ];
     for (const [eq, factories] of split) {
       if (factories <= 0) continue;

@@ -186,6 +186,14 @@ export const HUD_CSS = `
 .panel-build:disabled { opacity: 0.35; }
 .panel-build-title { font-size: 11px; font-weight: 600; }
 .panel-build-sub { font-size: 9px; color: var(--ink-dim); }
+/* The blocking reason, so a disabled recruit button says what it is waiting
+   for instead of just refusing. */
+.panel-build-note {
+  display: block; margin-top: 4px; font-size: 9px; letter-spacing: 0.4px;
+  color: var(--accent);
+}
+.panel-build.is-blocked { opacity: 0.55; }
+.panel-build.is-blocked .panel-build-note { color: var(--danger); }
 .panel-kvs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; }
 .panel-kv {
   display: flex; justify-content: space-between; gap: 8px; font-size: 10px;
