@@ -364,6 +364,7 @@ export class MapRenderer {
 
   setSelection(id: ProvinceId | null): void {
     this.selected = id;
+    this.units.setSelection(id);
   }
 
   setHover(id: ProvinceId | null): void {

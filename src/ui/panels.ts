@@ -518,7 +518,7 @@ export const provincePanel: Panel = {
       const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
       const org = tpl ? Math.round((d.org / tpl.maxOrg) * 100) : 0;
       const str = tpl ? Math.round((d.hp / tpl.maxHp) * 100) : 0;
-      setText(row, `org ${org}% · strength ${str}% · supply ${Math.round(d.supplyLevel * 100)}%`);
+      setText(row, `${UI.organisation} ${org}% · ${UI.strength} ${str}% · ${UI.supplyLevel} ${Math.round(d.supplyLevel * 100)}%`);
     }
   },
 };
