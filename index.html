@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
 <title>Iron Front — Europe 1936</title>
-<link rel="stylesheet" href="/src/style.css" />
+<link rel="stylesheet" href="./src/style.css" />
 </head>
 <body>
   <div id="app">
@@ -30,7 +30,7 @@
    first progress message. */
 (function () {
   var reported = false;
-  function show(title, detail) {
+  function show(title, detail, offerSingleFile) {
     if (reported) return;
     reported = true;
     var el = document.getElementById('boot-status');
@@ -40,6 +40,15 @@
     var d = document.createElement('div');
     d.className = 'boot-detail';
     d.textContent = detail || '';
+    if (offerSingleFile) {
+      // Same directory, and self-contained: whatever is serving this page
+      // wrongly can still serve that one correctly.
+      var a = document.createElement('a');
+      a.href = './play.html';
+      a.textContent = 'Open the single-file build instead →';
+      d.appendChild(document.createElement('br'));
+      d.appendChild(a);
+    }
     el.parentNode.appendChild(d);
   }
   window.__bootFail = show;
@@ -47,9 +56,10 @@
     var t = e.target;
     if (t && t !== window && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
       show('Could not load the game code.',
-        'The browser refused ' + (t.src || t.href) + '. If you are serving the ' +
-        'repository directly, TypeScript sources are not runnable: build first ' +
-        '(npm run build) and serve dist/, or open the single-file build.');
+        'The browser refused ' + (t.src || t.href) + '. This page is the ' +
+        'development entry point: its TypeScript sources only run under Vite. ' +
+        'To host the game, publish a production build (npm run build) and serve ' +
+        'dist/.', true);
       return;
     }
     show('Startup error.', String((e && e.message) || e));
@@ -63,13 +73,13 @@
         'index.html loaded but its script did not run. Serve a production build ' +
         '(npm run build && npm run preview) or the dev server (npm run dev) -- ' +
         'opening index.html from the file system, or from a plain static server ' +
-        'pointed at the repository, cannot execute it.');
+        'pointed at the repository, cannot execute it.', true);
     } else if (!window.__gameReady) {
       show('Still loading.', 'The map data is taking unusually long to arrive.');
     }
   }, 10000);
 })();
 </script>
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

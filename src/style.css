@@ -93,3 +93,4 @@ html, body {
   letter-spacing: 0;
   text-align: left;
 }
+.boot-detail a { display: inline-block; margin-top: 8px; color: #d9b34a; }

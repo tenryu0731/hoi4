@@ -13,8 +13,11 @@ import { build } from 'vite';
  */
 
 const ROOT = process.cwd();
-const OUT_DIR = join(ROOT, 'dist-single');
-const STAGE = join(OUT_DIR, '.stage');
+// Written to the repository root, not to dist/, because its whole purpose is
+// to be served or handed over as-is: GitHub Pages publishing a branch serves
+// the repository, so this is the one file there that actually runs.
+const OUT_FILE = join(ROOT, 'play.html');
+const STAGE = join(ROOT, 'dist-single', '.stage');
 
 const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
@@ -41,7 +44,7 @@ function jsString(value: string): string {
 }
 
 async function main(): Promise<void> {
-  mkdirSync(OUT_DIR, { recursive: true });
+  mkdirSync(STAGE, { recursive: true });
 
   // Library mode gives us exactly what a file:// page can run: one IIFE with
   // the dynamic import folded in, and one stylesheet.
@@ -92,18 +95,17 @@ async function main(): Promise<void> {
   let html = readFileSync(join(ROOT, 'index.html'), 'utf8');
   html = sub(html, '<link rel="icon" type="image/svg+xml" href="./favicon.svg" />',
     `<link rel="icon" type="image/svg+xml" href="${favicon}" />`);
-  html = sub(html, '<link rel="stylesheet" href="/src/style.css" />', `<style>\n${css}\n</style>`);
-  html = sub(html, '<script type="module" src="/src/main.ts"></script>',
+  html = sub(html, '<link rel="stylesheet" href="./src/style.css" />', `<style>\n${css}\n</style>`);
+  html = sub(html, '<script type="module" src="./src/main.ts"></script>',
     '<script>\n' +
     `window.__INLINE_MAP__ = JSON.parse(${jsString(mapJson)});\n` +
     `window.__INLINE_ASSETS__ = JSON.parse(${jsString(JSON.stringify(assets))});\n` +
     '</script>\n' +
     `<script>\n${script}\n</script>`);
 
-  const outFile = join(OUT_DIR, 'iron-front.html');
-  writeFileSync(outFile, html);
+  writeFileSync(OUT_FILE, html);
   const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
-  console.log(`single-file build: ${relative(ROOT, outFile)} (${kb} KB)`);
+  console.log(`single-file build: ${relative(ROOT, OUT_FILE)} (${kb} KB)`);
 }
 
 main().catch((err) => {
