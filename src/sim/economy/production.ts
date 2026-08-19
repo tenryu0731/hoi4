@@ -275,7 +275,7 @@ export function tickConstruction(state: GameState, c: Country): void {
     state.log.push({
       day: state.clock.totalDays,
       kind: 'construction',
-      text: `${c.name}: ${item.kind.replace('_', ' ')} completed`,
+      body: { k: 'itemCompleted', country: c.tag, item: item.kind },
       country: c.id,
     });
   }

@@ -71,12 +71,7 @@ export class Game {
     });
     this.input.attach(renderer.canvas);
 
-    // Commands are drained at the top of the hour, before any subsystem runs,
-    // so an order issued mid-frame always takes effect at a defined point.
-    this.time.on((ctx) => {
-      this.drainCommands();
-      this.sim.tick(ctx);
-    });
+    this.time.on((ctx) => this.sim.tick(ctx));
   }
 
   static async create(opts: GameOptions): Promise<Game> {
@@ -176,6 +171,13 @@ export class Game {
 
   issue(cmd: Command): void {
     this.commands.push(cmd);
+    // Applied at once, not on the next simulation hour. Deferring looks
+    // identical while the clock runs and is fatal while paused: no hour ever
+    // elapses, so the queue is never read and the order is silently swallowed
+    // -- and pausing to give orders is how this genre is played. Every
+    // mutation still reaches the simulation only through `execute`, and the
+    // same seed with the same order sequence still reproduces the same game.
+    this.drainCommands();
   }
 
   private drainCommands(): void {

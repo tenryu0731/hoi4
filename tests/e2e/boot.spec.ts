@@ -16,7 +16,7 @@ test.describe('boot', () => {
 
     const detail = page.locator('.boot-detail');
     await expect(detail).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('#boot-status')).toContainText('Could not load the game code');
+    await expect(page.locator('#boot-status')).toContainText('読み込めませんでした');
     expect(await detail.textContent()).toContain('npm run build');
   });
 });

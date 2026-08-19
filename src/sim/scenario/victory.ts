@@ -59,7 +59,7 @@ export function evaluateOutcome(state: GameState): Outcome {
   const me = state.countries[player];
 
   if (me.capitulated) {
-    return { status: 'defeat', reason: `${me.name} has capitulated`, day };
+    return { status: 'defeat', reason: 'capitulated', day };
   }
 
   // Winning means every enemy of the player's own bloc is out of the war, and
@@ -70,7 +70,7 @@ export function evaluateOutcome(state: GameState): Outcome {
   if (playerHasFought(state, player) && enemies.length === 0 && majorDefeated) {
     return {
       status: 'victory',
-      reason: 'every enemy has capitulated',
+      reason: 'allEnemiesCapitulated',
       day,
     };
   }
@@ -81,9 +81,9 @@ export function evaluateOutcome(state: GameState): Outcome {
     let bestEnemy = 0;
     for (const id of enemies) bestEnemy = Math.max(bestEnemy, blocScore(state, id));
     if (enemies.length === 0 || mine >= bestEnemy) {
-      return { status: 'victory', reason: 'ahead on victory points at 1948', day };
+      return { status: 'victory', reason: 'aheadOnPoints', day };
     }
-    return { status: 'defeat', reason: 'behind on victory points at 1948', day };
+    return { status: 'defeat', reason: 'behindOnPoints', day };
   }
 
   return { status: 'playing' };
@@ -98,8 +98,6 @@ export function tickVictoryCheck(state: GameState): void {
   state.log.push({
     day: state.clock.totalDays,
     kind: 'outcome',
-    text: outcome.status === 'victory'
-      ? `Victory: ${outcome.reason}`
-      : `Defeat: ${outcome.reason}`,
+    body: { k: 'outcome', status: outcome.status, reason: outcome.reason },
   });
 }

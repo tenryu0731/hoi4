@@ -1,4 +1,5 @@
 import { BitmapFont, BitmapText, Container } from 'pixi.js';
+import { COUNTRY } from '../../ui/strings';
 
 import type { ProvinceIndex } from '../../sim/map/ProvinceIndex';
 import type { ScreenRect } from './UnitLayer';
@@ -30,6 +31,18 @@ export const FONT_COUNTRY = 'IF-Country';
 export const FONT_PROVINCE = 'IF-Province';
 export const FONT_CITY = 'IF-City';
 
+/**
+ * Every distinct character the Japanese country names use.
+ *
+ * A bitmap font rasterises a fixed glyph set at install time, so the CJK
+ * characters have to be declared -- there is no fallback for a glyph the atlas
+ * does not contain. Deriving the set from the label table means adding a nation
+ * can never leave its name rendering as blanks.
+ */
+const COUNTRY_GLYPHS = [...new Set(Object.values(COUNTRY).join(''))].join('');
+
+const LATIN_GLYPHS = " -'.,()àáäâãåèéêëìíîïòóôöõùúûüçñßÀÁÄÂÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜÇÑ";
+
 let fontsInstalled = false;
 
 function installFonts(): void {
@@ -38,13 +51,13 @@ function installFonts(): void {
   BitmapFont.install({
     name: FONT_COUNTRY,
     style: {
-      fontFamily: 'Georgia, "Times New Roman", serif',
+      fontFamily: 'Georgia, "Times New Roman", "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif',
       fontSize: 44,
       fontWeight: 'bold',
       fill: 0xffffff,
       letterSpacing: 2,
     },
-    chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], " -'.,()àáäâãåèéêëìíîïòóôöõùúûüçñßÀÁÄÂÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜÇÑ"],
+    chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], LATIN_GLYPHS + COUNTRY_GLYPHS],
     resolution: 2,
   });
   BitmapFont.install({
@@ -55,7 +68,7 @@ function installFonts(): void {
       fill: 0xffffff,
       letterSpacing: 1,
     },
-    chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], " -'.,()àáäâãåèéêëìíîïòóôöõùúûüçñßÀÁÄÂÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜÇÑ"],
+    chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], LATIN_GLYPHS],
     resolution: 2,
   });
   BitmapFont.install({
@@ -65,7 +78,7 @@ function installFonts(): void {
       fontSize: 26,
       fill: 0xffffff,
     },
-    chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], " -'.,()àáäâãåèéêëìíîïòóôöõùúûüçñßÀÁÄÂÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜÇÑ"],
+    chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], LATIN_GLYPHS],
     resolution: 2,
   });
 }

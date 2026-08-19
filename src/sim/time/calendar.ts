@@ -80,11 +80,7 @@ export function formatDate(c: GameClock): string {
   return `${c.year}-${mm}-${dd}`;
 }
 
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
 
 export function formatDateLong(c: GameClock): string {
-  return `${c.day} ${MONTH_NAMES[c.month - 1]} ${c.year}`;
+  return `${c.year}年${c.month}月${c.day}日`;
 }

@@ -218,7 +218,8 @@ export const HUD_CSS = `
 }
 .hud-outcome.is-shown { opacity: 1; pointer-events: auto; }
 .hud-outcome-title {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Georgia, "Times New Roman", "Hiragino Mincho ProN", "Yu Mincho",
+    "Noto Serif JP", serif;
   font-size: 40px; letter-spacing: 12px; color: var(--good); text-align: center;
 }
 .hud-outcome.is-defeat .hud-outcome-title { color: var(--danger); }

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-<title>Iron Front — Europe 1936</title>
+<title>アイアン・フロント — ヨーロッパ 1936</title>
 <link rel="stylesheet" href="./src/style.css" />
 </head>
 <body>
@@ -17,9 +17,9 @@
     <div id="boot">
       <div class="boot-inner">
         <div class="boot-title">IRON FRONT</div>
-        <div class="boot-sub">Europe 1936</div>
+        <div class="boot-sub">ヨーロッパ 1936</div>
         <div class="boot-bar"><span id="boot-fill"></span></div>
-        <div class="boot-status" id="boot-status">Loading theatre map…</div>
+        <div class="boot-status" id="boot-status">戦域地図を読み込み中…</div>
       </div>
     </div>
   </div>
@@ -46,27 +46,26 @@
   window.addEventListener('error', function (e) {
     var t = e.target;
     if (t && t !== window && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
-      show('Could not load the game code.',
-        'The browser refused ' + (t.src || t.href) + '. This page is the ' +
-        'development entry point: its TypeScript sources only run under Vite. ' +
-        'To host the game, publish a production build (npm run build) and serve ' +
-        'dist/.');
+      show('ゲームのコードを読み込めませんでした。',
+        'ブラウザが ' + (t.src || t.href) + ' を拒否しました。このページは開発用の' +
+        'エントリポイントで、TypeScript のソースは Vite 上でしか実行できません。' +
+        '配信するにはビルド (npm run build) して dist/ を配信してください。');
       return;
     }
-    show('Startup error.', String((e && e.message) || e));
+    show('起動エラー。', String((e && e.message) || e));
   }, true);
   window.addEventListener('unhandledrejection', function (e) {
-    show('Startup error.', String((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+    show('起動エラー。', String((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason));
   });
   setTimeout(function () {
     if (!window.__bootStarted) {
-      show('The game code never started.',
-        'index.html loaded but its script did not run. Serve a production build ' +
-        '(npm run build && npm run preview) or the dev server (npm run dev) -- ' +
-        'opening index.html from the file system, or from a plain static server ' +
-        'pointed at the repository, cannot execute it.');
+      show('ゲームのコードが起動しませんでした。',
+        'index.html は読み込めましたが、スクリプトが実行されませんでした。' +
+        'ビルド成果物 (npm run build && npm run preview) か開発サーバー (npm run dev) ' +
+        'を使ってください。ファイルシステムから直接開いた場合や、リポジトリを' +
+        'そのまま静的配信した場合は実行できません。');
     } else if (!window.__gameReady) {
-      show('Still loading.', 'The map data is taking unusually long to arrive.');
+      show('読み込み中です。', '地図データの取得に想定以上の時間がかかっています。');
     }
   }, 10000);
 })();

@@ -51,10 +51,10 @@ async function loadMapData(): Promise<MapDataJson> {
 }
 
 async function main(): Promise<void> {
-  progress(15, 'Loading theatre map…');
+  progress(15, '戦域地図を読み込み中…');
   const mapData = await loadMapData();
 
-  progress(55, 'Deploying forces…');
+  progress(55, '部隊を展開中…');
   const game = await Game.create({
     canvasParent: document.getElementById('map-root')!,
     mapData,
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     staticMode,
   });
 
-  progress(85, 'Preparing headquarters…');
+  progress(85, '司令部を準備中…');
   const { mountHud } = await import('./ui/Hud');
   mountHud(game, document.getElementById('hud')!);
 
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
   game.start();
   if (!staticMode) game.setSpeed(2);
 
-  progress(100, 'Ready');
+  progress(100, '準備完了');
   requestAnimationFrame(() => {
     bootEl.classList.add('done');
     window.__gameReady = true;
@@ -90,9 +90,9 @@ async function main(): Promise<void> {
 main().catch((err: unknown) => {
   console.error(err);
   const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
-  if (window.__bootFail) window.__bootFail('Failed to start.', detail);
+  if (window.__bootFail) window.__bootFail('起動に失敗しました。', detail);
   else {
-    statusEl.textContent = `Failed to start: ${detail}`;
+    statusEl.textContent = `起動に失敗しました: ${detail}`;
     statusEl.style.color = '#d2453a';
   }
 });

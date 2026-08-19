@@ -126,16 +126,16 @@ export const TEMPLATE_MOUNTAIN = 3;
 
 function defaultTemplates(): DivisionTemplate[] {
   return [
-    deriveTemplate(TEMPLATE_INFANTRY, 'Infantry Division',
+    deriveTemplate(TEMPLATE_INFANTRY, '歩兵師団',
       ['infantry', 'infantry', 'infantry', 'infantry', 'infantry', 'infantry', 'artillery'],
       ['engineer', 'recon']),
-    deriveTemplate(TEMPLATE_MOTORISED, 'Motorised Division',
+    deriveTemplate(TEMPLATE_MOTORISED, '自動車化師団',
       ['motorized', 'motorized', 'motorized', 'motorized', 'motorized', 'motorized', 'artillery'],
       ['engineer', 'recon', 'logistics']),
-    deriveTemplate(TEMPLATE_ARMOUR, 'Armoured Division',
+    deriveTemplate(TEMPLATE_ARMOUR, '機甲師団',
       ['medium_armor', 'medium_armor', 'medium_armor', 'motorized', 'motorized', 'motorized'],
       ['engineer', 'recon', 'logistics']),
-    deriveTemplate(TEMPLATE_MOUNTAIN, 'Mountain Division',
+    deriveTemplate(TEMPLATE_MOUNTAIN, '山岳師団',
       ['mountaineers', 'mountaineers', 'mountaineers', 'mountaineers', 'mountaineers', 'artillery'],
       ['engineer', 'recon']),
   ];

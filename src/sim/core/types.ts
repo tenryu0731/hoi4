@@ -319,10 +319,17 @@ export interface Country {
 // Root state
 // ---------------------------------------------------------------------------
 
+/** Why the campaign ended. A code, not prose: the UI writes the sentence. */
+export type OutcomeReason =
+  | 'capitulated'
+  | 'allEnemiesCapitulated'
+  | 'aheadOnPoints'
+  | 'behindOnPoints';
+
 export type Outcome =
   | { status: 'playing' }
-  | { status: 'victory'; reason: string; day: number }
-  | { status: 'defeat'; reason: string; day: number };
+  | { status: 'victory'; reason: OutcomeReason; day: number }
+  | { status: 'defeat'; reason: OutcomeReason; day: number };
 
 export interface GameState {
   meta: {
@@ -347,10 +354,27 @@ export interface GameState {
   log: GameEvent[];
 }
 
+/**
+ * What happened, as data rather than as a sentence.
+ *
+ * The simulation must not know what language the player reads, so it records
+ * the facts and the UI writes the prose. Country references are tags because
+ * those are stable across the whole program; province references are ids so the
+ * UI can look up whatever name it wants to show.
+ */
+export type GameEventBody =
+  | { k: 'warDeclared'; attacker: string; defender: string }
+  | { k: 'joinedFaction'; country: string; faction: string }
+  | { k: 'capitulated'; country: string; occupation: number }
+  | { k: 'itemCompleted'; country: string; item: string }
+  | { k: 'divisionLost'; country: string }
+  | { k: 'attack'; attacker: string; defender: string; province: ProvinceId }
+  | { k: 'outcome'; status: Outcome['status']; reason: OutcomeReason };
+
 export interface GameEvent {
   day: number;
   kind: 'war' | 'combat' | 'production' | 'construction' | 'diplomacy' | 'capitulation' | 'outcome';
-  text: string;
+  body: GameEventBody;
   /** Optional province to focus the camera on when tapped. */
   province?: ProvinceId;
   country?: CountryId;

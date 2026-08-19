@@ -15,6 +15,7 @@ import {
 import { NATIONS } from '../sim/scenario/nations';
 import { LabelLayer } from './layers/LabelLayer';
 import { UnitLayer } from './layers/UnitLayer';
+import { country } from '../ui/strings';
 
 /**
  * Draws the map.
@@ -183,7 +184,7 @@ export class MapRenderer {
 
     // Nation display names come from the scenario table rather than the map,
     // which only stores tags.
-    const countryNames = new Map<string, string>(NATIONS.map((n) => [n.tag, n.name]));
+    const countryNames = new Map<string, string>(NATIONS.map((n) => [n.tag, country(n.tag)]));
     this.labels = new LabelLayer(this.index, countryNames);
     this.world.addChild(this.labels.container);
 

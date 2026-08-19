@@ -165,7 +165,7 @@ export function declareWar(
   state.log.push({
     day: state.clock.totalDays,
     kind: 'war',
-    text: `${a.name} declares war on ${t.name}`,
+    body: { k: 'warDeclared', attacker: a.tag, defender: t.tag },
     country: aggressor,
   });
   return war;
@@ -219,7 +219,7 @@ export function joinFaction(state: GameState, country: CountryId, factionId: num
   state.log.push({
     day: state.clock.totalDays,
     kind: 'diplomacy',
-    text: `${c.name} joins the ${faction.name}`,
+    body: { k: 'joinedFaction', country: c.tag, faction: faction.name },
     country,
   });
   return true;
@@ -339,7 +339,7 @@ export function capitulate(
   state.log.push({
     day: state.clock.totalDays,
     kind: 'capitulation',
-    text: `${c.name} capitulates (${Math.round(occupation * 100)}% occupied)`,
+    body: { k: 'capitulated', country: c.tag, occupation },
     country,
   });
 }

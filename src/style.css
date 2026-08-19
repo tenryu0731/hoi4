@@ -21,7 +21,9 @@ html, body {
   overflow: hidden;
   background: #0b1622;
   color: var(--ink);
-  font-family: "Helvetica Neue", Helvetica, Arial, "Noto Sans", sans-serif;
+  font-family: "Helvetica Neue", Helvetica, Arial, "Hiragino Kaku Gothic ProN",
+    "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Noto Sans CJK JP", Meiryo,
+    "Noto Sans", sans-serif;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
   /* The map handles its own gestures; the page must never scroll or zoom. */
@@ -55,7 +57,8 @@ html, body {
 
 .boot-inner { text-align: center; width: min(80vw, 380px); }
 .boot-title {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Georgia, "Times New Roman", "Hiragino Mincho ProN", "Yu Mincho",
+    "Noto Serif JP", serif;
   font-size: 34px;
   letter-spacing: 10px;
   font-weight: 700;

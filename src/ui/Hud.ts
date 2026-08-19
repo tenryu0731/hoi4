@@ -4,6 +4,7 @@ import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
 import { PANELS, formatNumber, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
+import { RESOURCE_SHORT, UI, country, eventText } from './strings';
 
 /**
  * The heads-up display.
@@ -19,24 +20,18 @@ import { HUD_CSS } from './hud.css';
  */
 
 const MAP_MODES: [MapMode, string][] = [
-  ['political', 'Political'],
-  ['terrain', 'Terrain'],
-  ['resource', 'Resources'],
-  ['supply', 'Supply'],
-  ['victory', 'Victory'],
+  ['political', UI.modePolitical],
+  ['terrain', UI.modeTerrain],
+  ['resource', UI.modeResource],
+  ['supply', UI.modeSupply],
+  ['victory', UI.modeVictory],
 ];
 
-/** Abbreviations that fit the resource strip on a 360px screen. */
-const RESOURCE_SHORT: Record<ResourceType, string> = {
-  oil: 'Oil', steel: 'Steel', aluminium: 'Alu',
-  tungsten: 'Tung', rubber: 'Rub', chromium: 'Chr',
-};
-
 const NAV: [PanelId, string, string][] = [
-  ['production', 'Production', 'ui-production'],
-  ['construction', 'Build', 'ui-construction'],
-  ['army', 'Army', 'ui-army'],
-  ['diplomacy', 'Diplomacy', 'ui-diplomacy'],
+  ['production', UI.navProduction, 'ui-production'],
+  ['construction', UI.navConstruction, 'ui-construction'],
+  ['army', UI.navArmy, 'ui-army'],
+  ['diplomacy', UI.navDiplomacy, 'ui-diplomacy'],
 ];
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -78,23 +73,23 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     stats.append(box);
     statNodes[key] = v;
   };
-  addStat('pp', 'PP');
-  addStat('mp', 'MANPOWER');
-  addStat('civ', 'CIV');
-  addStat('mil', 'MIL');
-  addStat('div', 'DIV');
+  addStat('pp', UI.politicalPower);
+  addStat('mp', UI.manpower);
+  addStat('civ', UI.civFactories);
+  addStat('mil', UI.milFactories);
+  addStat('div', UI.divisions);
 
   const clock = el('div', 'hud-clock');
   const dateNode = el('div', 'hud-date', '');
   const speedRow = el('div', 'hud-speed');
   const pauseBtn = el('button', 'hud-btn hud-pause', '▶');
-  pauseBtn.setAttribute('aria-label', 'Play or pause');
+  pauseBtn.setAttribute('aria-label', UI.playPause);
   const speedPips = el('div', 'hud-pips');
   const pips: HTMLElement[] = [];
   for (let i = 1; i <= 5; i++) {
     const pip = el('button', 'hud-pip');
     pip.dataset.speed = String(i);
-    pip.setAttribute('aria-label', `Speed ${i}`);
+    pip.setAttribute('aria-label', `${UI.speed} ${i}`);
     pips.push(pip);
     speedPips.append(pip);
   }
@@ -139,7 +134,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const sheetHeader = el('div', 'hud-sheet-header');
   const sheetTitle = el('div', 'hud-sheet-title', '');
   const sheetClose = el('button', 'hud-sheet-close', '×');
-  sheetClose.setAttribute('aria-label', 'Close panel');
+  sheetClose.setAttribute('aria-label', UI.closePanel);
   sheetHeader.append(sheetTitle, sheetClose);
   const sheetBody = el('div', 'hud-sheet-body');
   sheet.append(sheetGrip, sheetHeader, sheetBody);
@@ -244,7 +239,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const TOAST_KINDS = new Set(['war', 'capitulation', 'construction', 'outcome']);
 
   function pushToast(e: GameEvent): void {
-    const node = el('div', `hud-toast kind-${e.kind}`, e.text);
+    const node = el('div', `hud-toast kind-${e.kind}`,
+      eventText(e.body, (id) => game.index.get(id).name));
     toasts.append(node);
     // Fade and remove; the log panel keeps the permanent record.
     setTimeout(() => node.classList.add('is-out'), 4200);
@@ -267,7 +263,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       flag.src = assetUrl(`flags/${me.tag}.svg`);
       flag.alt = me.name;
     }
-    setText(countryName, me.name);
+    setText(countryName, country(me.tag));
     setText(countryTag, me.tag);
 
     setText(statNodes.pp, formatNumber(me.economy.politicalPower));

@@ -17,8 +17,17 @@ import {
  * then crawls, which is the behaviour the period demands.
  */
 
-/** Hours of movement are scaled so a foot division covers ~110km/day on roads. */
-const KM_PER_HOUR_SCALE = 0.5;
+/**
+ * Marching speed is not road speed.
+ *
+ * Provinces here average 223km between centres -- HOI4's are a quarter of that
+ * -- so the scale has to be read against this map, not against a doctrine
+ * table. At 2.2 a foot division covers roughly 210km/day and crosses a typical
+ * province in under a day; at the 0.5 this used to be, a single hop took two
+ * and a half in-game days and nineteen real seconds, and an order looked
+ * exactly like an order that had been ignored.
+ */
+const KM_PER_HOUR_SCALE = 2.2;
 /** Nobody moves slower than this fraction of their nominal speed. */
 const MIN_SPEED_FACTOR = 0.15;
 /** A division may not move while its organisation is below this fraction. */
@@ -209,7 +218,7 @@ export function retreat(
     state.log.push({
       day: state.clock.totalDays,
       kind: 'combat',
-      text: `${state.countries[d.owner].tag}: a division was destroyed with no line of retreat`,
+      body: { k: 'divisionLost', country: state.countries[d.owner].tag },
       province: from,
       country: d.owner,
     });
@@ -308,7 +317,12 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
       state.log.push({
         day: state.clock.totalDays,
         kind: 'combat',
-        text: `${state.countries[d.owner].tag} attacks ${state.countries[controller].tag} at ${ctx.index.get(next).name}`,
+        body: {
+          k: 'attack',
+          attacker: state.countries[d.owner].tag,
+          defender: state.countries[controller].tag,
+          province: next,
+        },
         province: next,
         country: d.owner,
       });
