@@ -61,7 +61,8 @@ export class MapRenderer {
   private selectionLayer = new Graphics();
   private frontLayer = new Graphics();
   private cityLayer = new Graphics();
-  private labels!: LabelLayer;
+  /** Exposed for the visual-determinism probe in the e2e suite. */
+  labels!: LabelLayer;
   private units!: UnitLayer;
 
   private reliefTexture!: Texture;

@@ -20,6 +20,11 @@ import { PALETTE } from '../palette';
 
 /** How far from its capital a province still counts as a nation's heartland. */
 const HOME_RADIUS_KM = 1500;
+/**
+ * Most a label may be shrunk to make it fit its shape before it is dropped.
+ * 1.6 keeps small countries captioned a little longer as the map zooms in.
+ */
+const MAX_LABEL_SHRINK = 1.6;
 
 export const FONT_COUNTRY = 'IF-Country';
 export const FONT_PROVINCE = 'IF-Province';
@@ -85,9 +90,9 @@ interface LabelEntry {
 
 export class LabelLayer {
   readonly container = new Container();
-  private countryLabels: LabelEntry[] = [];
-  private provinceLabels: LabelEntry[] = [];
-  private cityLabels: LabelEntry[] = [];
+  readonly countryLabels: LabelEntry[] = [];
+  readonly provinceLabels: LabelEntry[] = [];
+  readonly cityLabels: LabelEntry[] = [];
   private step = 0;
   private occupied = new Set<number>();
   /** Screen-space collision cell size in CSS pixels. */
@@ -278,9 +283,16 @@ export class LabelLayer {
         if (shapeHPx < hPx * 1.6) return false;
         // Allow shrinking to 62% before giving up, which keeps small countries
         // captioned a little longer as you zoom in.
-        const need = wPx / Math.max(1, Math.round(shapeWPx * 0.88));
-        if (need > 1) {
-          if (need > 1 / 0.62) return false;
+        // Quantise how much the label has to shrink. Glyph advances come from
+        // a canvas-rasterised atlas whose metrics move by a fraction of a
+        // percent between page loads, and a label sitting exactly on the
+        // shrink-or-drop threshold would then appear in one render and not the
+        // next. Snapping to tenths means only a real six-percent change in fit
+        // can flip the decision.
+        const raw = wPx / Math.max(1, Math.round(shapeWPx * 0.88));
+        if (raw > 1) {
+          const need = Math.ceil(raw * 10) / 10;
+          if (need > MAX_LABEL_SHRINK) return false;
           wPx = Math.round(wPx / need);
           hPx = Math.round(hPx / need);
         }
