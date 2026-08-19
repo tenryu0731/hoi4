@@ -12,7 +12,7 @@ import { expect, test } from '@playwright/test';
  * served build is no use to someone who cannot run a server at all.
  */
 
-const SINGLE_FILE = join(process.cwd(), 'dist-single', 'iron-front.html');
+const SINGLE_FILE = join(process.cwd(), 'play.html');
 
 test.describe('boot', () => {
   test('reports a bundle that fails to load instead of hanging', async ({ page }) => {
