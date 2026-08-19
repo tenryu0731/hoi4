@@ -1,5 +1,5 @@
 import { hoursFromDate, clockFromHours } from '../time/calendar';
-import { createRng } from '../core/rng';
+import { createRng, randRange } from '../core/rng';
 import { BATTALIONS, EQUIPMENT, SUPPORTS, BASE_EFFICIENCY, BASE_EFFICIENCY_CAP } from '../core/data';
 import {
   EQUIPMENT_TYPES, RESOURCE_TYPES,
@@ -170,6 +170,10 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
   const seed = opts.seed ?? 20250101;
   const playerTag = opts.playerTag ?? 'GER';
 
+  // Temperaments are drawn before anything else so they depend only on the
+  // seed, not on how many countries the map happens to contain.
+  const temperamentRng = createRng(seed ^ 0x5bf03635);
+
   const tags = [...new Set(index.provinces.map((p) => p.ownerTag))];
   // Order countries by the nation table so ids are stable across map rebuilds.
   const orderedTags = NATIONS.map((n) => n.tag).filter((t) => tags.includes(t));
@@ -203,6 +207,7 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       atWarWith: [],
       capitulated: false,
       surrenderLimit: n.major ? 0.75 : 0.6,
+      aggression: randRange(temperamentRng, 0.78, 1.28),
       stats: { victoryPoints: 0, victoryPointsHeld: 0, divisionCount: 0, militaryStrength: 0 },
     };
   });

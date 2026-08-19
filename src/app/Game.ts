@@ -1,6 +1,7 @@
 import { ProvinceIndex } from '../sim/map/ProvinceIndex';
 import type { MapDataJson } from '../sim/map/MapData';
 import { createScenario } from '../sim/scenario/europe1936';
+import { Simulation } from '../sim/Simulation';
 import { TimeEngine, type Speed } from '../sim/time/TimeEngine';
 import { CommandQueue, type Command } from '../sim/core/commands';
 import type { GameState, ProvinceId } from '../sim/core/types';
@@ -38,6 +39,7 @@ export interface SelectionState {
 export class Game {
   readonly index: ProvinceIndex;
   readonly renderer: MapRenderer;
+  readonly sim: Simulation;
   readonly time: TimeEngine;
   readonly commands = new CommandQueue();
   readonly input: TouchController;
@@ -57,6 +59,7 @@ export class Game {
     this.index = index;
     this.renderer = renderer;
     this.state = state;
+    this.sim = new Simulation(state, index);
     this.time = new TimeEngine(state.clock.totalHours);
 
     this.input = new TouchController(renderer.camera, {
@@ -68,9 +71,11 @@ export class Game {
     });
     this.input.attach(renderer.canvas);
 
+    // Commands are drained at the top of the hour, before any subsystem runs,
+    // so an order issued mid-frame always takes effect at a defined point.
     this.time.on((ctx) => {
-      this.state.clock = ctx.clock;
       this.drainCommands();
+      this.sim.tick(ctx);
     });
   }
 
@@ -176,13 +181,19 @@ export class Game {
   private drainCommands(): void {
     const cmds = this.commands.drain();
     if (cmds.length === 0) return;
-    // Subsystems register their handlers here as they come online; until then
-    // commands are drained and discarded rather than queued forever.
-    for (const cmd of cmds) this.execute?.(this.state, cmd);
+    for (const cmd of cmds) {
+      this.sim.execute(cmd);
+      this.onCommand?.(this.state, cmd);
+    }
   }
 
-  /** Installed by the simulation wiring once the subsystems exist. */
-  execute: ((state: GameState, cmd: Command) => void) | null = null;
+  /** Test hook: observes commands after the simulation has applied them. */
+  onCommand: ((state: GameState, cmd: Command) => void) | null = null;
+
+  /** True once the scenario has resolved one way or the other. */
+  get finished(): boolean {
+    return this.state.outcome.status !== 'playing';
+  }
 
   // -------------------------------------------------------------------------
   // Speed & view

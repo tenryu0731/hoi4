@@ -470,25 +470,34 @@ describe('supply', () => {
   it('gives the capital full supply and decays with distance', () => {
     const f = makeFixture();
     const sov = f.country('SOV');
-    const levels = computeSupply(f.state, f.index, sov.id, supplySources(f.state, sov.id));
+    const levels = computeSupply(f.state, f.index, sov.id, supplySources(f.state, f.index, sov.id));
     expect(levels[sov.capital]).toBe(1);
   });
 
-  it('gives nothing to provinces the country does not control', () => {
+  it('carries supply across a coalition but not beyond it', () => {
     const f = makeFixture();
     const ger = f.country('GER');
-    const levels = computeSupply(f.state, f.index, ger.id, supplySources(f.state, ger.id));
+    const bloc = new Set(f.state.factions[ger.factionId!].members);
+    const levels = computeSupply(f.state, f.index, ger.id, supplySources(f.state, f.index, ger.id));
     for (let i = 0; i < levels.length; i++) {
-      if (f.state.provinces[i].controller !== ger.id) expect(levels[i]).toBe(0);
+      if (!bloc.has(f.state.provinces[i].controller)) {
+        expect(levels[i], `province ${i}`).toBe(0);
+      }
     }
+    // An ally's ground is inside the network.
+    const ita = f.country('ITA');
+    expect(levels[ita.capital]).toBeGreaterThan(0);
   });
 
-  it('returns nothing when the capital has fallen', () => {
+  it('leaves an unaligned country with nothing once its ports and capital are gone', () => {
     const f = makeFixture();
-    const ger = f.country('GER');
+    const hun = f.country('HUN');       // landlocked and unaligned
     const sov = f.country('SOV');
-    f.state.provinces[ger.capital].controller = sov.id;
-    const levels = computeSupply(f.state, f.index, ger.id, supplySources(f.state, ger.id));
+    expect(hun.factionId).toBeNull();
+    for (let i = 0; i < f.state.provinces.length; i++) {
+      if (f.state.provinces[i].controller === hun.id) f.state.provinces[i].controller = sov.id;
+    }
+    const levels = computeSupply(f.state, f.index, hun.id, supplySources(f.state, f.index, hun.id));
     expect(Math.max(...levels)).toBe(0);
   });
 
@@ -527,7 +536,7 @@ describe('supply', () => {
         chain.push(next);
         cur = next;
       }
-      const levels = computeSupply(f.state, f.index, sov.id, supplySources(f.state, sov.id));
+      const levels = computeSupply(f.state, f.index, sov.id, supplySources(f.state, f.index, sov.id));
       return { total: levels.reduce((a, b) => a + b, 0), chain };
     };
 
@@ -542,7 +551,7 @@ describe('supply', () => {
     const sov = f.country('SOV');
     const neighbour = f.index.get(sov.capital).neighbors[0];
     f.state.provinces[neighbour].controller = sov.id;
-    const levels = computeSupply(f.state, f.index, sov.id, supplySources(f.state, sov.id));
+    const levels = computeSupply(f.state, f.index, sov.id, supplySources(f.state, f.index, sov.id));
     expect(levels[sov.capital]).toBe(1);
     expect(levels[neighbour]).toBeGreaterThan(0);
     expect(levels[neighbour]).toBeLessThan(1);
@@ -550,10 +559,58 @@ describe('supply', () => {
 });
 
 describe('encirclement', () => {
-  it('finds no pocket in an intact country', () => {
+  it('finds no pocket in a country whose territory is contiguous', () => {
+    const f = makeFixture();
+    for (const tag of ['POL', 'CZE', 'SOV', 'HUN']) {
+      const c = f.country(tag);
+      const pocket = encircledProvinces(f.state, f.index, c.id);
+      expect([...pocket].map((p) => f.index.get(p).name), tag).toEqual([]);
+    }
+  });
+
+  it('keeps East Prussia supplied through its own port', () => {
+    // The Polish Corridor severed East Prussia from Germany by land, but
+    // Koenigsberg is a port, so it is a separate theatre rather than a pocket.
     const f = makeFixture();
     const ger = f.country('GER');
     expect(encircledProvinces(f.state, f.index, ger.id).size).toBe(0);
+    const sources = supplySources(f.state, f.index, ger.id);
+    expect(sources.length).toBeGreaterThan(1);
+    expect(sources.some((s) => s.province === ger.capital)).toBe(true);
+  });
+
+  it('encircles a landlocked salient with no route home', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const sov = f.country('SOV');
+    declareWar(f.state, ger.id, sov.id);
+
+    // Find an inland province deep in Soviet territory and hand it to Germany,
+    // then make sure it is surrounded.
+    const target = f.index.provinces.find(
+      (p) => p.ownerTag === 'SOV' && !p.coastal && p.neighbors.length >= 3
+        && p.neighbors.every((n) => f.index.get(n).ownerTag === 'SOV'),
+    )!;
+    f.state.provinces[target.id].controller = ger.id;
+
+    const pocket = encircledProvinces(f.state, f.index, ger.id);
+    expect(pocket.has(target.id)).toBe(true);
+
+    tickSupplyDaily(f.state, f.index);
+    expect(f.state.provinces[target.id].supply).toBe(0);
+  });
+
+  it('supplies overseas theatres through a port rather than starving them', () => {
+    const f = makeFixture();
+    const eng = f.country('ENG');
+    const fra = f.country('FRA');
+    // Egypt and French North Africa are unreachable overland from London and
+    // Paris, but both are coastal and owned, so convoys keep them supplied.
+    for (const c of [eng, fra]) {
+      const sources = supplySources(f.state, f.index, c.id);
+      expect(sources.length, c.tag).toBeGreaterThan(1);
+      expect(encircledProvinces(f.state, f.index, c.id).size, c.tag).toBe(0);
+    }
   });
 
   it('detects a province cut off from the capital', () => {

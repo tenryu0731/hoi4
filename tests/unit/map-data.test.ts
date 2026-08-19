@@ -124,8 +124,19 @@ describe('map data integrity', () => {
     }
   });
 
+  /** Country-level adjacency, derived from province adjacency. */
+  function countryNeighbours(): Map<string, Set<string>> {
+    const out = new Map<string, Set<string>>();
+    for (const p of data.provinces) {
+      let set = out.get(p.ownerTag);
+      if (!set) { set = new Set(); out.set(p.ownerTag, set); }
+      for (const n of p.neighbors) set.add(data.provinces[n].ownerTag);
+    }
+    return out;
+  }
+
   it('reproduces well-known European land borders', () => {
-    const byTag = new Map(data.provinces.map((p) => [p.ownerTag, p]));
+    const nb = countryNeighbours();
     const borders: [string, string][] = [
       ['GER', 'FRA'], ['GER', 'POL'], ['GER', 'DEN'], ['GER', 'BEL'],
       ['FRA', 'SPR'], ['SPR', 'POR'], ['ITA', 'SWI'], ['ITA', 'AUS'],
@@ -133,25 +144,20 @@ describe('map data integrity', () => {
       ['NOR', 'SWE'], ['HUN', 'ROM'],
     ];
     for (const [a, b] of borders) {
-      const pa = byTag.get(a);
-      const pb = byTag.get(b);
-      expect(pa, a).toBeDefined();
-      expect(pb, b).toBeDefined();
-      expect(pa!.neighbors, `${a}-${b}`).toContain(pb!.id);
+      expect(nb.get(a), `${a} missing`).toBeDefined();
+      expect([...(nb.get(a) ?? [])], `${a}-${b}`).toContain(b);
+      expect([...(nb.get(b) ?? [])], `${b}-${a}`).toContain(a);
     }
   });
 
   it('does not invent land borders across water or third countries', () => {
-    const byTag = new Map(data.provinces.map((p) => [p.ownerTag, p]));
+    const nb = countryNeighbours();
     const notBorders: [string, string][] = [
       ['GER', 'ITA'], ['POL', 'HUN'], ['POL', 'ROM'], ['HOL', 'FRA'],
       ['SWE', 'DEN'], ['GRE', 'ITA'], ['IRE', 'FRA'],
     ];
     for (const [a, b] of notBorders) {
-      const pa = byTag.get(a);
-      const pb = byTag.get(b);
-      if (!pa || !pb) continue;
-      expect(pa.neighbors, `${a}-${b} must not be a land border`).not.toContain(pb.id);
+      expect([...(nb.get(a) ?? [])], `${a}-${b} must not be a land border`).not.toContain(b);
     }
   });
 });

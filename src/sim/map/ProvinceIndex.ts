@@ -149,28 +149,40 @@ export class ProvinceIndex {
     }
   }
 
+  /**
+   * Marks the cells a province covers, by scanline.
+   *
+   * Each row is sampled at several heights rather than only at its centre. A
+   * single centre sample systematically misses cells where the province occupies
+   * the top or bottom of the row but not the middle -- a thin coastal strip, a
+   * province tapering to a point -- and a missed cell is a province the user
+   * simply cannot tap.
+   */
   private fillInterior(p: Province, mark: (cx: number, cy: number, id: number) => void): void {
     const c = this.cellSize;
     const row0 = Math.floor((p.bbox[1] - this.gridOffY) / c);
     const row1 = Math.floor((p.bbox[3] - this.gridOffY) / c);
+    const offsets = [0.08, 0.3, 0.5, 0.7, 0.92];
     const xs: number[] = [];
     for (let row = row0; row <= row1; row++) {
-      const y = this.gridOffY + (row + 0.5) * c;
-      xs.length = 0;
-      for (const ring of p.rings) {
-        for (let i = 0, j = ring.length - 2; i < ring.length; j = i, i += 2) {
-          const yi = ring[i + 1];
-          const yj = ring[j + 1];
-          if ((yi > y) === (yj > y)) continue;
-          xs.push(ring[i] + ((y - yi) / (yj - yi)) * (ring[j] - ring[i]));
+      for (const off of offsets) {
+        const y = this.gridOffY + (row + off) * c;
+        xs.length = 0;
+        for (const ring of p.rings) {
+          for (let i = 0, j = ring.length - 2; i < ring.length; j = i, i += 2) {
+            const yi = ring[i + 1];
+            const yj = ring[j + 1];
+            if ((yi > y) === (yj > y)) continue;
+            xs.push(ring[i] + ((y - yi) / (yj - yi)) * (ring[j] - ring[i]));
+          }
         }
-      }
-      if (xs.length < 2) continue;
-      xs.sort((a, b) => a - b);
-      for (let k = 0; k + 1 < xs.length; k += 2) {
-        const c0 = Math.floor((xs[k] - this.gridOffX) / c);
-        const c1 = Math.floor((xs[k + 1] - this.gridOffX) / c);
-        for (let cx = c0; cx <= c1; cx++) mark(cx, row, p.id);
+        if (xs.length < 2) continue;
+        xs.sort((a, b) => a - b);
+        for (let k = 0; k + 1 < xs.length; k += 2) {
+          const c0 = Math.floor((xs[k] - this.gridOffX) / c);
+          const c1 = Math.floor((xs[k + 1] - this.gridOffX) / c);
+          for (let cx = c0; cx <= c1; cx++) mark(cx, row, p.id);
+        }
       }
     }
   }
@@ -357,12 +369,19 @@ export class ProvinceIndex {
     return out;
   }
 
-  /** Breadth-first reachable set, used by supply propagation and encirclement. */
+  /**
+   * Breadth-first reachable set, used by supply propagation and encirclement.
+   *
+   * `includeSea` must match whatever supply does: if supply crosses straits but
+   * connectivity does not, every island reads as an encircled pocket.
+   */
   reachable(
     from: ProvinceId,
     passable: (id: ProvinceId) => boolean,
-    maxDepth = Infinity,
+    opts: { includeSea?: boolean; maxDepth?: number } = {},
   ): Set<ProvinceId> {
+    const includeSea = opts.includeSea ?? false;
+    const maxDepth = opts.maxDepth ?? Infinity;
     const out = new Set<ProvinceId>();
     if (!passable(from)) return out;
     out.add(from);
@@ -371,10 +390,18 @@ export class ProvinceIndex {
     while (frontier.length && depth < maxDepth) {
       const next: ProvinceId[] = [];
       for (const cur of frontier) {
-        for (const nb of this.provinces[cur].neighbors) {
+        const p = this.provinces[cur];
+        for (const nb of p.neighbors) {
           if (out.has(nb) || !passable(nb)) continue;
           out.add(nb);
           next.push(nb);
+        }
+        if (includeSea) {
+          for (const nb of p.seaNeighbors) {
+            if (out.has(nb) || !passable(nb)) continue;
+            out.add(nb);
+            next.push(nb);
+          }
         }
       }
       frontier = next;

@@ -151,8 +151,15 @@ export const BUILDING_CAP: Record<BuildingType, number> = {
   fort: 10,
 };
 
-/** Daily output of one factory, in cost units. */
-export const FACTORY_OUTPUT = 5;
+/**
+ * Daily output of one factory, in cost units.
+ *
+ * Tuned against how fast an army should grow: at 5 a major power added roughly
+ * one division a quarter, which is far short of the period. At 9, Germany goes
+ * from 24 divisions in 1936 to a wartime army, and a civilian factory takes
+ * about two months to build.
+ */
+export const FACTORY_OUTPUT = 9;
 
 /** Base production efficiency a fresh line starts at, and its natural ceiling. */
 export const BASE_EFFICIENCY = 0.10;

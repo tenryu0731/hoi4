@@ -149,7 +149,7 @@ test.describe('touch input', () => {
       const g = window.__game!;
       // The queue drains on the next simulation hour; step one to flush it.
       const seen: unknown[] = [];
-      g.execute = (_state, cmd) => { seen.push(cmd); };
+      g.onCommand = (_state, cmd) => { seen.push(cmd); };
       g.stepHours(1);
       return seen;
     });

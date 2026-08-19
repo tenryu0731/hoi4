@@ -299,6 +299,13 @@ export interface Country {
   capitulated: boolean;
   /** Fraction of own victory points that may be lost before capitulating. */
   surrenderLimit: number;
+  /**
+   * Seeded temperament, around 1.0. Scales how eagerly this country picks
+   * fights and how large an army it wants first, so two runs of the same
+   * scenario with different seeds produce different histories rather than the
+   * same script with different dice.
+   */
+  aggression: number;
   /** Cached each month for UI + AI. */
   stats: {
     victoryPoints: number;

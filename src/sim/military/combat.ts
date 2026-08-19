@@ -22,10 +22,18 @@ import type { ProvinceIndex } from '../map/ProvinceIndex';
  * on a phone, and it makes the balance testable in closed form.
  */
 
-/** Organisation removed per point of absorbed damage. */
-export const ORG_DAMAGE_K = 0.030;
+/**
+ * Organisation removed per point of damage.
+ *
+ * This constant sets how long a battle lasts, and therefore how fast the whole
+ * war moves. At 0.030 an even engagement burned out in under two days and the
+ * front collapsed faster than armies could march; at 0.010 it grinds for the
+ * better part of a week, which is what lets a defence be reinforced and a
+ * breakthrough mean something.
+ */
+export const ORG_DAMAGE_K = 0.010;
 /** Strength removed per point of penetrating damage. */
-export const STR_DAMAGE_K = 0.045;
+export const STR_DAMAGE_K = 0.06;
 /**
  * Flat penalty on the attacker's output.
  *

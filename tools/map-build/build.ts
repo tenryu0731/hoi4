@@ -299,6 +299,7 @@ export async function buildMap(opts: BuildOptions): Promise<MapDataJson> {
   }
 
   // --- 8. Sea adjacency -----------------------------------------------------
+  markCoastal(provinces, landGeom);
   addSeaNeighbors(provinces, landGeom);
   connectIsolatedComponents(provinces);
   const lakeRings: number[][] = [];
@@ -683,6 +684,40 @@ function connectIsolatedComponents(provinces: ProvinceGeoJson[]): void {
       console.log(`  linked isolated ${provinces[bestA].name} -> ${provinces[bestB].name} (${bestD.toFixed(0)} km)`);
       for (let i = 0; i < provinces.length; i++) if (comp[i] === c) comp[i] = main;
     }
+  }
+}
+
+/**
+ * Flags provinces that touch open water.
+ *
+ * A province is coastal when part of its outline is not shared with any
+ * neighbour -- that edge can only face the sea. Dockyards and naval invasions
+ * both need this, and it is far cheaper than testing against the ocean.
+ */
+function markCoastal(provinces: ProvinceGeoJson[], landGeom: Ring[]): void {
+  const landBoxes = landGeom.map((r) => bboxOfRing(r));
+  for (const p of provinces) {
+    let coastal = false;
+    outer: for (const flat of p.rings) {
+      for (let i = 0; i < flat.length; i += 2) {
+        const x = flat[i];
+        const y = flat[i + 1];
+        // A vertex within a whisker of the land silhouette is on the coastline.
+        for (let k = 0; k < landGeom.length && !coastal; k++) {
+          const [minX, minY, maxX, maxY] = landBoxes[k];
+          if (x < minX - 4 || x > maxX + 4 || y < minY - 4 || y > maxY + 4) continue;
+          const ring = landGeom[k];
+          for (const q of ring) {
+            if (Math.abs(q[0] - x) <= 4 && Math.abs(q[1] - y) <= 4) {
+              coastal = true;
+              break;
+            }
+          }
+        }
+        if (coastal) break outer;
+      }
+    }
+    p.coastal = coastal;
   }
 }
 

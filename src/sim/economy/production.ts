@@ -124,8 +124,25 @@ export function tickEconomyDaily(state: GameState, ctx: EconomyContext): void {
   }
 }
 
+/** Consumer-goods share a country settles at, by whether it is fighting. */
+const CONSUMER_GOODS_TARGET = { peace: 0.32, war: 0.15 };
+/** How fast the economy is allowed to shift, per day. */
+const CONSUMER_GOODS_DRIFT = 0.002;
+
 function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): void {
   const eco = c.economy;
+
+  // A country at war converts its economy over months, not overnight. The
+  // freed civilian factories are what let a wartime power out-build a
+  // peacetime one, and the drift is what makes mobilising cost time.
+  const target = c.atWarWith.length > 0
+    ? CONSUMER_GOODS_TARGET.war
+    : CONSUMER_GOODS_TARGET.peace;
+  if (eco.consumerGoodsRatio > target) {
+    eco.consumerGoodsRatio = Math.max(target, eco.consumerGoodsRatio - CONSUMER_GOODS_DRIFT);
+  } else if (eco.consumerGoodsRatio < target) {
+    eco.consumerGoodsRatio = Math.min(target, eco.consumerGoodsRatio + CONSUMER_GOODS_DRIFT / 2);
+  }
 
   // --- 1. resource supply -------------------------------------------------
   const produced = computeResourceOutput(state, ctx.index, c.id);
