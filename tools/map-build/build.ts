@@ -12,7 +12,7 @@ import {
   type LccParams,
 } from './geo';
 import { assembleRing, buildTopology, simplifyArc, type ArcRef } from './topology';
-import { MEMBER_TO_TAG, NATIONS, NATION_BY_TAG } from './nations';
+import { MEMBER_TO_TAG, NATIONS, NATION_BY_TAG } from '../../src/sim/scenario/nations';
 import { subdivideProvinces } from './provinces';
 import type {
   CityJson, MapDataJson, ProvinceGeoJson, StateGeoJson,
@@ -397,8 +397,12 @@ function oneProvincePerNation(units: UnitLike[]): BuiltProvinces {
       return depth % 2;
     });
 
-    const biggest = rings[0];
-    const center = poleOfInaccessibility([biggest], 2);
+    // Anchor the label on the ring that holds the capital, not the largest one.
+    // The United Kingdom's largest 1936 landmass is Egypt, and France's is
+    // Algeria, so "largest ring" would caption both nations in North Africa.
+    const [capX, capY] = projectLcc(nation.capitalLonLat[0], nation.capitalLonLat[1], PROJ);
+    const homeRing = rings.find((r) => pointInRingFast(capX, capY, r)) ?? rings[0];
+    const center = poleOfInaccessibility([homeRing], 2);
     const area = rings.reduce((s, r) => s + ringArea(r), 0);
 
     provinces.push({

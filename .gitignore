@@ -5,3 +5,6 @@ playwright-report
 .cache
 tools/.cache
 tests/e2e/__screenshots__/*.actual.png
+tests/e2e/__screenshots__/*.actual.png
+tests/e2e/__screenshots__/*.diff.png
+tests/e2e/__screenshots__/determinism-check.png

@@ -15,9 +15,11 @@
     "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
-    "playwright": "^1.62.1",
     "@playwright/test": "^1.62.1",
+    "@types/node": "^22.10.2",
+    "@types/pngjs": "^6.0.5",
+    "playwright": "^1.62.1",
+    "pngjs": "^7.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.9.2",
     "vite": "^6.3.5",

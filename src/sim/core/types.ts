@@ -244,6 +244,9 @@ export interface DiplomaticState {
 export interface ProvinceState {
   owner: CountryId;
   controller: CountryId;
+  /** Victory points the province is worth; cached from the map so that stats
+   *  can be recomputed without reaching back into ProvinceIndex. */
+  vp: number;
   supply: number;
   fortLevel: number;
   /** Divisions currently standing in the province (cache, rebuilt on change). */
