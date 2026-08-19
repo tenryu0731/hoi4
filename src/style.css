@@ -82,3 +82,14 @@ html, body {
   transition: width 260ms ease;
 }
 .boot-status { font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; }
+/* Only ever populated by the boot guard, when startup has failed. */
+.boot-detail {
+  margin: 10px auto 0;
+  max-width: 32em;
+  padding: 0 18px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+  letter-spacing: 0;
+  text-align: left;
+}
