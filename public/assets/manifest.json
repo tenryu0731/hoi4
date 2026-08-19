@@ -1,0 +1,333 @@
+{
+  "generated": "tools/asset-gen/build.ts",
+  "counts": {
+    "flags": 30,
+    "resourceIcons": 6,
+    "uiIcons": 16,
+    "unitIcons": 12
+  },
+  "totalBytes": 22662,
+  "totalGzipBytes": 13830,
+  "assets": [
+    {
+      "path": "assets/flags/ALB.svg",
+      "bytes": 362,
+      "gzipBytes": 228
+    },
+    {
+      "path": "assets/flags/AUS.svg",
+      "bytes": 432,
+      "gzipBytes": 226
+    },
+    {
+      "path": "assets/flags/BEL.svg",
+      "bytes": 432,
+      "gzipBytes": 224
+    },
+    {
+      "path": "assets/flags/BUL.svg",
+      "bytes": 432,
+      "gzipBytes": 230
+    },
+    {
+      "path": "assets/flags/CZE.svg",
+      "bytes": 400,
+      "gzipBytes": 235
+    },
+    {
+      "path": "assets/flags/DEN.svg",
+      "bytes": 410,
+      "gzipBytes": 223
+    },
+    {
+      "path": "assets/flags/ENG.svg",
+      "bytes": 648,
+      "gzipBytes": 277
+    },
+    {
+      "path": "assets/flags/EST.svg",
+      "bytes": 432,
+      "gzipBytes": 228
+    },
+    {
+      "path": "assets/flags/FIN.svg",
+      "bytes": 410,
+      "gzipBytes": 223
+    },
+    {
+      "path": "assets/flags/FRA.svg",
+      "bytes": 432,
+      "gzipBytes": 224
+    },
+    {
+      "path": "assets/flags/GER.svg",
+      "bytes": 432,
+      "gzipBytes": 229
+    },
+    {
+      "path": "assets/flags/GRE.svg",
+      "bytes": 605,
+      "gzipBytes": 246
+    },
+    {
+      "path": "assets/flags/HOL.svg",
+      "bytes": 432,
+      "gzipBytes": 231
+    },
+    {
+      "path": "assets/flags/HUN.svg",
+      "bytes": 432,
+      "gzipBytes": 230
+    },
+    {
+      "path": "assets/flags/ICE.svg",
+      "bytes": 512,
+      "gzipBytes": 245
+    },
+    {
+      "path": "assets/flags/IRE.svg",
+      "bytes": 432,
+      "gzipBytes": 225
+    },
+    {
+      "path": "assets/flags/ITA.svg",
+      "bytes": 432,
+      "gzipBytes": 224
+    },
+    {
+      "path": "assets/flags/LAT.svg",
+      "bytes": 432,
+      "gzipBytes": 226
+    },
+    {
+      "path": "assets/flags/LIT.svg",
+      "bytes": 432,
+      "gzipBytes": 233
+    },
+    {
+      "path": "assets/flags/LUX.svg",
+      "bytes": 432,
+      "gzipBytes": 231
+    },
+    {
+      "path": "assets/flags/NOR.svg",
+      "bytes": 512,
+      "gzipBytes": 245
+    },
+    {
+      "path": "assets/flags/POL.svg",
+      "bytes": 374,
+      "gzipBytes": 214
+    },
+    {
+      "path": "assets/flags/POR.svg",
+      "bytes": 374,
+      "gzipBytes": 218
+    },
+    {
+      "path": "assets/flags/ROM.svg",
+      "bytes": 432,
+      "gzipBytes": 225
+    },
+    {
+      "path": "assets/flags/SOV.svg",
+      "bytes": 505,
+      "gzipBytes": 293
+    },
+    {
+      "path": "assets/flags/SPR.svg",
+      "bytes": 432,
+      "gzipBytes": 227
+    },
+    {
+      "path": "assets/flags/SWE.svg",
+      "bytes": 410,
+      "gzipBytes": 225
+    },
+    {
+      "path": "assets/flags/SWI.svg",
+      "bytes": 419,
+      "gzipBytes": 230
+    },
+    {
+      "path": "assets/flags/TUR.svg",
+      "bytes": 526,
+      "gzipBytes": 294
+    },
+    {
+      "path": "assets/flags/YUG.svg",
+      "bytes": 432,
+      "gzipBytes": 231
+    },
+    {
+      "path": "assets/icons/resource-aluminium.svg",
+      "bytes": 245,
+      "gzipBytes": 182
+    },
+    {
+      "path": "assets/icons/resource-chromium.svg",
+      "bytes": 267,
+      "gzipBytes": 192
+    },
+    {
+      "path": "assets/icons/resource-oil.svg",
+      "bytes": 389,
+      "gzipBytes": 242
+    },
+    {
+      "path": "assets/icons/resource-rubber.svg",
+      "bytes": 292,
+      "gzipBytes": 201
+    },
+    {
+      "path": "assets/icons/resource-steel.svg",
+      "bytes": 274,
+      "gzipBytes": 197
+    },
+    {
+      "path": "assets/icons/resource-tungsten.svg",
+      "bytes": 265,
+      "gzipBytes": 200
+    },
+    {
+      "path": "assets/icons/ui-army.svg",
+      "bytes": 271,
+      "gzipBytes": 198
+    },
+    {
+      "path": "assets/icons/ui-construction.svg",
+      "bytes": 263,
+      "gzipBytes": 191
+    },
+    {
+      "path": "assets/icons/ui-diplomacy.svg",
+      "bytes": 310,
+      "gzipBytes": 233
+    },
+    {
+      "path": "assets/icons/ui-dockyard.svg",
+      "bytes": 297,
+      "gzipBytes": 213
+    },
+    {
+      "path": "assets/icons/ui-factory.svg",
+      "bytes": 255,
+      "gzipBytes": 188
+    },
+    {
+      "path": "assets/icons/ui-fast_forward.svg",
+      "bytes": 226,
+      "gzipBytes": 175
+    },
+    {
+      "path": "assets/icons/ui-manpower.svg",
+      "bytes": 255,
+      "gzipBytes": 198
+    },
+    {
+      "path": "assets/icons/ui-military_factory.svg",
+      "bytes": 253,
+      "gzipBytes": 189
+    },
+    {
+      "path": "assets/icons/ui-pause.svg",
+      "bytes": 284,
+      "gzipBytes": 180
+    },
+    {
+      "path": "assets/icons/ui-play.svg",
+      "bytes": 217,
+      "gzipBytes": 172
+    },
+    {
+      "path": "assets/icons/ui-political_power.svg",
+      "bytes": 271,
+      "gzipBytes": 212
+    },
+    {
+      "path": "assets/icons/ui-production.svg",
+      "bytes": 256,
+      "gzipBytes": 186
+    },
+    {
+      "path": "assets/icons/ui-research.svg",
+      "bytes": 240,
+      "gzipBytes": 183
+    },
+    {
+      "path": "assets/icons/ui-supply.svg",
+      "bytes": 332,
+      "gzipBytes": 223
+    },
+    {
+      "path": "assets/icons/ui-victory_point.svg",
+      "bytes": 251,
+      "gzipBytes": 200
+    },
+    {
+      "path": "assets/icons/ui-warning.svg",
+      "bytes": 243,
+      "gzipBytes": 182
+    },
+    {
+      "path": "assets/units/air.svg",
+      "bytes": 273,
+      "gzipBytes": 207
+    },
+    {
+      "path": "assets/units/armor.svg",
+      "bytes": 267,
+      "gzipBytes": 197
+    },
+    {
+      "path": "assets/units/artillery.svg",
+      "bytes": 293,
+      "gzipBytes": 204
+    },
+    {
+      "path": "assets/units/cavalry.svg",
+      "bytes": 248,
+      "gzipBytes": 189
+    },
+    {
+      "path": "assets/units/headquarters.svg",
+      "bytes": 263,
+      "gzipBytes": 198
+    },
+    {
+      "path": "assets/units/infantry.svg",
+      "bytes": 258,
+      "gzipBytes": 195
+    },
+    {
+      "path": "assets/units/marines.svg",
+      "bytes": 289,
+      "gzipBytes": 211
+    },
+    {
+      "path": "assets/units/mechanized.svg",
+      "bytes": 279,
+      "gzipBytes": 206
+    },
+    {
+      "path": "assets/units/motorized.svg",
+      "bytes": 325,
+      "gzipBytes": 225
+    },
+    {
+      "path": "assets/units/mountaineers.svg",
+      "bytes": 256,
+      "gzipBytes": 196
+    },
+    {
+      "path": "assets/units/naval.svg",
+      "bytes": 287,
+      "gzipBytes": 212
+    },
+    {
+      "path": "assets/units/paratrooper.svg",
+      "bytes": 289,
+      "gzipBytes": 213
+    }
+  ]
+}
