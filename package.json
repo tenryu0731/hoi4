@@ -1,0 +1,29 @@
+{
+  "name": "iron-front-europe",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run data && npm run assets && vite build",
+    "preview": "vite preview --port 4173",
+    "data": "tsx tools/map-build/build.ts --countries-only",
+    "assets": "tsx tools/asset-gen/build.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run tests/unit",
+    "test:scenario": "vitest run tests/scenario --testTimeout=600000",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "playwright": "^1.62.1",
+    "@playwright/test": "^1.62.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.2",
+    "vite": "^6.3.5",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "pixi.js": "^8.19.0"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules
+dist
+test-results
+playwright-report
+.cache
+tools/.cache
+tests/e2e/__screenshots__/*.actual.png
