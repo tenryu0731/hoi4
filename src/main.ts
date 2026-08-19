@@ -14,8 +14,6 @@ declare global {
      *  load apart from a bundle that never executed at all. */
     __bootStarted?: boolean;
     __bootFail?: (title: string, detail?: string) => void;
-    /** Present only in the single-file build, which has no server to fetch from. */
-    __INLINE_MAP__?: MapDataJson;
   }
 }
 
@@ -54,7 +52,7 @@ async function loadMapData(): Promise<MapDataJson> {
 
 async function main(): Promise<void> {
   progress(15, 'Loading theatre map…');
-  const mapData = window.__INLINE_MAP__ ?? (await loadMapData());
+  const mapData = await loadMapData();
 
   progress(55, 'Deploying forces…');
   const game = await Game.create({

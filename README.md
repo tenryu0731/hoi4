@@ -13,24 +13,12 @@ npm run preview    # http://0.0.0.0:4173 (同じ LAN のスマホからも開け
 開発時は `npm run dev`。`?country=FRA` で操作国を、`?seed=123` でシードを、
 `?static=1` でアニメーション停止 (スクリーンショット用) を指定できる。
 
-### 実機で遊ぶ (サーバーなし)
-
-```bash
-npm run build:single   # → play.html (約 1.1 MB)
-```
-
-地図データ・アセット・スクリプトをすべて埋め込んだ 1 ファイル。スマホに
-転送してブラウザで開けばそのまま起動する (`file://` でも動作、通信ゼロ)。
-リポジトリのルートに出力してコミットしてあるので、静的配信するだけの
-ホスティング (ブランチをそのまま公開する GitHub Pages など) でも
-`<公開 URL>/play.html` が単体で動く。ゲーム側を変更したら再生成すること。
-
 ### GitHub Pages
 
 `.github/workflows/pages.yml` が `npm run build:app` の成果物 (`dist/`) を
 公開する。リポジトリの Settings → Pages → Source を **GitHub Actions** に
 すること。ブランチをそのまま公開する設定では `index.html` は Vite の
-開発用エントリなので動かない (その場合でも `/play.html` は動く)。
+開発用エントリなので動かない。
 
 `index.html` は起動できなかったことを必ず画面に出す。ロゴの下に赤字が出た
 場合、その本文が原因 (スクリプトを取得できない / 地図 JSON が 404 / WebGL

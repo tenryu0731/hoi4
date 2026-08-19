@@ -12,9 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:scenario": "vitest run tests/scenario --testTimeout=600000",
-    "test:e2e": "npm run build && npm run build:single && playwright test",
-    "build:app": "vite build",
-    "build:single": "tsx tools/pack/single.ts"
+    "test:e2e": "npm run build && playwright test",
+    "build:app": "vite build"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
