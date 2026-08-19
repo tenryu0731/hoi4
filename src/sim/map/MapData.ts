@@ -55,6 +55,12 @@ export interface StateGeoJson {
   civilianFactories: number;
   militaryFactories: number;
   dockyards: number;
+  /**
+   * Shared civilian + military factory slots, scaled by population. A flat cap
+   * would be meaningless: one state is an entire nation on the country-level
+   * map and a handful of provinces once the map is subdivided.
+   */
+  buildingSlots: number;
 }
 
 export interface CityJson {

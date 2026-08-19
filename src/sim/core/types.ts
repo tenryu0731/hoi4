@@ -264,6 +264,8 @@ export interface StateRuntime {
   infrastructure: number;
   /** Remaining recruitable population, in thousands. */
   manpowerPool: number;
+  /** Shared civilian + military factory slots. */
+  buildingSlots: number;
 }
 
 // ---------------------------------------------------------------------------

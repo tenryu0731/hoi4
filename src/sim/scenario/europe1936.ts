@@ -228,6 +228,7 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       dockyards: s.dockyards,
       infrastructure: s.infrastructure,
       manpowerPool: s.manpower,
+      buildingSlots: s.buildingSlots,
     };
   });
 

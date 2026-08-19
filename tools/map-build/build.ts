@@ -415,14 +415,18 @@ function oneProvincePerNation(units: UnitLike[]): BuiltProvinces {
       neighbors: [], seaNeighbors: [],
     });
 
+    const manpower = Math.round(nation.population * 1000);
     states.push({
       id, name: nation.name, ownerTag: tag, provinces: [id],
-      manpower: Math.round(nation.population * 1000),
+      manpower,
       resources: nation.resources,
       infrastructure: nation.infrastructure,
       civilianFactories: nation.civilianFactories,
       militaryFactories: nation.militaryFactories,
       dockyards: nation.dockyards,
+      buildingSlots: buildingSlotsFor(
+        manpower, nation.civilianFactories + nation.militaryFactories,
+      ),
     });
   });
 
@@ -430,6 +434,16 @@ function oneProvincePerNation(units: UnitLike[]): BuiltProvinces {
   // Recomputed here from raw rings so it stays correct after simplification.
   computeLandAdjacency(units, provinceOfUnit, provinces);
   return { provinces, states, provinceOfUnit };
+}
+
+/**
+ * Factory slots a state offers. Population sets the ceiling, but a state never
+ * starts over-built: the floor is whatever industry it already has plus room to
+ * grow, so a scenario is never in an illegal position on day one.
+ */
+export function buildingSlotsFor(manpower: number, existing: number): number {
+  const byPopulation = Math.round(manpower / 1200);
+  return Math.max(6, existing + 4, Math.min(48, byPopulation));
 }
 
 /** Marks provinces adjacent when their source units share at least one arc. */
