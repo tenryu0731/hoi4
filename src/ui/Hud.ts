@@ -186,12 +186,19 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       sheet.classList.remove('is-open');
     } else {
       const panel = PANELS[openPanel];
-      setText(sheetTitle, panel.title);
+      setText(sheetTitle, panelTitle(panel.id));
       panel.build(game, sheetBody);
       panel.refresh?.(game, sheetBody);
       sheet.classList.add('is-open');
     }
     for (const b of navButtons) b.classList.toggle('is-active', b.dataset.panel === openPanel);
+  }
+
+  /** The province panel is titled with the place it is showing. */
+  function panelTitle(id: PanelId): string {
+    if (id !== 'province') return PANELS[id].title;
+    const sel = game.selection.province;
+    return sel === null ? PANELS.province.title : game.index.get(sel).name;
   }
 
   sheetClose.addEventListener('click', () => {
@@ -292,6 +299,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       } else if (openPanel === null || openPanel === 'province') {
         openPanel = null;
         togglePanel('province');
+        setText(sheetTitle, panelTitle('province'));
       } else if (openPanel === 'construction') {
         // The build panel is scoped to the selected state, so re-read it.
         PANELS.construction.build(game, sheetBody);

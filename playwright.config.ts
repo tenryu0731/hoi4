@@ -52,7 +52,10 @@ export default defineConfig({
   webServer: {
     command: 'npx vite preview --port 4173 --host 127.0.0.1',
     url: 'http://127.0.0.1:4173',
-    reuseExistingServer: true,
+    // Never reuse a server that is already running: it may be serving an older
+    // dist, and a visual-diff suite comparing a new baseline against a stale
+    // build reports differences that do not exist in the source.
+    reuseExistingServer: false,
     timeout: 60_000,
   },
 });

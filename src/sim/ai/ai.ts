@@ -123,7 +123,7 @@ function desiredMix(c: Country): [EquipmentType, number][] {
   return [...ground, ['fighter', AIR_SHARE]];
 }
 
-export function runEconomyAI(state: GameState, ctx: AIContext, c: Country): void {
+export function runEconomyAI(state: GameState, _ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
 
   // --- production lines ---------------------------------------------------
@@ -178,14 +178,13 @@ export function runEconomyAI(state: GameState, ctx: AIContext, c: Country): void
     if (score > bestScore) { bestScore = score; bestState = i; }
   }
   if (bestState >= 0) queueBuilding(state, c, bestState, kind);
-  void ctx;
 }
 
 // ---------------------------------------------------------------------------
 // Recruitment
 // ---------------------------------------------------------------------------
 
-export function runRecruitmentAI(state: GameState, ctx: AIContext, c: Country): void {
+export function runRecruitmentAI(state: GameState, _ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
   const home = c.capital;
   if (state.provinces[home]?.controller !== c.id) return;
@@ -218,7 +217,6 @@ export function runRecruitmentAI(state: GameState, ctx: AIContext, c: Country): 
     spawnDivision(state, c.id, templateId, home, equipped);
     return;
   }
-  void ctx;
 }
 
 // ---------------------------------------------------------------------------

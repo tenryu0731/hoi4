@@ -262,21 +262,27 @@ export class LabelLayer {
 
       // Label size is constant on screen, so its pixel width is independent of
       // zoom: width(local) * pxSize / atlasFontSize.
+      //
+      // Both sides of the fit test are rounded to whole pixels. Glyph metrics
+      // come from a canvas-rasterised atlas and vary by a fraction of a pixel
+      // between page loads; without rounding, a label sitting exactly on the
+      // threshold appears in one render and not the next, which is a visual
+      // regression the eye cannot see but a pixel diff can.
       const k = e.pxSize / e.baseSize;
-      let wPx = e.text.width * k;
+      let wPx = Math.round(e.text.width * k);
       let hPx = e.pxSize;
 
       if (fitToShape) {
-        const shapeWPx = e.shapeW * zoom;
-        const shapeHPx = e.shapeH * zoom;
+        const shapeWPx = Math.round(e.shapeW * zoom);
+        const shapeHPx = Math.round(e.shapeH * zoom);
         if (shapeHPx < hPx * 1.6) return false;
         // Allow shrinking to 62% before giving up, which keeps small countries
         // captioned a little longer as you zoom in.
-        const need = wPx / (shapeWPx * 0.88);
+        const need = wPx / Math.max(1, Math.round(shapeWPx * 0.88));
         if (need > 1) {
           if (need > 1 / 0.62) return false;
-          wPx /= need;
-          hPx /= need;
+          wPx = Math.round(wPx / need);
+          hPx = Math.round(hPx / need);
         }
       }
 

@@ -109,7 +109,10 @@ test.describe('touch input', () => {
     const selected = await page.evaluate(() => window.__game!.selection.province);
     expect(selected).toBe(pos.id);
     await expect(page.locator('.hud-sheet')).toHaveClass(/is-open/);
-    await expect(page.locator('.hud-sheet-title')).toHaveText('France');
+    // The sheet is titled with the place, and names its owner underneath.
+    const expected = await page.evaluate((id) => window.__game!.index.get(id).name, pos.id);
+    await expect(page.locator('.hud-sheet-title')).toHaveText(expected);
+    await expect(page.locator('.panel-sub')).toContainText('France');
   });
 
   test('a drag does not register as a tap', async ({ page }) => {
