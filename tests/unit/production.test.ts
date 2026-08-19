@@ -242,12 +242,34 @@ describe('construction', () => {
     const f = makeFixture();
     const ger = f.country('GER');
     ger.constructionQueue = [];
-    ger.economy.consumerGoodsRatio = 1;
     const stateId = f.index.get(ger.capital).stateId;
     queueBuilding(f.state, ger, stateId, 'civilian_factory');
-    runDays(f, 200);
+    // Consumer goods drift back toward the peacetime target each day, so pin
+    // the ratio rather than setting it once.
+    for (let i = 0; i < 200; i++) {
+      ger.economy.consumerGoodsRatio = 1;
+      tickEconomyDaily(f.state, { index: f.index });
+    }
     expect(ger.constructionQueue.length).toBe(1);
     expect(ger.constructionQueue[0].progress).toBe(0);
+  });
+
+  it('shifts to a war economy when fighting, and back again in peace', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const peacetime = ger.economy.consumerGoodsRatio;
+
+    ger.atWarWith.push(pol.id);
+    runDays(f, 400);
+    const wartime = ger.economy.consumerGoodsRatio;
+    expect(wartime).toBeLessThan(peacetime);
+    expect(freeCivilianFactories(ger)).toBeGreaterThan(0);
+
+    ger.atWarWith.length = 0;
+    runDays(f, 800);
+    // Demobilisation is slower than mobilisation, but it does happen.
+    expect(ger.economy.consumerGoodsRatio).toBeGreaterThan(wartime);
   });
 
   it('shares one slot pool between civilian and military factories', () => {

@@ -12,6 +12,7 @@ import {
 import {
   createGrainTexture, createOceanTexture, createReliefTexture, createVerticalRamp,
 } from './textures';
+import { NATIONS } from '../sim/scenario/nations';
 import { LabelLayer } from './layers/LabelLayer';
 import { UnitLayer } from './layers/UnitLayer';
 
@@ -179,7 +180,10 @@ export class MapRenderer {
     this.world.addChild(this.selectionLayer);
     this.world.addChild(this.cityLayer);
 
-    this.labels = new LabelLayer(this.index);
+    // Nation display names come from the scenario table rather than the map,
+    // which only stores tags.
+    const countryNames = new Map<string, string>(NATIONS.map((n) => [n.tag, n.name]));
+    this.labels = new LabelLayer(this.index, countryNames);
     this.world.addChild(this.labels.container);
 
     this.units = new UnitLayer(this.index);

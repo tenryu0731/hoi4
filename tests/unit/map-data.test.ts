@@ -200,18 +200,39 @@ describe('ProvinceIndex', () => {
     expect(checked).toBe(1600);
   });
 
-  it('finds a path between any two provinces', () => {
-    const ids = index.provinces.map((p) => p.id);
-    for (const a of ids) {
-      for (const b of ids) {
+  it('finds a valid path between every sampled pair of provinces', () => {
+    // All pairs is 100k searches on the province map, which is too slow for a
+    // suite meant to run after every change. A deterministic stride samples
+    // every province as both origin and destination without the quadratic cost.
+    const n = index.count;
+    const stride = 7;
+    let checked = 0;
+    for (let a = 0; a < n; a++) {
+      for (let k = 1; k <= 5; k++) {
+        const b = (a * stride + k * 31) % n;
         const path = index.path(a, b);
         expect(path, `${a}->${b}`).not.toBeNull();
         expect(path![0]).toBe(a);
         expect(path![path!.length - 1]).toBe(b);
         for (let i = 1; i < path!.length; i++) {
-          expect(index.areAdjacent(path![i - 1], path![i])).toBe(true);
+          expect(index.areAdjacent(path![i - 1], path![i]), `${a}->${b} step ${i}`).toBe(true);
         }
+        checked++;
       }
+    }
+    expect(checked).toBe(n * 5);
+  });
+
+  it('can reach the far corners of the map', () => {
+    const byTag = new Map(index.provinces.map((p) => [p.ownerTag, p]));
+    const corners: [string, string][] = [
+      ['POR', 'SOV'], ['ICE', 'TUR'], ['IRE', 'GRE'], ['NOR', 'SPR'],
+    ];
+    for (const [a, b] of corners) {
+      const pa = byTag.get(a);
+      const pb = byTag.get(b);
+      if (!pa || !pb) continue;
+      expect(index.path(pa.id, pb.id), `${a}->${b}`).not.toBeNull();
     }
   });
 

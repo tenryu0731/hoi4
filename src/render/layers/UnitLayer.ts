@@ -51,9 +51,22 @@ const COUNTER_MAX_PX = 34;
 const ZOOM_SMALL = 0.05;
 const ZOOM_LARGE = 0.28;
 
+/**
+ * Counter level of detail.
+ *
+ * Three hundred provinces means three hundred counters, and at continental zoom
+ * they cover the map completely -- the political situation, the front line and
+ * every place name disappear under a carpet of unit symbols. So counters
+ * aggregate to one per state as the camera pulls back, and vanish entirely at
+ * the widest view where the map itself is the information.
+ */
+const ZOOM_HIDE_COUNTERS = 0.055;
+const ZOOM_AGGREGATE_STATES = 0.13;
+
 export class UnitLayer {
   readonly container = new Container();
   private pool: Counter[] = [];
+  private anchors = new Map<number, ProvinceId>();
 
   constructor(private index: ProvinceIndex) {
     this.container.eventMode = 'none';
@@ -61,6 +74,21 @@ export class UnitLayer {
 
   /** Kept for symmetry with the other layers; counters read zoom per frame. */
   setZoom(_zoom: number): void {}
+
+  /** Largest province of a state, cached: it is the state's counter position. */
+  private stateAnchor(stateId: number): ProvinceId {
+    const cached = this.anchors.get(stateId);
+    if (cached !== undefined) return cached;
+    const members = this.index.data.states[stateId]?.provinces ?? [];
+    let best = members[0] ?? 0;
+    let bestArea = -1;
+    for (const id of members) {
+      const area = this.index.get(id).area;
+      if (area > bestArea) { bestArea = area; best = id; }
+    }
+    this.anchors.set(stateId, best);
+    return best;
+  }
 
   private acquire(i: number): Counter {
     while (this.pool.length <= i) {
@@ -81,7 +109,11 @@ export class UnitLayer {
 
   update(state: GameState, camera: Camera, elapsed: number): ScreenRect[] {
     const zoom = Math.max(1e-4, camera.zoom);
-    const stacks = this.collect(state, camera);
+    if (zoom < ZOOM_HIDE_COUNTERS) {
+      for (const c of this.pool) c.root.visible = false;
+      return [];
+    }
+    const stacks = this.collect(state, camera, zoom < ZOOM_AGGREGATE_STATES);
     // Counters hold a constant on-screen size, but a plate sized for a corps
     // view swamps a continental one, so the target pixel size ramps with zoom.
     const targetPx = COUNTER_MIN_PX +
@@ -120,7 +152,9 @@ export class UnitLayer {
     }
 
     for (let i = stacks.length; i < this.pool.length; i++) this.pool[i].root.visible = false;
-    return rects;
+    // Only claim space against labels when counters are per-province. While
+    // aggregated, place names matter more than exact unit positions.
+    return zoom < ZOOM_AGGREGATE_STATES ? [] : rects;
   }
 
   private draw(c: Counter, s: Stack, color: number): void {
@@ -157,30 +191,37 @@ export class UnitLayer {
     }
   }
 
-  /** Aggregates divisions into one stack per province, culled to the viewport. */
-  private collect(state: GameState, camera: Camera): Stack[] {
+  /**
+   * Aggregates divisions into stacks, culled to the viewport.
+   *
+   * When `byState` is set, every division in a state shares one counter placed
+   * on its largest province, which is what keeps a continental view readable.
+   */
+  private collect(state: GameState, camera: Camera, byState: boolean): Stack[] {
     const view = camera.visibleRect();
     const pad = 200 / Math.max(1e-4, camera.zoom);
     const byProvince = new Map<ProvinceId, Stack>();
 
     for (const d of state.divisions) {
       if (d.dead) continue;
-      const p = this.index.provinces[d.provinceId];
+      const home = this.index.provinces[d.provinceId];
+      const anchorId = byState ? this.stateAnchor(home.stateId) : d.provinceId;
+      const p = this.index.provinces[anchorId];
       if (p.centerX < view.minX - pad || p.centerX > view.maxX + pad) continue;
       if (p.centerY < view.minY - pad || p.centerY > view.maxY + pad) continue;
 
       const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
-      let stack = byProvince.get(d.provinceId);
+      let stack = byProvince.get(anchorId);
       if (!stack) {
         stack = {
-          province: d.provinceId, owner: d.owner, divisions: 0,
+          province: anchorId, owner: d.owner, divisions: 0,
           org: 0, strength: 0, armour: false, motorised: false, inCombat: false,
         };
-        byProvince.set(d.provinceId, stack);
+        byProvince.set(anchorId, stack);
       }
       // A province can hold units from several countries; the controller's
       // stack wins the counter so the map never shows two plates in one place.
-      if (stack.owner !== d.owner && d.owner === state.provinces[d.provinceId].controller) {
+      if (stack.owner !== d.owner && d.owner === state.provinces[anchorId].controller) {
         stack.owner = d.owner;
       }
       stack.divisions++;

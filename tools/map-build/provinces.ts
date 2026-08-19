@@ -245,6 +245,8 @@ interface RawProvince {
   area: number;
   centre: Pt;
   terrain: TerrainType;
+  /** Filled in by `nameProvinces`. */
+  name: string;
 }
 
 /**
@@ -367,6 +369,7 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
         area,
         centre,
         terrain: classifyTerrain(seed.lon, seed.lat, seed.pop),
+        name: '',
       });
       continue;
     }
@@ -405,6 +408,7 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
         area: cellArea,
         centre: cellCentre,
         terrain: classifyTerrain(seeds[i].lon, seeds[i].lat, seeds[i].pop),
+        name: '',
       });
       produced++;
     }
@@ -427,7 +431,10 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
     }
   }
 
-  // --- 3. Order provinces by nation, then geographically -------------------
+  // --- 3. Name the provinces that have no city of their own ----------------
+  nameProvinces(raw, cities);
+
+  // --- 4. Order provinces by nation, then geographically -------------------
   // Stable ids make save data and screenshot baselines survive a rebuild.
   const tagOrder = new Map(NATIONS.map((n, i) => [n.tag, i]));
   raw.sort((a, b) => {
@@ -493,7 +500,7 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
     });
     return {
       id,
-      name: p.seed.cityName ?? `${NATION_BY_TAG.get(p.tag)?.name ?? p.tag} ${id}`,
+      name: p.name,
       stateId: Math.max(0, stateOfProvince[id]),
       ownerTag: p.tag,
       terrain: p.terrain,
@@ -522,6 +529,61 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   return { provinces, states, provinceOfUnit };
 }
 
+/**
+ * Gives every province a place name.
+ *
+ * A province seeded on a city takes that city's name. The rest are named for
+ * the nearest real town with a compass qualifier, because "Sweden 282" tells a
+ * player nothing and breaks the illusion the map is working to create.
+ */
+function nameProvinces(raw: RawProvince[], cities: CityJson[]): void {
+  const used = new Map<string, number>();
+  const claim = (base: string): string => {
+    const n = used.get(base) ?? 0;
+    used.set(base, n + 1);
+    return n === 0 ? base : `${base} ${romanish(n)}`;
+  };
+
+  // Cities first, so they get the unqualified name.
+  for (const p of raw) {
+    if (p.seed.cityName) p.name = claim(p.seed.cityName);
+  }
+  for (const p of raw) {
+    if (p.name) continue;
+    let best: CityJson | null = null;
+    let bestD = Infinity;
+    for (const c of cities) {
+      const d = (c.x - p.centre[0]) ** 2 + (c.y - p.centre[1]) ** 2;
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    if (!best) {
+      p.name = claim(NATION_BY_TAG.get(p.tag)?.name ?? p.tag);
+      continue;
+    }
+    p.name = claim(`${compass(p.centre[0] - best.x, p.centre[1] - best.y)} ${best.name}`);
+  }
+}
+
+function compass(dx: number, dy: number): string {
+  // Screen y grows southward, matching the projection's flip.
+  const angle = Math.atan2(-dy, dx);
+  const octant = Math.round((angle * 4) / Math.PI);
+  switch (((octant % 8) + 8) % 8) {
+    case 0: return 'East';
+    case 1: return 'North-east';
+    case 2: return 'North';
+    case 3: return 'North-west';
+    case 4: return 'West';
+    case 5: return 'South-west';
+    case 6: return 'South';
+    default: return 'South-east';
+  }
+}
+
+function romanish(n: number): string {
+  return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][n - 1] ?? String(n + 1);
+}
+
 function flatten(ring: Ring, decimals = 1): number[] {
   const f = 10 ** decimals;
   const out = new Array<number>(ring.length * 2);
@@ -537,7 +599,7 @@ function stateName(raw: RawProvince[], group: number[], nationName: string, inde
   let best = group[0];
   for (const i of group) if (raw[i].seed.pop > raw[best].seed.pop) best = i;
   const city = raw[best].seed.cityName;
-  return city ? city : `${nationName} ${index + 1}`;
+  return city ?? raw[best].name ?? `${nationName} ${index + 1}`;
 }
 
 /**

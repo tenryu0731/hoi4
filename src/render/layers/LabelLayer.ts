@@ -18,7 +18,11 @@ import { PALETTE } from '../palette';
  * at once.
  */
 
+/** How far from its capital a province still counts as a nation's heartland. */
+const HOME_RADIUS_KM = 1500;
+
 export const FONT_COUNTRY = 'IF-Country';
+export const FONT_PROVINCE = 'IF-Province';
 export const FONT_CITY = 'IF-City';
 
 let fontsInstalled = false;
@@ -34,6 +38,17 @@ function installFonts(): void {
       fontWeight: 'bold',
       fill: 0xffffff,
       letterSpacing: 2,
+    },
+    chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], " -'.,()àáäâãåèéêëìíîïòóôöõùúûüçñßÀÁÄÂÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜÇÑ"],
+    resolution: 2,
+  });
+  BitmapFont.install({
+    name: FONT_PROVINCE,
+    style: {
+      fontFamily: 'Georgia, "Times New Roman", serif',
+      fontSize: 30,
+      fill: 0xffffff,
+      letterSpacing: 1,
     },
     chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], " -'.,()àáäâãåèéêëìíîïòóôöõùúûüçñßÀÁÄÂÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜÇÑ"],
     resolution: 2,
@@ -71,13 +86,17 @@ interface LabelEntry {
 export class LabelLayer {
   readonly container = new Container();
   private countryLabels: LabelEntry[] = [];
+  private provinceLabels: LabelEntry[] = [];
   private cityLabels: LabelEntry[] = [];
   private step = 0;
   private occupied = new Set<number>();
   /** Screen-space collision cell size in CSS pixels. */
   private static readonly CELL = 14;
 
-  constructor(private index: ProvinceIndex) {
+  constructor(
+    private index: ProvinceIndex,
+    private countryNames: Map<string, string> = new Map(),
+  ) {
     installFonts();
     this.container.eventMode = 'none';
     this.build();
@@ -96,22 +115,35 @@ export class LabelLayer {
     const text = new BitmapText({ text: value, style: { fontFamily: font } });
     text.anchor.set(0.5);
     text.tint = font === FONT_COUNTRY ? PALETTE.textPrimary : PALETTE.textCity;
+    if (font === FONT_PROVINCE) text.alpha = 0.88;
 
     this.container.addChild(shadow);
     this.container.addChild(text);
     into.push({
       text, shadow, worldX: x, worldY: y, minStep, pxSize, priority,
-      shapeW, shapeH, baseSize: font === FONT_COUNTRY ? 44 : 26,
+      shapeW, shapeH,
+      baseSize: font === FONT_COUNTRY ? 44 : font === FONT_PROVINCE ? 30 : 26,
     });
   }
 
   private build(): void {
+    // Country names first. Without them a zoomed-out map is a mosaic of a
+    // few hundred place names and no sense of who holds what.
+    for (const c of this.collectCountries()) {
+      this.makeLabel(
+        c.name.toUpperCase(), FONT_COUNTRY,
+        c.x, c.y, 0, 15, c.area,
+        c.width, c.height,
+        this.countryLabels,
+      );
+    }
+    // Province names take over as the map gets closer.
     for (const p of this.index.provinces) {
       this.makeLabel(
-        p.name.toUpperCase(), FONT_COUNTRY,
-        p.centerX, p.centerY, 0, 14, p.area,
+        p.name.toUpperCase(), FONT_PROVINCE,
+        p.centerX, p.centerY, 3, 10, p.area,
         p.bbox[2] - p.bbox[0], p.bbox[3] - p.bbox[1],
-        this.countryLabels,
+        this.provinceLabels,
       );
     }
     for (const c of this.index.data.cities) {
@@ -125,7 +157,82 @@ export class LabelLayer {
     // Draw order follows priority so that if two do overlap, the more important
     // one is on top rather than whichever happened to be built last.
     this.countryLabels.sort((a, b) => b.priority - a.priority);
+    this.provinceLabels.sort((a, b) => b.priority - a.priority);
     this.cityLabels.sort((a, b) => b.priority - a.priority);
+  }
+
+  /**
+   * One label anchor per nation, placed on the province closest to the
+   * area-weighted centre of its home territory. Anchoring on a real province
+   * guarantees the name lands on land rather than in a bay.
+   */
+  private collectCountries(): {
+    name: string; x: number; y: number; area: number; width: number; height: number;
+  }[] {
+    const byTag = new Map<string, { members: number[] }>();
+    for (const p of this.index.provinces) {
+      let acc = byTag.get(p.ownerTag);
+      if (!acc) { acc = { members: [] }; byTag.set(p.ownerTag, acc); }
+      acc.members.push(p.id);
+    }
+
+    // Capital cities give the display name and a better anchor than a colonial
+    // centroid, which for France sits in the Mediterranean.
+    const capitals = new Map<string, { name: string; x: number; y: number }>();
+    for (const c of this.index.data.cities) {
+      if (c.capitalOf) capitals.set(c.capitalOf, { name: c.name, x: c.x, y: c.y });
+    }
+
+    const out: { name: string; x: number; y: number; area: number; width: number; height: number }[] = [];
+    for (const [tag, acc] of byTag) {
+      const cap = capitals.get(tag);
+
+      // Only home territory decides where the name goes. Averaging in the
+      // colonies puts "United Kingdom" over Egypt and "France" in the Bay of
+      // Biscay, because that really is where the centre of those empires lies.
+      const home = cap
+        ? acc.members.filter((id) => {
+          const p = this.index.get(id);
+          return Math.hypot(p.centerX - cap.x, p.centerY - cap.y) <= HOME_RADIUS_KM;
+        })
+        : acc.members;
+      const pool = home.length > 0 ? home : acc.members;
+
+      let sx = 0;
+      let sy = 0;
+      let homeArea = 0;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const id of pool) {
+        const p = this.index.get(id);
+        sx += p.centerX * p.area;
+        sy += p.centerY * p.area;
+        homeArea += p.area;
+        minX = Math.min(minX, p.bbox[0]);
+        minY = Math.min(minY, p.bbox[1]);
+        maxX = Math.max(maxX, p.bbox[2]);
+        maxY = Math.max(maxY, p.bbox[3]);
+      }
+      const targetX = sx / Math.max(1, homeArea);
+      const targetY = sy / Math.max(1, homeArea);
+
+      let best = pool[0];
+      let bestD = Infinity;
+      for (const id of pool) {
+        const p = this.index.get(id);
+        const d = (p.centerX - targetX) ** 2 + (p.centerY - targetY) ** 2;
+        if (d < bestD) { bestD = d; best = id; }
+      }
+      const anchor = this.index.get(best);
+      out.push({
+        name: this.countryNames.get(tag) ?? tag,
+        x: anchor.centerX,
+        y: anchor.centerY,
+        area: homeArea,
+        width: maxX - minX,
+        height: maxY - minY,
+      });
+    }
+    return out;
   }
 
   setLod(step: number, _zoom: number): void {
@@ -186,6 +293,11 @@ export class LabelLayer {
     };
 
     for (const e of this.countryLabels) {
+      const ok = place(e, true);
+      e.text.visible = ok;
+      e.shadow.visible = ok;
+    }
+    for (const e of this.provinceLabels) {
       const ok = place(e, true);
       e.text.visible = ok;
       e.shadow.visible = ok;
