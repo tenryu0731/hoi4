@@ -444,7 +444,7 @@ function oneProvincePerNation(units: UnitLike[]): BuiltProvinces {
  */
 export function buildingSlotsFor(manpower: number, existing: number): number {
   const byPopulation = Math.round(manpower / 1200);
-  return Math.max(6, existing + 4, Math.min(48, byPopulation));
+  return Math.max(8, existing + 8, Math.min(64, byPopulation));
 }
 
 /** Marks provinces adjacent when their source units share at least one arc. */

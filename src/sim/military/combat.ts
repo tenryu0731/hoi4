@@ -33,7 +33,7 @@ import type { ProvinceIndex } from '../map/ProvinceIndex';
  */
 export const ORG_DAMAGE_K = 0.010;
 /** Strength removed per point of penetrating damage. */
-export const STR_DAMAGE_K = 0.06;
+export const STR_DAMAGE_K = 0.02;
 /**
  * Flat penalty on the attacker's output.
  *
@@ -46,7 +46,7 @@ export const ATTACKER_PENALTY = 0.9;
 /** Random spread applied to each side's damage each round. */
 export const COMBAT_JITTER = 0.10;
 /** Organisation recovered per hour, as a fraction of the maximum. */
-export const ORG_RECOVERY_PER_HOUR = 0.010;
+export const ORG_RECOVERY_PER_HOUR = 0.0075;
 /** Strength recovered per hour when in supply and out of combat. */
 export const STR_RECOVERY_PER_HOUR = 0.0015;
 /** Hours a division must recover after being forced to retreat. */
@@ -197,11 +197,17 @@ export function sideDamage(
 
   const hits = raw * modifier * pierced * roll;
   // Fire the defence absorbs still costs cohesion; only what gets through
-  // costs men and equipment. Organisation therefore falls at the same rate for
-  // both sides in an even fight, and the side that is bleeding strength loses
-  // the grind -- because lost strength means lost equipment, which feeds back
-  // into how hard it can hit next round.
-  const through = Math.max(0, hits - defender.defence);
+  // costs men and equipment.
+  //
+  // Proportional, not `hits - defence`. A flat subtraction is a step function:
+  // below the threshold an attack costs the defender literally nothing, above
+  // it the defender routs at full strength, and there is no ratio in between
+  // where a battle grinds. Measured, that made every even fight a hundred-day
+  // no-op and every 2:1 a bloodless walk-in -- so equipment was never consumed
+  // and the war never touched the economy. This form keeps defence meaningful
+  // (it always cuts the share getting through) while leaving no odds at which
+  // fire simply stops landing.
+  const through = hits * (hits / (hits + Math.max(1, defender.defence)));
 
   return {
     org: hits * ORG_DAMAGE_K,
