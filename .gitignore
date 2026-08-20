@@ -5,9 +5,11 @@ playwright-report
 .cache
 tools/.cache
 tests/e2e/__screenshots__/*.actual.png
-tests/e2e/__screenshots__/*.actual.png
 tests/e2e/__screenshots__/*.diff.png
 tests/e2e/__screenshots__/determinism-check.png
-# Throwaway screenshot drivers, written at the repo root so they resolve
-# @playwright/test. Never part of the project.
+# Throwaway Playwright drivers -- screenshots, layout probes, contrast
+# measurements. They are written at the repo root because that is the only
+# place @playwright/test resolves from, and dot-prefixed so they stay out of
+# the way. None of them are part of the project.
 *shot*.mjs
+/.*.mjs
