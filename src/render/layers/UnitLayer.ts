@@ -3,7 +3,7 @@ import { BitmapText, Container, Graphics } from 'pixi.js';
 import type { ProvinceIndex } from '../../sim/map/ProvinceIndex';
 import type { CountryId, GameState, ProvinceId } from '../../sim/core/types';
 import { Camera } from '../Camera';
-import { mix, rgbToHex } from '../palette';
+import { rgbToHex } from '../palette';
 import { FONT_CITY } from './LabelLayer';
 
 /**
@@ -28,6 +28,26 @@ interface Counter {
   count: BitmapText;
   /** Cached so a counter that has not changed skips its redraw. */
   key: string;
+  /**
+   * Which stack this pooled counter is currently showing, and where it was
+   * drawn last frame. A counter follows its stack across a province boundary
+   * rather than teleporting; when the pool slot is reassigned to a different
+   * stack it jumps, because interpolating between two unrelated armies would
+   * draw a unit sliding across countries it was never in.
+   */
+  stack: number;
+  x: number;
+  y: number;
+}
+
+/** An order the player is still dragging out; null once it lands or is cancelled. */
+export interface DragOrder {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  /** Province under the finger, or null where the drop would do nothing. */
+  target: number | null;
 }
 
 export interface ScreenRect {
@@ -58,6 +78,8 @@ const PLATE_H = 24;
 /** Ink used for every rim, shadow and symbol outline. */
 const INK = 0x0b0906;
 const SYMBOL = 0xf6f0e2;
+/** The counter face, identical for every nation. See `draw`. */
+const PLATE_FACE = 0x2b2d33;
 
 /** On-screen counter width in CSS pixels, ramped between these zoom levels. */
 const COUNTER_MIN_PX = 15;
@@ -89,6 +111,7 @@ export class UnitLayer {
   private anchors = new Map<number, ProvinceId>();
   private selectedProvince: ProvinceId | null = null;
   private neutral = false;
+  private drag: DragOrder | null = null;
 
   constructor(private index: ProvinceIndex) {
     this.container.eventMode = 'none';
@@ -112,6 +135,10 @@ export class UnitLayer {
    */
   setNeutral(neutral: boolean): void {
     this.neutral = neutral;
+  }
+
+  setDrag(drag: DragOrder | null): void {
+    this.drag = drag;
   }
 
   /** Largest province of a state, cached: it is the state's counter position. */
@@ -141,12 +168,12 @@ export class UnitLayer {
       root.addChild(plate, symbol, count);
       root.visible = false;
       this.counters.addChild(root);
-      this.pool.push({ root, plate, symbol, count, key: '' });
+      this.pool.push({ root, plate, symbol, count, key: '', stack: -1, x: 0, y: 0 });
     }
     return this.pool[i];
   }
 
-  update(state: GameState, camera: Camera, elapsed: number): ScreenRect[] {
+  update(state: GameState, camera: Camera, elapsed: number, dtMs = 16.667): ScreenRect[] {
     const zoom = Math.max(1e-4, camera.zoom);
     if (zoom < ZOOM_HIDE_COUNTERS) {
       for (const c of this.pool) c.root.visible = false;
@@ -154,6 +181,7 @@ export class UnitLayer {
       return [];
     }
     const byState = zoom < ZOOM_AGGREGATE_STATES;
+    const dtSeconds = Math.min(0.05, Math.max(0, dtMs) / 1000);
     const stacks = this.collect(state, camera, byState);
     // Counters hold a constant on-screen size, but a plate sized for a corps
     // view swamps a continental one, so the target pixel size ramps with zoom.
@@ -173,8 +201,23 @@ export class UnitLayer {
       const s = stacks[i];
       const c = this.acquire(i);
       const p = this.index.provinces[s.province];
+      const tx = p.centerX;
+      const ty = p.centerY - liftWorld;
+      if (c.stack !== s.province) {
+        // New occupant of this pool slot: place it, do not fly it in.
+        c.stack = s.province;
+        c.x = tx;
+        c.y = ty;
+      } else {
+        // Framerate-independent ease, so the follow looks the same at 30fps.
+        const k = 1 - Math.pow(0.001, dtSeconds);
+        c.x += (tx - c.x) * k;
+        c.y += (ty - c.y) * k;
+        // Snap once the remainder is under a pixel, so a counter never creeps.
+        if (Math.hypot(tx - c.x, ty - c.y) * zoom < 0.5) { c.x = tx; c.y = ty; }
+      }
       c.root.visible = true;
-      c.root.position.set(p.centerX, p.centerY - liftWorld);
+      c.root.position.set(c.x, c.y);
       c.root.scale.set(scale);
       rects.push({
         x: camera.worldToScreenX(p.centerX),
@@ -220,6 +263,7 @@ export class UnitLayer {
   private drawOrders(state: GameState, byState: boolean, zoom: number): void {
     const g = this.orders;
     g.clear();
+    this.drawDrag(g, zoom);
     if (byState) return;
 
     const width = 2.4 / zoom;
@@ -262,6 +306,46 @@ export class UnitLayer {
     }
   }
 
+  /**
+   * The order the finger is still holding.
+   *
+   * Dragging an army across the map used to produce no response at all until
+   * the finger lifted, which on a touch screen is indistinguishable from the
+   * gesture not having been recognised. The line follows the finger, a ring
+   * marks the province the order would land on, and a cross says the drop
+   * would do nothing.
+   */
+  private drawDrag(g: Graphics, zoom: number): void {
+    const d = this.drag;
+    if (!d) return;
+    const valid = d.target !== null;
+    const color = valid ? 0xf2d98a : 0xd8574a;
+    const w = 2.6 / zoom;
+
+    g.moveTo(d.fromX, d.fromY);
+    g.lineTo(d.toX, d.toY);
+    g.stroke({ color: INK, width: w * 2.2, alpha: 0.45, cap: 'round' });
+    g.moveTo(d.fromX, d.fromY);
+    g.lineTo(d.toX, d.toY);
+    g.stroke({ color, width: w, alpha: 0.95, cap: 'round' });
+
+    const r = 13 / zoom;
+    if (valid) {
+      const p = this.index.provinces[d.target!];
+      g.circle(p.centerX, p.centerY, r);
+      g.stroke({ color, width: w, alpha: 0.95 });
+      g.circle(p.centerX, p.centerY, r * 0.32);
+      g.fill({ color, alpha: 0.85 });
+    } else {
+      const k = r * 0.62;
+      g.moveTo(d.toX - k, d.toY - k);
+      g.lineTo(d.toX + k, d.toY + k);
+      g.moveTo(d.toX + k, d.toY - k);
+      g.lineTo(d.toX - k, d.toY + k);
+      g.stroke({ color, width: w * 1.2, alpha: 0.95, cap: 'round' });
+    }
+  }
+
   private draw(c: Counter, s: Stack, color: number, detailed: boolean): void {
     const g = c.plate;
     g.clear();
@@ -277,19 +361,34 @@ export class UnitLayer {
     g.roundRect(-hw, -hh, PLATE_W, PLATE_H, 4);
     g.fill({ color: INK });
 
-    // Face, in the national colour. Lifted well clear of the rim so the colour
-    // is legible as an identity rather than as a tint on black.
-    const face = mix(color, 0xffffff, 0.06);
+    // One plate material for every nation, with identity carried by a bar down
+    // the left edge instead of by the face.
+    //
+    // Painting the face in the national colour put the symbol at 1.28:1 against
+    // a pale nation and grey-on-grey over Germany -- and a German counter
+    // standing on German territory then had nothing but its frame separating
+    // it from the ground, which is why the frame had to be so heavy. On a
+    // constant dark face the symbol holds about 10:1 everywhere, and the
+    // colour still reads at a glance because it is the only chroma present.
     g.roundRect(-hw + 2, -hh + 2, PLATE_W - 4, PLATE_H - 4, 2.5);
-    g.fill({ color: face });
+    g.fill({ color: PLATE_FACE });
+
+    // Wide enough to carry a nation at 25 screen pixels. At a tenth of the
+    // plate the bar was there but not readable, and a map where every counter
+    // looks the same is worse than one where the symbol is hard to read.
+    const barW = 7;
+    g.roundRect(-hw + 2, -hh + 2, barW, PLATE_H - 4, 1.6);
+    g.fill({ color });
+    g.rect(-hw + 2 + barW, -hh + 2, 0.9, PLATE_H - 4);
+    g.fill({ color: INK, alpha: 0.75 });
 
     if (detailed) {
       // Two flat bands instead of a gradient: a real gradient fill costs a
       // texture upload per counter, and at this size the seam is invisible.
-      g.rect(-hw + 2, -hh + 2, PLATE_W - 4, (PLATE_H - 4) * 0.42);
-      g.fill({ color: 0xffffff, alpha: 0.1 });
-      g.rect(-hw + 2, hh - 2 - (PLATE_H - 4) * 0.34, PLATE_W - 4, (PLATE_H - 4) * 0.34);
-      g.fill({ color: 0x000000, alpha: 0.16 });
+      g.rect(-hw + 2 + 7, -hh + 2, PLATE_W - 4 - 7, (PLATE_H - 4) * 0.42);
+      g.fill({ color: 0xffffff, alpha: 0.09 });
+      g.rect(-hw + 2 + 7, hh - 2 - (PLATE_H - 4) * 0.34, PLATE_W - 4 - 7, (PLATE_H - 4) * 0.34);
+      g.fill({ color: 0x000000, alpha: 0.18 });
 
       // Bevel: light along the top and left, shadow along the bottom and right.
       g.moveTo(-hw + 2.5, hh - 3);
@@ -348,35 +447,34 @@ export class UnitLayer {
    */
   private drawSymbol(sy: Graphics, kind: SymbolKind, detailed: boolean): void {
     sy.clear();
-    const w = PLATE_W / 2 - 7.5;
+    const w = PLATE_W / 2 - 10;
     const h = PLATE_H / 2 - 7;
     const cy = -1.2;
+    const cx = 3.4;
 
     const path = (): void => {
       switch (kind) {
         case 'armour':
-          sy.ellipse(0, cy, w, h * 0.92);
+          sy.ellipse(cx, cy, w, h * 0.92);
           break;
         case 'mountain':
           // Two peaks, the mountain-troops symbol.
-          sy.moveTo(-w, cy + h);
-          sy.lineTo(-w * 0.3, cy - h);
-          sy.lineTo(w * 0.35, cy + h);
-          sy.moveTo(w * 0.35, cy + h);
-          sy.lineTo(w * 0.35, cy + h);
-          sy.moveTo(-w * 0.1, cy + h * 0.1);
-          sy.lineTo(w * 0.45, cy - h);
-          sy.lineTo(w, cy + h);
+          // A filled peak: the NATO mountain symbol is solid, and two open
+          // chevrons at this size read as a chevron, not as mountains.
+          sy.moveTo(cx - w, cy + h);
+          sy.lineTo(cx - w * 0.1, cy - h);
+          sy.lineTo(cx + w * 0.8, cy + h);
+          sy.lineTo(cx - w, cy + h);
           break;
         case 'artillery':
-          sy.circle(0, cy, Math.min(w, h) * 0.62);
+          sy.circle(cx, cy, Math.min(w, h) * 0.62);
           break;
         default:
           // Infantry and motorised share the crossed diagonals.
-          sy.moveTo(-w, cy - h);
-          sy.lineTo(w, cy + h);
-          sy.moveTo(w, cy - h);
-          sy.lineTo(-w, cy + h);
+          sy.moveTo(cx - w, cy - h);
+          sy.lineTo(cx + w, cy + h);
+          sy.moveTo(cx + w, cy - h);
+          sy.lineTo(cx - w, cy + h);
       }
     };
 
@@ -388,18 +486,24 @@ export class UnitLayer {
     sy.stroke({ color: SYMBOL, width: detailed ? 2 : 2.4, cap: 'round', join: 'round' });
 
     if (kind === 'artillery') {
-      sy.circle(0, cy, Math.min(w, h) * 0.62);
+      sy.circle(cx, cy, Math.min(w, h) * 0.62);
+      sy.fill({ color: SYMBOL });
+    }
+    if (kind === 'mountain') {
+      sy.moveTo(cx - w, cy + h);
+      sy.lineTo(cx - w * 0.1, cy - h);
+      sy.lineTo(cx + w * 0.8, cy + h);
       sy.fill({ color: SYMBOL });
     }
     if (kind === 'motorised') {
       // The wheel that separates motorised from foot infantry.
-      sy.circle(0, cy, 2.4);
+      sy.circle(cx, cy, 2.4);
       sy.fill({ color: INK });
-      sy.circle(0, cy, 2.4);
+      sy.circle(cx, cy, 2.4);
       sy.stroke({ color: SYMBOL, width: 1.4 });
     }
     if (kind === 'armour') {
-      sy.ellipse(0, cy, w * 0.42, h * 0.34);
+      sy.ellipse(cx, cy, w * 0.42, h * 0.34);
       sy.stroke({ color: SYMBOL, width: 1.2, alpha: 0.8 });
     }
   }

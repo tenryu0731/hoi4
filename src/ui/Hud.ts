@@ -43,6 +43,39 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/**
+ * Eases a displayed number toward its true value and flashes it on change.
+ *
+ * Resources and factory counts used to rewrite instantly, which reads as a
+ * spreadsheet recalculating rather than as a country running. The tween is
+ * display-only -- the simulation value is never what is shown mid-flight -- and
+ * it snaps rather than creeping once it is within a whole unit, so a settled
+ * figure always matches the state exactly.
+ */
+class NumberTween {
+  private shown = NaN;
+
+  constructor(private node: HTMLElement, private format: (v: number) => string) {}
+
+  set(target: number, dtMs: number): void {
+    if (!Number.isFinite(this.shown)) {
+      this.shown = target;
+      setText(this.node, this.format(target));
+      return;
+    }
+    if (this.shown === target) return;
+    const k = 1 - Math.pow(0.004, Math.min(0.05, dtMs / 1000));
+    const next = this.shown + (target - this.shown) * k;
+    this.shown = Math.abs(target - next) < 1 ? target : next;
+    setText(this.node, this.format(this.shown));
+    this.node.classList.remove('is-changing');
+    // Reading offsetWidth restarts the animation; without it a value that
+    // changes every frame never re-triggers the flash.
+    void this.node.offsetWidth;
+    this.node.classList.add('is-changing');
+  }
+}
+
 function setText(node: HTMLElement, value: string): void {
   if (node.textContent !== value) node.textContent = value;
 }
@@ -280,6 +313,14 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     while (toasts.childElementCount > 4) toasts.firstElementChild?.remove();
   }
 
+  const tweens = {
+    pp: new NumberTween(statNodes.pp, formatNumber),
+    mp: new NumberTween(statNodes.mp, formatNumber),
+    civ: new NumberTween(statNodes.civ, (v) => String(Math.round(v))),
+    mil: new NumberTween(statNodes.mil, (v) => String(Math.round(v))),
+    div: new NumberTween(statNodes.div, (v) => String(Math.round(v))),
+  };
+
   // --- per-frame refresh ---------------------------------------------------
   let lastSpeed = -1;
   let lastProvince: number | null | undefined;
@@ -298,11 +339,12 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     setText(countryName, country(me.tag));
     setText(countryTag, me.tag);
 
-    setText(statNodes.pp, formatNumber(me.economy.politicalPower));
-    setText(statNodes.mp, formatNumber(me.economy.manpower * 1000));
-    setText(statNodes.civ, String(me.economy.civilianFactories));
-    setText(statNodes.mil, String(me.economy.militaryFactories));
-    setText(statNodes.div, String(me.stats.divisionCount));
+    const dt = game.lastFrameMs;
+    tweens.pp.set(me.economy.politicalPower, dt);
+    tweens.mp.set(me.economy.manpower * 1000, dt);
+    tweens.civ.set(me.economy.civilianFactories, dt);
+    tweens.mil.set(me.economy.militaryFactories, dt);
+    tweens.div.set(me.stats.divisionCount, dt);
 
     for (const r of RESOURCE_TYPES) {
       const flow = me.economy.resources[r];

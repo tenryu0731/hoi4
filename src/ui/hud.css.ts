@@ -37,6 +37,13 @@ export const HUD_CSS = `
   font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
   min-width: 4ch; text-align: center;
 }
+/* A brief tint as a figure moves, so a change is noticed without the player
+   having to be looking at that number when it happens. */
+.hud-stat-v.is-changing { animation: hud-flash 520ms ease-out; }
+@keyframes hud-flash {
+  0% { color: var(--accent); }
+  100% { color: inherit; }
+}
 .hud-stat-l { font-size: 10px; color: var(--ink-dim); letter-spacing: 0; text-align: center; }
 
 .hud-clock { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: 0 0 auto; }

@@ -47,6 +47,8 @@ export class Game {
   state: GameState;
   selection: SelectionState = { province: null, divisions: [] };
 
+  /** Milliseconds the last frame took, for display-only easing in the HUD. */
+  lastFrameMs = 16.667;
   private rafId = 0;
   private lastFrameTime = 0;
   private running = false;
@@ -60,7 +62,11 @@ export class Game {
   openPanel?: (id: string | null) => void;
 
   /** Set by the order-drag gesture so the HUD can draw a preview arrow. */
-  dragOrder: { fromX: number; fromY: number; toX: number; toY: number } | null = null;
+  dragOrder: {
+    fromX: number; fromY: number; toX: number; toY: number;
+    /** Province under the finger, or null where the drop would do nothing. */
+    target: ProvinceId | null;
+  } | null = null;
 
   private constructor(index: ProvinceIndex, renderer: MapRenderer, state: GameState) {
     this.index = index;
@@ -153,8 +159,10 @@ export class Game {
 
   /** One frame of work. Exposed so tests can drive the loop deterministically. */
   tickFrame(dtMs: number): void {
+    this.lastFrameMs = dtMs;
     this.time.advance(dtMs);
     this.input.update(dtMs);
+    this.renderer.setDragOrder(this.dragOrder);
     this.renderer.update(dtMs, this.state);
     for (const fn of this.listeners) fn();
   }
@@ -269,12 +277,12 @@ export class Game {
       this.dragOrder = null;
       return;
     }
-    this.dragOrder = { fromX, fromY, toX, toY };
+    const slackWorld = 22 / Math.max(1e-4, this.renderer.camera.zoom);
+    const target = this.index.pickNearest(toX, toY, slackWorld);
+    this.dragOrder = { fromX, fromY, toX, toY, target };
     if (phase !== 'end') return;
     this.dragOrder = null;
 
-    const slackWorld = 22 / Math.max(1e-4, this.renderer.camera.zoom);
-    const target = this.index.pickNearest(toX, toY, slackWorld);
     if (target === null || this.selection.divisions.length === 0) return;
     this.issue({ t: 'moveDivisions', divisions: [...this.selection.divisions], target });
   }

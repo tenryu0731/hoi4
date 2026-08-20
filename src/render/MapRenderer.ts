@@ -14,7 +14,7 @@ import {
 } from './textures';
 import { NATIONS } from '../sim/scenario/nations';
 import { LabelLayer } from './layers/LabelLayer';
-import { UnitLayer } from './layers/UnitLayer';
+import { UnitLayer, type DragOrder } from './layers/UnitLayer';
 import { country } from '../ui/strings';
 
 /**
@@ -353,6 +353,11 @@ export class MapRenderer {
   // Colouring
   // -------------------------------------------------------------------------
 
+  /** The in-progress order drag, so the map can show where it would land. */
+  setDragOrder(drag: DragOrder | null): void {
+    this.units.setDrag(drag);
+  }
+
   setMapMode(mode: MapMode): void {
     this.units.setNeutral(mode !== 'political');
     if (this.mode === mode) return;
@@ -478,7 +483,8 @@ export class MapRenderer {
     this.drawSelection();
     let reserved: readonly { x: number; y: number; w: number; h: number }[] = [];
     if (state) {
-      reserved = this.units.update(state, cam, this.staticMode ? 0 : this.elapsed);
+      reserved = this.units.update(state, cam, this.staticMode ? 0 : this.elapsed,
+        this.staticMode ? 1e6 : dtMs);
       this.drawFrontline(state);
     }
     this.labels.update(cam, reserved);
