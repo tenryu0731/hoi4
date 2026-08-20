@@ -87,7 +87,7 @@ export function collectAlerts(game: Game): Alert[] {
   // working, so it outranks anything merely idle.
   if (me.economy.fuelRatio < 0.95) {
     out.push({
-      id: 'fuel', icon: 'resource-oil',
+      id: 'fuel', icon: 'ui-fuel',
       text: `${Math.round(me.economy.fuelRatio * 100)}%`, title: UI.alertFuel,
       panel: 'production', urgent: true,
     });

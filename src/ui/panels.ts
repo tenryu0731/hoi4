@@ -569,9 +569,13 @@ export const diplomacyPanel: Panel = {
       swatch.style.background = `rgb(${c.color[0]},${c.color[1]},${c.color[2]})`;
       swatch.addEventListener('error', () => { swatch.removeAttribute('src'); });
 
+      // The ideology belongs on the detail line, not welded to the name. On one
+      // nowrap line beside three 44px buttons, 27 of 30 rows were clipped at
+      // 360px -- worst case 171px of text in a 52px box, cutting
+      // チェコスロバキア to チェコス.
       const main = el('div', 'panel-row-main');
       main.append(
-        el('div', 'panel-row-title', `${country(c.tag)}　${IDEOLOGY[c.ideology]}`),
+        el('div', 'panel-row-title', country(c.tag)),
         el('div', 'panel-row-sub', ''),
       );
 
@@ -617,7 +621,7 @@ export const diplomacyPanel: Panel = {
       if (!row) continue;
       const sub = row.querySelector<HTMLElement>('.panel-row-sub');
       if (!sub) continue;
-      const parts: string[] = [];
+      const parts: string[] = [IDEOLOGY[c.ideology]];
       if (c.capitulated) parts.push('降伏');
       else if (me.atWarWith.includes(c.id)) parts.push('交戦中');
       else if (c.factionId !== null && c.factionId === me.factionId) parts.push('同盟');

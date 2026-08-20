@@ -167,6 +167,15 @@ export const UI_ICONS: Record<string, string> = {
     '<path d="M16 3.2L29 13.4l-3.4 2.6L16 8.6 6.4 16 3 13.4z"/>' +
     '<path d="M16 12.4L29 22.6l-3.4 2.6L16 17.8l-9.6 7.4L3 22.6z"/>',
   ),
+  // A jerrycan. Fuel borrowed the oil-barrel glyph, so the same picture meant
+  // 燃料 600 in one row of the top bar and 石油 0 two rows below it.
+  fuel: solid(
+    '<path d="M6.4 7.2h15.2v21.2H6.4z' +
+    'M9.2 11.4h9.6v2.4H9.2z"/>' +
+    '<path d="M9 3.6h10v3H9z"/>' +
+    '<path d="M22.6 9.6h3.2c1.6 0 2.8 1.3 2.8 2.9v9.2c0 1.2-1 2.2-2.2 2.2' +
+    'h-1.6v-2.8h1v-8.6c0-.1-.1-.2-.2-.2h-3z"/>',
+  ),
   // Scales. Stability is the government's balance, and borrowing the
   // victory-point star for it said "this province is worth something".
   stability: solid(

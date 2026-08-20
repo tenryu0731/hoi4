@@ -145,7 +145,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   addStat('stab', UI.stability, 'ui-stability');
   addStat('ws', UI.warSupport, 'ui-war_support');
   addStat('mp', UI.manpower, 'ui-manpower');
-  addStat('fuel', UI.fuel, 'resource-oil');
+  addStat('fuel', UI.fuel, 'ui-fuel');
   addStat('civ', UI.civFactories, 'ui-factory');
   addStat('mil', UI.milFactories, 'ui-military_factory');
   addStat('div', UI.divisions, 'ui-army');
@@ -312,9 +312,20 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const measureTop = () => {
     root.style.setProperty('--hud-top-h', `${Math.round(top.getBoundingClientRect().height)}px`);
   };
-  const topObserver = new ResizeObserver(measureTop);
+  // The strip of map a player can actually see, which is what the map-mode
+  // column has to fit inside: the sheet covers everything below it.
+  function measureBand(): void {
+    const topH = top.getBoundingClientRect().height;
+    const sheetTop = sheet.classList.contains('is-open')
+      ? sheet.getBoundingClientRect().top
+      : window.innerHeight - 56;
+    root.style.setProperty('--map-band', `${Math.max(60, Math.round(sheetTop - topH))}px`);
+  }
+
+  const topObserver = new ResizeObserver(() => { measureTop(); measureBand(); });
   topObserver.observe(top);
   measureTop();
+  measureBand();
 
   // -------------------------------------------------------------------------
   // Behaviour
@@ -338,6 +349,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       sheet.classList.add('is-open');
     }
     for (const b of navButtons) b.classList.toggle('is-active', b.dataset.panel === openPanel);
+    root.classList.toggle('is-panel-open', openPanel !== null);
+    measureBand();
   }
 
   // Panels that are not nav destinations open from inside another panel: the
@@ -481,6 +494,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
     for (const r of RESOURCE_TYPES) {
       const flow = me.economy.resources[r];
+      // A chip that has read zero since 1936 is not information. Six of the
+      // fourteen in the top bar were permanently empty, taking a whole row.
+      resNodes[r]?.parentElement?.classList.toggle(
+        'is-idle', flow.produced === 0 && flow.consumed === 0,
+      );
       const node = resNodes[r]!;
       // The shortfall, not the balance. A shortage used to render as a red
       // zero -- production and consumption net out at the point supply is
