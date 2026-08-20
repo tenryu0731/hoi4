@@ -13,6 +13,7 @@ import {
   createGrainTexture, createOceanTexture, createReliefTexture, createVerticalRamp,
 } from './textures';
 import { NATIONS } from '../sim/scenario/nations';
+import { supplyCapacity } from '../sim/military/supply';
 import { LabelLayer } from './layers/LabelLayer';
 import { UnitLayer, type DragOrder } from './layers/UnitLayer';
 import { country } from '../ui/strings';
@@ -406,13 +407,26 @@ export class MapRenderer {
     }
   }
 
+  /** The richest province on the map, so the victory ramp has a real top. */
+  private get maxVp(): number {
+    if (this.maxVpCache === 0) {
+      for (const p of this.index.provinces) {
+        if (p.vp > this.maxVpCache) this.maxVpCache = p.vp;
+      }
+      this.maxVpCache = Math.max(1, this.maxVpCache);
+    }
+    return this.maxVpCache;
+  }
+
+  private maxVpCache = 0;
+
   private tintKeyFor(id: ProvinceId, state: GameState | null): string {
     if (!state) return `${this.mode}:static`;
     const p = state.provinces[id];
     switch (this.mode) {
       case 'political': return `p${p.controller}:${p.owner}`;
       case 'state': return `st${p.controller}:${this.index.provinces[id].stateId}`;
-      case 'supply': return `s${Math.round(p.supply * 20)}`;
+      case 'supply': return `s${Math.round(p.supply * 20)}:${this.index.provinces[id].stateId}`;
       case 'terrain': return 't';
       case 'resource': return 'r';
       case 'victory': return `v${p.controller}`;
@@ -429,10 +443,25 @@ export class MapRenderer {
         const total = Object.values(st.resources).reduce((s, v) => s + (v ?? 0), 0);
         return ramp(Math.min(1, total / 45), RESOURCE_RAMP);
       }
-      case 'supply':
-        return state ? ramp(state.provinces[id].supply, SUPPLY_RAMP) : PALETTE.landBase;
+      case 'supply': {
+        // Capacity times shortage. Shortage alone is a wartime quantity -- a
+        // country at peace is at full supply everywhere -- so on its own this
+        // mode was a single flat colour over the whole map until the first war
+        // broke out, four years into a twelve-year campaign. Multiplying by
+        // what the roads can carry means the mode always shows the logistics
+        // network, and shows the war eating into it once there is one.
+        const capacity = supplyCapacity(this.index, id);
+        const shortage = state ? state.provinces[id].supply : 1;
+        return ramp(capacity * shortage, SUPPLY_RAMP);
+      }
       case 'victory':
-        return ramp(Math.min(1, geo.vp / 60), VICTORY_RAMP);
+        // Against the largest prize on the map, on a square-root curve. The
+        // divisor used to be a flat 60 while the richest province on the board
+        // is worth 34, so the whole map lived in the bottom half of the ramp
+        // -- and since two thirds of provinces are worth 1 to 5, they lived in
+        // the bottom twelfth of it and were indistinguishable. The curve
+        // spends the ramp where the provinces actually are.
+        return ramp(Math.sqrt(geo.vp / this.maxVp), VICTORY_RAMP);
       case 'state': {
         // Every state a distinguishable shade of whoever holds it. Provinces
         // of one state share a tone, so the administrative tier reads as

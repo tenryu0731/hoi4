@@ -242,6 +242,24 @@ const BASE_THROUGHPUT = 1.6;
  * which feeds the effectiveness and attrition paths that already exist, and
  * gives infrastructure and the supply map mode something to say.
  */
+/**
+ * What this province could move forward if nothing were stacked on it, as a
+ * fraction of the most any province in the game can carry.
+ *
+ * Exposed because the supply map mode needs something to say in peacetime.
+ * Shortage is a wartime quantity by design -- countries at peace sit at full
+ * supply at home -- so for the first four years of a campaign the mode was one
+ * flat colour over the whole of Europe, which reads as a broken screen rather
+ * than as good news. Capacity is the standing fact underneath it: where the
+ * roads are, and therefore where an offensive can be fed.
+ */
+export const MAX_THROUGHPUT = BASE_THROUGHPUT + 5 * THROUGHPUT_PER_INFRASTRUCTURE;
+
+export function supplyCapacity(index: ProvinceIndex, province: ProvinceId): number {
+  const infra = index.data.states[index.get(province).stateId]?.infrastructure ?? 1;
+  return (BASE_THROUGHPUT + infra * THROUGHPUT_PER_INFRASTRUCTURE) / MAX_THROUGHPUT;
+}
+
 function applyThroughput(state: GameState, index: ProvinceIndex): void {
   for (let i = 0; i < state.provinces.length; i++) {
     const p = state.provinces[i];
