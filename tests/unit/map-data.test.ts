@@ -293,3 +293,49 @@ describe('ProvinceIndex', () => {
     expect(index.distance(4, 4)).toBe(0);
   });
 });
+
+/**
+ * Shared boundaries.
+ *
+ * The front line is drawn along them, so a pair of neighbours that reports no
+ * shared geometry is a stretch of front that silently does not exist.
+ */
+describe('shared borders', () => {
+  it('recovers a boundary for most neighbouring pairs', () => {
+    let pairs = 0;
+    let withGeometry = 0;
+    for (const p of index.provinces) {
+      for (const nb of p.neighbors) {
+        if (nb < p.id) continue;
+        pairs++;
+        if (index.sharedBorder(p.id, nb).length > 0) withGeometry++;
+      }
+    }
+    expect(pairs).toBeGreaterThan(400);
+    // Not all of them: the subdivision leaves pairs that meet at a single
+    // corner, and the strait links are adjacency across water. Neither has a
+    // boundary to draw, so the front line simply has nothing to say there.
+    expect(withGeometry / pairs).toBeGreaterThan(0.7);
+  });
+
+  it('agrees with itself whichever province is asked first', () => {
+    const pair = (() => {
+      for (const p of index.provinces) {
+        for (const nb of p.neighbors) {
+          if (nb > p.id && index.sharedBorder(p.id, nb).length > 0) return [p.id, nb];
+        }
+      }
+      throw new Error('no pair shares a boundary');
+    })();
+    const forward = index.sharedBorder(pair[0], pair[1]).flat().length;
+    const backward = index.sharedBorder(pair[1], pair[0]).flat().length;
+    expect(forward).toBeGreaterThan(0);
+    expect(backward).toBeGreaterThan(0);
+  });
+
+  it('returns nothing for provinces that do not touch', () => {
+    const a = index.provinces.find((q) => q.ownerTag === 'POR')!;
+    const b = index.provinces.find((q) => q.ownerTag === 'FIN')!;
+    expect(index.sharedBorder(a.id, b.id)).toEqual([]);
+  });
+});

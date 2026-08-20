@@ -88,6 +88,7 @@ export class UnitLayer {
   private pool: Counter[] = [];
   private anchors = new Map<number, ProvinceId>();
   private selectedProvince: ProvinceId | null = null;
+  private neutral = false;
 
   constructor(private index: ProvinceIndex) {
     this.container.eventMode = 'none';
@@ -99,6 +100,18 @@ export class UnitLayer {
 
   setSelection(id: ProvinceId | null): void {
     this.selectedProvince = id;
+  }
+
+  /**
+   * Drops national colouring outside the political map.
+   *
+   * A terrain or supply view is a single ramp the player is reading for one
+   * variable; three hundred counters in thirty national colours sit on top of
+   * it arguing for a different one. Neutral plates keep the units locatable
+   * without competing with the mode they are drawn over.
+   */
+  setNeutral(neutral: boolean): void {
+    this.neutral = neutral;
   }
 
   /** Largest province of a state, cached: it is the state's counter position. */
@@ -175,8 +188,8 @@ export class UnitLayer {
         h: ((targetPx * PLATE_H) / PLATE_W + 10) * (byState ? 0.8 : 1),
       });
 
-      const color = rgbToHex(state.countries[s.owner].color);
-      const key = `${color}|${s.divisions}|${s.kind}|${Math.round(s.org * 10)}` +
+      const color = this.neutral ? 0x4a4d55 : rgbToHex(state.countries[s.owner].color);
+      const key = `${color}|${this.neutral}|${s.divisions}|${s.kind}|${Math.round(s.org * 10)}` +
         `|${Math.round(s.strength * 6)}|${s.inCombat}|${s.selected}|${detailed}`;
       if (c.key !== key) {
         c.key = key;
