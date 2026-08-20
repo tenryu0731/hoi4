@@ -1,6 +1,6 @@
 import type {
-  Army, ArmyId, Commander, CommanderId, CountryId, Division, DivisionId, GameState,
-  ProvinceId,
+  Army, ArmyId, Commander, CommanderId, CommanderTrait, CountryId, Division, DivisionId,
+  GameState, ProvinceId,
 } from '../core/types';
 
 /**
@@ -47,11 +47,26 @@ export interface CommandModifiers {
   planningSpeed: number;
   /** Added to the ceiling the planning bonus may reach. */
   maxPlanningBonus: number;
+  /** Multiplier on how deep this division may dig in. */
   entrenchment: number;
+  /**
+   * Traits in force over this division, the general's and half-weighted ones
+   * from the field marshal alike.
+   *
+   * Handed out as a set rather than pre-multiplied into numbers because most
+   * of them are conditional on something this module cannot see -- whether the
+   * division is armoured, whether it is landing from the sea, what month it
+   * is -- and folding them into a single figure here is what left six of the
+   * ten traits computing nothing at all.
+   */
+  traits: ReadonlySet<CommanderTrait>;
 }
+
+const NO_TRAITS: ReadonlySet<CommanderTrait> = new Set();
 
 export const NO_COMMAND: CommandModifiers = {
   attack: 1, defence: 1, supplyUse: 1, planningSpeed: 1, maxPlanningBonus: 0, entrenchment: 1,
+  traits: NO_TRAITS,
 };
 
 /** Lazily created, the way the research and focus runtimes create theirs. */
@@ -122,6 +137,10 @@ export function overloadScale(state: GameState, army: Army, commander: Commander
 function applyCommander(
   into: CommandModifiers, c: Commander, scale: number,
 ): void {
+  // Traits count while the officer has any authority left at all; they are
+  // his reputation, and reputation does not thin out with paperwork the way
+  // his attention does.
+  if (scale > 0) for (const t of c.traits) (into.traits as Set<CommanderTrait>).add(t);
   into.attack += c.attack * ATTACK_PER_LEVEL * scale;
   into.defence += c.defence * DEFENCE_PER_LEVEL * scale;
   into.supplyUse -= c.logistics * LOGISTICS_PER_LEVEL * scale;
@@ -148,7 +167,7 @@ export function commandModifiers(state: GameState, division: Division): CommandM
   const army = armyById(state, division.armyId);
   if (!army) return NO_COMMAND;
 
-  const mods: CommandModifiers = { ...NO_COMMAND };
+  const mods: CommandModifiers = { ...NO_COMMAND, traits: new Set<CommanderTrait>() };
   const general = commanderById(state, army.commander);
   if (general) applyCommander(mods, general, overloadScale(state, army, general));
 

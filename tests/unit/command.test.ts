@@ -92,6 +92,7 @@ describe('the chain of command', () => {
     const mods = commandModifiers(f.state, div);
     expect(mods).toEqual({
       attack: 1, defence: 1, supplyUse: 1, planningSpeed: 1, maxPlanningBonus: 0, entrenchment: 1,
+      traits: new Set(),
     });
   });
 

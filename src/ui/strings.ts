@@ -136,6 +136,8 @@ export const UI = {
   organisation: '組織率',
   strength: '兵力',
   supplyLevel: '補給',
+  entrenched: '塹壕',
+  winter: '厳冬',
   noDivisions: '師団がありません。',
   templates: '師団テンプレート',
   recruit: '編成',

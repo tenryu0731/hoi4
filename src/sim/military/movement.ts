@@ -1,4 +1,17 @@
 import { effectiveTemplate, techModifiers } from '../research';
+import { commandModifiers } from './command';
+import {
+  WINTER_ATTRITION_PER_DAY, WINTER_SPECIALIST_RELIEF, winterSeverity,
+} from './weather';
+
+/** Levels a division may dig in to before a defensive general raises the cap. */
+export const MAX_ENTRENCHMENT = 4;
+/** What a panzer general adds to the speed of the armour he leads. */
+export const PANZER_LEADER_SPEED = 0.1;
+/** What an amphibious specialist adds to the order his men land in. */
+export const NAVAL_INVADER_ORG = 0.3;
+/** Defence added per level dug in. */
+export const ENTRENCHMENT_PER_LEVEL = 0.05;
 import { TERRAIN } from '../core/data';
 import type {
   CountryId, Division, DivisionTemplate, GameState, ProvinceId,
@@ -59,6 +72,10 @@ export function canEnterFreely(state: GameState, country: CountryId, province: P
 // ---------------------------------------------------------------------------
 
 export function placeDivision(state: GameState, d: Division, province: ProvinceId): void {
+  // Ground is only prepared by holding it. Everything a division dug is left
+  // behind the moment it steps into the next province, which is the whole
+  // reason entrenchment favours the side that does not have to move.
+  if (d.provinceId !== province) d.entrenchment = 0;
   const from = state.provinces[d.provinceId];
   if (from) {
     const i = from.divisions.indexOf(d.id);
@@ -346,7 +363,13 @@ export function movementSpeed(
   const infraFactor = 0.6 + (infra / 5) * 0.6;
   const supplyFactor = 0.5 + 0.5 * Math.min(1, d.supplyLevel);
   const factor = Math.max(MIN_SPEED_FACTOR, terrain.speed * infraFactor * supplyFactor);
-  return tpl.speedKmh * factor * KM_PER_HOUR_SCALE;
+  // A panzer general gets his armour moving faster than the book says, which
+  // is the only thing the trait is famous for.
+  const cmd = commandModifiers(state, d);
+  const led = cmd.traits.has('panzer_leader')
+    && tpl.battalions.some((b) => b === 'light_armor' || b === 'medium_armor')
+    ? 1 + PANZER_LEADER_SPEED : 1;
+  return tpl.speedKmh * factor * KM_PER_HOUR_SCALE * led;
 }
 
 function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): void {
@@ -372,7 +395,12 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
     // Ashore, and disorganised. Without this an amphibious assault is strictly
     // better than a land attack, because it arrives where the enemy is not.
     const tplNow = effectiveTemplate(state, d.owner, templateOf(state, d));
-    const kept = Math.min(0.9, LANDING_ORG_KEPT * techModifiers(state, d.owner).landingOrg);
+    // An officer who has done this before lands his men in better order.
+    const practised = commandModifiers(state, d).traits.has('naval_invader')
+      ? 1 + NAVAL_INVADER_ORG : 1;
+    const kept = Math.min(
+      0.9, LANDING_ORG_KEPT * techModifiers(state, d.owner).landingOrg * practised,
+    );
     d.org = Math.min(d.org, tplNow.maxOrg * kept);
   }
   const controller = state.provinces[next].controller;
@@ -426,6 +454,38 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
  * been mauled slowly returns to strength as factories deliver, which is the
  * link between the economy and the front.
  */
+/**
+ * A day of digging, and a day of winter.
+ *
+ * Entrenchment grows a level a day while a division holds still and is not in
+ * a battle -- men under fire are not improving their positions -- to a cap the
+ * defensive-doctrine trait raises. Winter takes strength off anything standing
+ * in the cold, which is the reason the date on the clock matters when you
+ * choose to start something.
+ */
+export function tickConditionsDaily(
+  state: GameState, index: ProvinceIndex,
+): void {
+  for (const d of state.divisions) {
+    if (d.dead) continue;
+    const mods = commandModifiers(state, d);
+
+    if (d.combatId === null && d.path.length === 0) {
+      const cap = MAX_ENTRENCHMENT * mods.entrenchment;
+      d.entrenchment = Math.min(cap, d.entrenchment + 1);
+    }
+
+    let winter = winterSeverity(state, index, d.provinceId);
+    if (winter > 0) {
+      if (mods.traits.has('winter_specialist')) winter *= 1 - WINTER_SPECIALIST_RELIEF;
+      const tpl = effectiveTemplate(state, d.owner, templateOf(state, d));
+      const bite = WINTER_ATTRITION_PER_DAY * winter;
+      d.hp = Math.max(0, d.hp - tpl.maxHp * bite);
+      d.org = Math.max(0, d.org - tpl.maxOrg * bite * 0.5);
+    }
+  }
+}
+
 export function tickReinforcementDaily(state: GameState): void {
   for (const d of state.divisions) {
     if (d.dead) continue;

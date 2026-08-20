@@ -195,6 +195,14 @@ export interface Division {
   /** 0..1 progress toward the next province in `path`. */
   moveProgress: number;
   combatId: CombatId | null;
+  /**
+   * Days spent dug in where it stands, in whole levels.
+   *
+   * Reset the moment the division enters a new province, so ground is only
+   * prepared by holding it. This is what makes striking early cheaper than
+   * striking late, and what a defensive general is for.
+   */
+  entrenchment: number;
   /** Set when the division has been destroyed; kept so ids stay stable. */
   dead: boolean;
   /** Hours the unit must spend recovering before it may attack again. */
@@ -220,17 +228,25 @@ export interface Combat {
 
 export type CommanderRank = 'general' | 'field_marshal';
 
-export type CommanderTrait =
-  | 'organiser'
-  | 'logistics_wizard'
-  | 'defensive_doctrine'
-  | 'fast_planner'
-  | 'thorough_planner'
-  | 'panzer_leader'
-  | 'infantry_leader'
-  | 'trickster'
-  | 'winter_specialist'
-  | 'naval_invader';
+/**
+ * Declared as a list rather than a bare union so the set exists at runtime and
+ * a test can walk it. Six of these once computed nothing at all while being
+ * printed on the officer's card, and a union cannot be enumerated to catch
+ * that.
+ */
+export const COMMANDER_TRAITS = [
+  'organiser',
+  'logistics_wizard',
+  'defensive_doctrine',
+  'fast_planner',
+  'thorough_planner',
+  'panzer_leader',
+  'infantry_leader',
+  'trickster',
+  'winter_specialist',
+  'naval_invader',
+] as const;
+export type CommanderTrait = (typeof COMMANDER_TRAITS)[number];
 
 /**
  * A general or a field marshal.

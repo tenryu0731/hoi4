@@ -1,5 +1,9 @@
 import { effectiveTemplate, techModifiers } from '../research';
 import { armyById, commandModifiers } from './command';
+import { ENTRENCHMENT_PER_LEVEL } from './movement';
+import {
+  WINTER_ATTACK_PENALTY, WINTER_SPECIALIST_RELIEF, winterSeverity,
+} from './weather';
 import { TERRAIN } from '../core/data';
 import { jitter } from '../core/rng';
 import type {
@@ -143,17 +147,60 @@ interface SideStats {
   engaged: Division[];
 }
 
+/** What a trait is worth where it applies. */
+const TRAIT_BONUS = 0.1;
+
+/** True when armour is what this formation is built around. */
+function isArmoured(tpl: DivisionTemplate): boolean {
+  return tpl.battalions.some((b) => b === 'light_armor' || b === 'medium_armor');
+}
+
+/** True when this formation marches: the infantry a foot general knows. */
+function isFootborne(tpl: DivisionTemplate): boolean {
+  const foot = tpl.battalions.filter((b) => b === 'infantry' || b === 'mountaineers').length;
+  return foot * 2 > tpl.battalions.length;
+}
+
 /** The preparation bonus this division's army has banked, if it has one. */
 function planningBonus(state: GameState, d: Division): number {
   return armyById(state, d.armyId)?.planning ?? 0;
 }
 
 /**
+ * Whether an officer on this side sees through the other's preparation.
+ *
+ * The trickster's counter is resolved once for the battle rather than per
+ * round, because a plan that is read is read; rolling it hourly would make it
+ * a small permanent discount instead of an event.
+ */
+function countersPlan(state: GameState, ids: number[]): boolean {
+  for (const id of ids) {
+    const d = state.divisions[id];
+    if (!d || d.dead) continue;
+    if (commandModifiers(state, d).traits.has('trickster')) {
+      // Keyed off the combat's own province and start hour so the answer is
+      // stable for the life of the battle and identical on every machine.
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Commits divisions up to the province's combat width. Units are committed
  * best-first, so a stack of broken formations does not crowd out fresh ones.
  */
+function sideHasTrait(state: GameState, ids: number[], trait: 'winter_specialist'): boolean {
+  for (const id of ids) {
+    const d = state.divisions[id];
+    if (d && !d.dead && commandModifiers(state, d).traits.has(trait)) return true;
+  }
+  return false;
+}
+
 function collectSide(
   state: GameState, ids: number[], width: number, attacking: boolean,
+  ignorePlanning = false,
 ): SideStats {
   const out: SideStats = {
     softAttack: 0, hardAttack: 0, defence: 0, breakthrough: 0,
@@ -182,12 +229,31 @@ function collectSide(
     // force fights exactly as it did before the chain of command existed.
     const cmd = commandModifiers(state, d);
     // Preparation only helps the side going forward; a defender's advantage is
-    // entrenchment, which is a different bonus entirely.
-    const plan = attacking ? 1 + planningBonus(state, d) : 1;
-    out.softAttack += tpl.softAttack * eff * cmd.attack * plan;
-    out.hardAttack += tpl.hardAttack * eff * cmd.attack * plan;
-    out.defence += (attacking ? tpl.breakthrough * cmd.attack : tpl.defense * cmd.defence) * eff;
-    out.breakthrough += tpl.breakthrough * eff * cmd.attack;
+    // entrenchment, applied below.
+    const plan = attacking && !ignorePlanning ? 1 + planningBonus(state, d) : 1;
+
+    // Traits that depend on what the division actually is, which is why they
+    // are settled here rather than folded into a single number upstream.
+    let attackMod = cmd.attack;
+    let defenceMod = cmd.defence;
+    let breakthroughMod = cmd.attack;
+    if (cmd.traits.has('panzer_leader') && isArmoured(tpl)) {
+      breakthroughMod += TRAIT_BONUS;
+    }
+    if (cmd.traits.has('infantry_leader') && isFootborne(tpl)) {
+      attackMod += TRAIT_BONUS;
+      defenceMod += TRAIT_BONUS;
+    }
+    // Dug in, and only while holding: an attacker gets nothing for the
+    // trenches it is walking out of.
+    const dug = attacking ? 1 : 1 + d.entrenchment * ENTRENCHMENT_PER_LEVEL;
+
+    out.softAttack += tpl.softAttack * eff * attackMod * plan;
+    out.hardAttack += tpl.hardAttack * eff * attackMod * plan;
+    out.defence += (attacking
+      ? tpl.breakthrough * breakthroughMod
+      : tpl.defense * defenceMod * dug) * eff;
+    out.breakthrough += tpl.breakthrough * eff * breakthroughMod;
     out.hardness += tpl.hardness * tpl.width;
     out.armor = Math.max(out.armor, tpl.armor);
     out.piercing = Math.max(out.piercing, tpl.piercing);
@@ -221,10 +287,25 @@ export function sideDamage(
   // and the war never touched the economy. This form keeps defence meaningful
   // (it always cuts the share getting through) while leaving no odds at which
   // fire simply stops landing.
-  const through = hits * (hits / (hits + Math.max(1, defender.defence)));
+  const share = hits / (hits + Math.max(1, defender.defence));
+  const through = hits * share;
+
+  // Cohesion damage answers to defence too, which it did not before: org is
+  // what decides who holds the province, and it was computed from raw fire
+  // alone. So a division dug in four levels deep, in mountains, under a
+  // defensive general, lost 12% fewer men and exactly as much organisation --
+  // it made losing cheaper and did not make holding likelier. Terrain,
+  // entrenchment and every defensive trait in the game were decorative.
+  //
+  // Damped rather than proportional, on purpose. Running org off `through`
+  // directly would let a strong enough defence stop an attack from costing
+  // anything at all, which is the step-function failure the strength formula
+  // above was written to avoid. At its floor defence still concedes 40% of the
+  // cohesion damage, so there remain no odds at which an attack simply stops.
+  const ORG_DEFENCE_FLOOR = 0.4;
 
   return {
-    org: hits * ORG_DAMAGE_K,
+    org: hits * ORG_DAMAGE_K * (ORG_DEFENCE_FLOOR + (1 - ORG_DEFENCE_FLOOR) * share),
     strength: through * STR_DAMAGE_K,
   };
 }
@@ -266,14 +347,30 @@ export function resolveCombatRound(
   const att = collectSide(state, combat.attackers, width, true);
   const def = collectSide(state, combat.defenders, width, false);
 
+  // A trickster on the defending side reads the attack: the preparation the
+  // attacker spent weeks banking counts for nothing here.
+  if (countersPlan(state, combat.defenders)) {
+    const attWithoutPlan = collectSide(state, combat.attackers, width, true, true);
+    att.softAttack = attWithoutPlan.softAttack;
+    att.hardAttack = attWithoutPlan.hardAttack;
+  }
+
   if (att.engaged.length === 0) return { ended: true, attackerWon: false };
   if (def.engaged.length === 0) return { ended: true, attackerWon: true };
 
   const fort = state.provinces[combat.province].fortLevel;
   // Air support is the one technology branch that acts on the battle rather
   // than on the units in it, so it multiplies the side modifier.
+  // Winter is felt by whoever is doing the attacking, which is the historical
+  // shape of it: holding a line in the snow is miserable, crossing one is
+  // ruinous. Attrition on both sides is applied daily elsewhere.
+  let winter = winterSeverity(state, ctx.index, combat.province);
+  if (winter > 0 && sideHasTrait(state, combat.attackers, 'winter_specialist')) {
+    winter *= 1 - WINTER_SPECIALIST_RELIEF;
+  }
   const attackerMod = terrain.attackMod * ATTACKER_PENALTY
     * (1 - Math.min(0.6, fort * 0.12))
+    * (1 - WINTER_ATTACK_PENALTY * winter)
     * techModifiers(state, combat.attackerCountry).airSupport;
   const defenderMod = terrain.defenceMod
     * techModifiers(state, combat.defenderCountry).airSupport;

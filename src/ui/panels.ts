@@ -10,6 +10,8 @@ import {
 } from '../sim/core/types';
 import { deriveTemplate } from '../sim/scenario/europe1936';
 import { canQueueBuilding } from '../sim/economy/production';
+import { ENTRENCHMENT_PER_LEVEL } from '../sim/military/movement';
+import { winterSeverity } from '../sim/military/weather';
 import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
 import { availableFocuses } from '../sim/focus';
 import {
@@ -728,7 +730,21 @@ export const provincePanel: Panel = {
       const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
       const org = tpl ? Math.round((d.org / tpl.maxOrg) * 100) : 0;
       const str = tpl ? Math.round((d.hp / tpl.maxHp) * 100) : 0;
-      setText(row, `${UI.organisation} ${org}% · ${UI.strength} ${str}% · ${UI.supplyLevel} ${Math.round(d.supplyLevel * 100)}%`);
+      const parts = [
+        `${UI.organisation} ${org}%`,
+        `${UI.strength} ${str}%`,
+        `${UI.supplyLevel} ${Math.round(d.supplyLevel * 100)}%`,
+      ];
+      // Only when they apply. A line of zeroes for conditions that are not in
+      // force is noise on a phone; a division that has dug in, or one standing
+      // in the snow, is worth a word.
+      if (d.entrenchment > 0) {
+        const bonus = Math.round(d.entrenchment * ENTRENCHMENT_PER_LEVEL * 100);
+        parts.push(`${UI.entrenched} +${bonus}%`);
+      }
+      const cold = winterSeverity(state, game.index, d.provinceId);
+      if (cold > 0.15) parts.push(`${UI.winter} ${Math.round(cold * 100)}%`);
+      setText(row, parts.join(' · '));
     }
   },
 };

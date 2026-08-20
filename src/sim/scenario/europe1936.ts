@@ -474,6 +474,7 @@ export function spawnDivision(
     path: [],
     moveProgress: 0,
     combatId: null,
+    entrenchment: 0,
     dead: false,
     retreatCooldown: 0,
   };

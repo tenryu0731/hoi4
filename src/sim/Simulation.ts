@@ -24,7 +24,7 @@ import {
   tickJustificationsDaily, tickTensionMonthly,
 } from './diplomacy/diplomacy';
 import {
-  orderMove, stopDivision, tickMilitaryHourly, tickReinforcementDaily,
+  orderMove, stopDivision, tickConditionsDaily, tickMilitaryHourly, tickReinforcementDaily,
 } from './military/movement';
 import { tickSupplyDaily } from './military/supply';
 import {
@@ -286,6 +286,7 @@ export class Simulation {
       tickCommanderExperienceDaily(state);
       tickSupplyDaily(state, this.index);
       tickEconomyDaily(state, this.ctx);
+      tickConditionsDaily(state, this.index);
       tickReinforcementDaily(state);
       tickResearchDaily(state);
       // After the economy so the consumer-goods ceiling clamps the drift rather
