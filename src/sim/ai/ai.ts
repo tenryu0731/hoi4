@@ -398,8 +398,65 @@ function standingOnTheDefensive(state: GameState, c: Country): boolean {
   return state.clock.totalDays - joined < PHONEY_WAR_DAYS;
 }
 
+/**
+ * Writes the AI's intent onto its armies.
+ *
+ * The chain of command was player-only: measured over four ten-year campaigns,
+ * 0 of 128,783 army-days carried an order, so `frontProvinces` was empty for
+ * every AI formation in the game and every one of them was pinned to the
+ * half-rate planning fallback -- mean planning 0.193 against a ceiling of
+ * 0.330. A bonus the human collects at twice the rate is a difficulty setting
+ * nobody chose.
+ *
+ * The AI still moves its own divisions: that loop is tuned around garrison
+ * budgets and re-order suppression that the generic spreader does not model,
+ * and two controllers issuing movement on the same day would thrash. What the
+ * order buys is the thing that was actually missing -- a declared front, and
+ * the preparation that goes with holding one.
+ */
+function declareArmyIntent(state: GameState, ctx: AIContext, c: Country): void {
+  const armies = (state.armies ?? []).filter(
+    (a) => a.owner === c.id && !a.isArmyGroup && a.divisions.length > 0,
+  );
+  if (armies.length === 0) return;
+
+  const enemy = c.atWarWith
+    .map((id) => state.countries[id])
+    .filter((e) => !e.capitulated)
+    .sort((a, b) => b.stats.victoryPoints - a.stats.victoryPoints || a.id - b.id)[0];
+
+  if (!enemy) {
+    // At peace an army holds what it is standing on rather than nothing.
+    for (const army of armies) {
+      const held = army.divisions
+        .map((id) => state.divisions.find((d) => d.id === id))
+        .filter((d): d is NonNullable<typeof d> => !!d && !d.dead)
+        .map((d) => d.provinceId);
+      army.order = held.length > 0 ? { kind: 'garrison', provinces: [...new Set(held)] } : null;
+    }
+    return;
+  }
+
+  const attacking = !standingOnTheDefensive(state, c);
+  // Land objectives only: an amphibious operation is not something an army
+  // order can express, and the AI's own loop handles those.
+  const targets = attacking
+    ? frontTargets(state, ctx, c).filter((t) => !t.overseas).slice(0, 4).map((t) => t.province)
+    : [];
+  armies.forEach((army, i) => {
+    // The first formation holds the line whatever else is happening; the rest
+    // press, which is the same split the division loop below makes.
+    const press = attacking && targets.length > 0 && i > 0;
+    army.order = press
+      ? { kind: 'offensive', targets }
+      : { kind: 'front', against: enemy.id };
+  });
+}
+
 export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
+
+  declareArmyIntent(state, ctx, c);
 
   const available = state.divisions.filter(
     (d) => !d.dead && d.owner === c.id && d.combatId === null,

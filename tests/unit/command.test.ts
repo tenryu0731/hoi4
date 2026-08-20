@@ -309,6 +309,32 @@ describe('battle plans', () => {
   });
 });
 
+describe('the AI in the chain of command', () => {
+  it('declares a front for its armies instead of leaving them planless', () => {
+    // Measured before this existed, over four ten-year campaigns: 0 of 128,783
+    // army-days carried an order, so every AI formation was pinned to the
+    // half-rate planning fallback at a mean of 0.193. A preparation bonus the
+    // human collects at twice the rate is a difficulty setting nobody chose.
+    const f = makeFixture();
+    const sim = new Simulation(f.state, f.index);
+    const time = new TimeEngine(f.state.clock.totalHours);
+    time.on((c) => sim.tick(c));
+    time.step(24 * 365 * 5);
+
+    const aiArmies = (f.state.armies ?? []).filter(
+      (a) => !a.isArmyGroup && a.divisions.length > 0 && f.state.countries[a.owner].isAI,
+    );
+    expect(aiArmies.length).toBeGreaterThan(4);
+    const withOrder = aiArmies.filter((a) => a.order !== null);
+    expect(withOrder.length / aiArmies.length).toBeGreaterThan(0.8);
+    // And the front it declared is real, not an empty list.
+    const atWar = withOrder.filter((a) => f.state.countries[a.owner].atWarWith.length > 0);
+    if (atWar.length > 0) {
+      expect(atWar.some((a) => a.frontProvinces.length > 0)).toBe(true);
+    }
+  }, 90_000);
+});
+
 describe('reinforcements', () => {
   it('folds a division that belongs to nobody into an army with room', () => {
     const f = makeFixture();

@@ -219,6 +219,13 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
       continue;
     }
 
+    // An AI army declares its front so that the preparation and the front
+    // bookkeeping are real, but keeps moving its own divisions: its loop is
+    // tuned around garrison budgets and re-order suppression this spreader
+    // does not model, and two controllers issuing movement on the same day
+    // would leave divisions walking back and forth.
+    const spread = !state.countries[army.owner].isAI;
+
     let front: ProvinceId[] = [];
     switch (army.order.kind) {
       case 'front':
@@ -226,15 +233,15 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
         // A named enemy we no longer touch anywhere leaves the army facing
         // whoever else is shooting at us, rather than standing idle.
         if (front.length === 0) front = hostileFront(state, ctx.index, army.owner);
-        assignToFront(state, ctx, army, front);
+        if (spread) assignToFront(state, ctx, army, front);
         break;
       case 'garrison':
         front = army.order.provinces.filter((p) => state.provinces[p]?.controller === army.owner);
-        assignToFront(state, ctx, army, front);
+        if (spread) assignToFront(state, ctx, army, front);
         break;
       case 'offensive':
         front = army.order.targets;
-        pressOffensive(state, ctx, army, front);
+        if (spread) pressOffensive(state, ctx, army, front);
         break;
     }
     army.frontProvinces = front;
