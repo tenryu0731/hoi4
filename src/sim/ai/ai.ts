@@ -14,6 +14,7 @@ import {
 } from '../diplomacy/diplomacy';
 import { orderMove } from '../military/movement';
 import { canChangeLaw, changeLaw } from '../politics/politics';
+import { fuelRatio } from '../economy/fuel';
 import { LAW_COST } from '../politics/lawData';
 import { spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY } from '../scenario/europe1936';
 import {
@@ -146,8 +147,12 @@ function desiredMix(c: Country): [EquipmentType, number][] {
       demand.set(eq, (demand.get(eq) ?? 0) + need * EQUIPMENT[eq].cost * share);
     }
   };
-  add(infantry, 1 - ARMOUR_FRACTION);
-  add(armour, ARMOUR_FRACTION);
+  // Tanks a country cannot fuel are worse than the infantry it did not build:
+  // they cost steel and rubber and then move at half speed. A country running
+  // dry stops laying down armour until it has taken an oilfield.
+  const armourShare = ARMOUR_FRACTION * fuelRatio(c);
+  add(infantry, 1 - armourShare);
+  add(armour, armourShare);
 
   // Anything a template needs but the calculation missed still gets a line.
   for (const eq of requiredEquipment(c)) {
@@ -234,7 +239,8 @@ export function runRecruitmentAI(state: GameState, _ctx: AIContext, c: Country):
   // Keying the choice to the division count alone deadlocks: a country that
   // cannot afford a tank never raises the division that would move the count
   // past the armour slot, so it raises nothing at all, forever.
-  const wantArmour = c.major && c.stats.divisionCount % 5 === 4;
+  const wantArmour = c.major && c.stats.divisionCount % 5 === 4
+    && fuelRatio(c) > 0.5;
   const order = wantArmour
     ? [TEMPLATE_ARMOUR, TEMPLATE_INFANTRY]
     : [TEMPLATE_INFANTRY, TEMPLATE_ARMOUR];

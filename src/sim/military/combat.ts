@@ -1,6 +1,7 @@
 import { effectiveTemplate, techModifiers } from '../research';
 import { armyById, commandModifiers } from './command';
 import { ENTRENCHMENT_PER_LEVEL } from './movement';
+import { DRY_HARD_ATTACK, fuelPenalty } from '../economy/fuel';
 import {
   WINTER_ATTACK_PENALTY, WINTER_SPECIALIST_RELIEF, winterSeverity,
 } from './weather';
@@ -248,12 +249,17 @@ function collectSide(
     // trenches it is walking out of.
     const dug = attacking ? 1 : 1 + d.entrenchment * ENTRENCHMENT_PER_LEVEL;
 
+    // Fuel: the armoured half of a formation's firepower is what runs dry.
+    // Its rifles keep working, which is why this multiplies hard attack and
+    // breakthrough and leaves soft attack alone.
+    const fuel = fuelPenalty(tpl, state.countries[d.owner].economy.fuelRatio, DRY_HARD_ATTACK);
+
     out.softAttack += tpl.softAttack * eff * attackMod * plan;
-    out.hardAttack += tpl.hardAttack * eff * attackMod * plan;
+    out.hardAttack += tpl.hardAttack * eff * attackMod * plan * fuel;
     out.defence += (attacking
-      ? tpl.breakthrough * breakthroughMod
+      ? tpl.breakthrough * breakthroughMod * fuel
       : tpl.defense * defenceMod * dug) * eff;
-    out.breakthrough += tpl.breakthrough * eff * breakthroughMod;
+    out.breakthrough += tpl.breakthrough * eff * breakthroughMod * fuel;
     out.hardness += tpl.hardness * tpl.width;
     out.armor = Math.max(out.armor, tpl.armor);
     out.piercing = Math.max(out.piercing, tpl.piercing);

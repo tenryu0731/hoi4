@@ -145,6 +145,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   addStat('stab', UI.stability, 'ui-stability');
   addStat('ws', UI.warSupport, 'ui-war_support');
   addStat('mp', UI.manpower, 'ui-manpower');
+  addStat('fuel', UI.fuel, 'resource-oil');
   addStat('civ', UI.civFactories, 'ui-factory');
   addStat('mil', UI.milFactories, 'ui-military_factory');
   addStat('div', UI.divisions, 'ui-army');
@@ -445,6 +446,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     div: new NumberTween(statNodes.div, (v) => String(Math.round(v))),
     stab: new NumberTween(statNodes.stab, (v) => `${Math.round(v)}%`),
     ws: new NumberTween(statNodes.ws, (v) => `${Math.round(v)}%`),
+    fuel: new NumberTween(statNodes.fuel, (v) => String(Math.round(v))),
   };
 
   // --- per-frame refresh ---------------------------------------------------
@@ -474,6 +476,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     syncAlerts();
     tweens.stab.set(me.stability * 100, dt);
     tweens.ws.set(me.warSupport * 100, dt);
+    tweens.fuel.set(me.economy.fuel, dt);
+    statNodes.fuel.classList.toggle('is-short', me.economy.fuelRatio < 0.999);
 
     for (const r of RESOURCE_TYPES) {
       const flow = me.economy.resources[r];

@@ -46,6 +46,8 @@ export const UI = {
   navDiplomacy: '外交',
   closePanel: 'パネルを閉じる',
   navPolitics: '政治',
+  fuel: '燃料',
+  alertFuel: '燃料が不足しています。機甲・自動車化部隊が動けません',
   alertIdleFactories: '民需工場が遊んでいます。建設を指示してください',
   alertIdleResearch: '研究枠が空いています',
   alertNoFocus: '国家方針を選んでいません',

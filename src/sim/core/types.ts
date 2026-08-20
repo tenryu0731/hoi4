@@ -107,6 +107,15 @@ export interface Economy {
   resources: Record<ResourceType, ResourceFlow>;
   manpower: number;
   politicalPower: number;
+  /** Fuel in store; see sim/economy/fuel. */
+  fuel: number;
+  /**
+   * How much of yesterday's fuel demand was met, 0..1.
+   *
+   * Cached here so movement and combat see the same figure within a tick
+   * without either of them walking the division list again.
+   */
+  fuelRatio: number;
   /** Cached: civilian factories actually available for construction. */
   freeCivilianFactories: number;
 }
@@ -158,6 +167,8 @@ export interface DivisionTemplate {
   hardness: number;
   speedKmh: number;
   supplyUse: number;
+  /** Daily fuel draw; zero for a formation that marches. */
+  fuelUse: number;
   /** Combat width consumed in a battle. */
   width: number;
   equipmentNeed: Partial<Record<EquipmentType, number>>;

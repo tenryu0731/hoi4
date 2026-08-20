@@ -1,5 +1,6 @@
 import { effectiveTemplate, techModifiers } from '../research';
 import { commandModifiers } from './command';
+import { DRY_SPEED, fuelPenalty } from '../economy/fuel';
 import {
   WINTER_ATTRITION_PER_DAY, WINTER_SPECIALIST_RELIEF, winterSeverity,
 } from './weather';
@@ -369,7 +370,9 @@ export function movementSpeed(
   const led = cmd.traits.has('panzer_leader')
     && tpl.battalions.some((b) => b === 'light_armor' || b === 'medium_armor')
     ? 1 + PANZER_LEADER_SPEED : 1;
-  return tpl.speedKmh * factor * KM_PER_HOUR_SCALE * led;
+  // A dry tank has to be pushed. Only formations that burn fuel feel this.
+  const dry = fuelPenalty(tpl, state.countries[d.owner].economy.fuelRatio, DRY_SPEED);
+  return tpl.speedKmh * factor * KM_PER_HOUR_SCALE * led * dry;
 }
 
 function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): void {

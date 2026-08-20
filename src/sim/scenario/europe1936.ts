@@ -11,6 +11,7 @@ import type { ProvinceIndex } from '../map/ProvinceIndex';
 import { NATIONS, NATION_BY_TAG, type NationDef } from './nations';
 import { commandersFor } from '../military/commanderData';
 import { ECONOMY, startingLaws } from '../politics/lawData';
+import { templateFuelUse } from '../economy/fuel';
 import {
   appointCommander, ARMY_GROUP_LIMIT, ARMY_GROUP_NAME, assignDivisions, COMMAND_LIMIT,
   createArmy, nextArmyName, setArmyParent,
@@ -118,6 +119,7 @@ export function deriveTemplate(
     hardness: hardnessDen > 0 ? Math.round((hardnessNum / hardnessDen) * 100) / 100 : 0,
     speedKmh: speed === Infinity ? 4 : speed,
     supplyUse: Math.round(supplyUse * 100) / 100,
+    fuelUse: templateFuelUse(equipmentNeed),
     width,
     equipmentNeed,
     manpowerNeed,
@@ -168,6 +170,9 @@ function emptyEconomy(n: NationDef): Economy {
     resources,
     manpower: Math.round(n.population * 1000 * 1.5),
     politicalPower: 25,
+    // Everyone begins with tanks in the sheds and a tank's worth of fuel.
+    fuel: 600,
+    fuelRatio: 1,
     freeCivilianFactories: 0,
   };
 }

@@ -83,6 +83,16 @@ export function collectAlerts(game: Game): Alert[] {
     });
   }
 
+  // Fuel is the one shortage that stops equipment already in the field from
+  // working, so it outranks anything merely idle.
+  if (me.economy.fuelRatio < 0.95) {
+    out.push({
+      id: 'fuel', icon: 'resource-oil',
+      text: `${Math.round(me.economy.fuelRatio * 100)}%`, title: UI.alertFuel,
+      panel: 'production', urgent: true,
+    });
+  }
+
   let short = 0;
   for (const d of state.divisions) {
     if (d.dead || d.owner !== me.id) continue;

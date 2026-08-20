@@ -177,7 +177,7 @@ export const HUD_CSS = `
   font-size: 11px; font-variant-numeric: tabular-nums;
   min-width: 3ch; text-align: right;
 }
-.hud-res-v.is-short { color: var(--danger); font-weight: 700; }
+.hud-res-v.is-short, .hud-stat-v.is-short { color: var(--danger); font-weight: 700; }
 .hud-res-l { font-size: 11px; color: var(--ink-dim); letter-spacing: 0; }
 
 /* Map modes hug the top-right so the centre of the screen stays gesture-only. */
