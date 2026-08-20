@@ -28,6 +28,7 @@ export const UI = {
 
   // Map modes
   modePolitical: '政治',
+  modeState: '州',
   modeTerrain: '地形',
   modeResource: '資源',
   modeSupply: '補給',

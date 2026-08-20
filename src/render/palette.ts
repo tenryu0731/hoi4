@@ -37,7 +37,8 @@ export const PALETTE = {
 } as const;
 
 /** Map modes recolour the province fills without touching geometry. */
-export type MapMode = 'political' | 'terrain' | 'resource' | 'supply' | 'victory';
+export type MapMode =
+  | 'political' | 'state' | 'terrain' | 'resource' | 'supply' | 'victory';
 
 /**
  * Terrain map mode.

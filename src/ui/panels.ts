@@ -637,7 +637,7 @@ export const provincePanel: Panel = {
     root.innerHTML = '';
     const id = game.selection.province;
     if (id === null) {
-      root.append(el('div', 'panel-empty', '州が選択されていません。'));
+      root.append(el('div', 'panel-empty', 'プロヴィンスが選択されていません。'));
       return;
     }
     const state = game.state;
@@ -664,11 +664,15 @@ export const provincePanel: Panel = {
       .filter(([, v]) => (v ?? 0) > 0)
       .map(([k, v]) => `${RESOURCE_LABEL[k as ResourceType]} ${v}`)
       .join('、') || 'なし';
+    // The two tiers, named and related. A province is what a division stands
+    // in; the state is what the factories and the population belong to, and
+    // several provinces share one -- which is invisible unless it is said.
     const rows: [string, string][] = [
-      ['州', stateData.name],
+      ['所属ステート', `${stateData.name}（${stateData.provinces.length}プロヴィンス）`],
       [UI.infrastructure, String(stateData.infrastructure)],
       ['人口', formatNumber(stateData.manpower * 1000)],
-      ['工場', `民需 ${stateData.civilianFactories} / 軍需 ${stateData.militaryFactories}`],
+      ['工場（州全体）', `民需 ${stateData.civilianFactories} / 軍需 ${stateData.militaryFactories}`],
+      ['建設枠（州全体）', String(stateData.buildingSlots)],
       [UI.resources, resources],
       ['占領率', `${country(owner.tag)}の${Math.round(occupationRatio(state, p.owner) * 100)}%`],
     ];

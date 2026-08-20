@@ -214,7 +214,7 @@ test.describe('touch input', () => {
 
   test('map mode buttons recolour without errors', async ({ page }) => {
     const errors = await bootGame(page);
-    for (const mode of ['terrain', 'resource', 'supply', 'victory', 'political']) {
+    for (const mode of ['state', 'terrain', 'resource', 'supply', 'victory', 'political']) {
       await page.locator(`.hud-mode[data-mode="${mode}"]`).click();
       const active = await page.evaluate(() => window.__game!.renderer.mapMode);
       expect(active).toBe(mode);

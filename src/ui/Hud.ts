@@ -22,6 +22,7 @@ import { RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings
 
 const MAP_MODES: [MapMode, string][] = [
   ['political', UI.modePolitical],
+  ['state', UI.modeState],
   ['terrain', UI.modeTerrain],
   ['resource', UI.modeResource],
   ['supply', UI.modeSupply],
