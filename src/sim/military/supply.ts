@@ -208,9 +208,56 @@ export function tickSupplyDaily(state: GameState, index: ProvinceIndex): void {
     }
   }
 
+  applyThroughput(state, index);
+
   for (const d of state.divisions) {
     if (d.dead) continue;
     d.supplyLevel = state.provinces[d.provinceId].supply;
+  }
+}
+
+/**
+ * Supply throughput one point of infrastructure adds, in template supply units.
+ *
+ * An infantry division draws about 0.5, so a province on a rail hub
+ * (infrastructure 5) carries roughly ten divisions before it starts to choke
+ * and a poor one (infrastructure 1) about four. That range is the point: it
+ * makes a wide front cheaper to hold than a deep stack, which is the decision
+ * the operational layer was missing.
+ */
+const THROUGHPUT_PER_INFRASTRUCTURE = 0.7;
+
+/** Even a roadless province supports a screen without collapsing. */
+const BASE_THROUGHPUT = 1.6;
+
+/**
+ * Charges each province's garrison against what it can actually move forward.
+ *
+ * Every template computes a `supplyUse` and, until now, nothing consumed it --
+ * so thirty divisions stacked on one tile were supplied exactly as well as
+ * three, and "walk six divisions at one province and win" was the whole of
+ * operational play. Overstacking now starves the whole stack in proportion,
+ * which feeds the effectiveness and attrition paths that already exist, and
+ * gives infrastructure and the supply map mode something to say.
+ */
+function applyThroughput(state: GameState, index: ProvinceIndex): void {
+  for (let i = 0; i < state.provinces.length; i++) {
+    const p = state.provinces[i];
+    if (p.divisions.length === 0 || p.supply <= 0) continue;
+
+    let demand = 0;
+    for (const id of p.divisions) {
+      const d = state.divisions[id];
+      if (!d || d.dead) continue;
+      const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
+      demand += tpl?.supplyUse ?? 1;
+    }
+    if (demand <= 0) continue;
+
+    const infra = index.data.states[index.get(i).stateId]?.infrastructure ?? 1;
+    const capacity = BASE_THROUGHPUT + infra * THROUGHPUT_PER_INFRASTRUCTURE;
+    if (demand <= capacity) continue;
+    p.supply *= capacity / demand;
   }
 }
 

@@ -84,6 +84,64 @@ export function removeDivision(state: GameState, d: Division): void {
 // Orders
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Naval capability
+// ---------------------------------------------------------------------------
+
+/**
+ * Divisions a single dockyard can keep in transit.
+ *
+ * Crossing water used to be a pathfinding *cost* rather than a capability, so
+ * a foot infantry division walked the English Channel in under a day with no
+ * transports and no naval preparation, and Britain fell in about a fortnight
+ * to an army that had strolled there. A crossing now needs shipping, and a
+ * power with no dockyards cannot make one at all.
+ */
+const DIVISIONS_PER_DOCKYARD = 0.8;
+
+/** Convoys in the stockpile needed to lift one more division beyond that. */
+const CONVOYS_PER_DIVISION = 40;
+
+/** Hard ceiling, so a naval superpower still cannot move its whole army at once. */
+const MAX_SEALIFT = 24;
+
+/**
+ * Fraction of organisation a division keeps when it steps ashore.
+ *
+ * A landing is the most disorganised thing an army does, and without a penalty
+ * an amphibious assault is strictly better than a land attack -- it arrives
+ * where the enemy is not.
+ */
+const LANDING_ORG_KEPT = 0.35;
+
+/** How many divisions this country can have at sea at once. */
+export function sealiftCapacity(state: GameState, owner: CountryId): number {
+  const c = state.countries[owner];
+  const fromYards = c.economy.dockyards * DIVISIONS_PER_DOCKYARD;
+  const fromConvoys = (c.economy.stockpile.convoy ?? 0) / CONVOYS_PER_DIVISION;
+  return Math.min(MAX_SEALIFT, Math.floor(fromYards + fromConvoys));
+}
+
+/** Divisions of this country currently mid-crossing. */
+function sealiftInUse(state: GameState, ctx: MilitaryContext, owner: CountryId): number {
+  let n = 0;
+  for (const d of state.divisions) {
+    if (d.dead || d.owner !== owner || d.path.length === 0) continue;
+    if (ctx.index.isSeaLink(d.provinceId, d.path[0])) n++;
+  }
+  return n;
+}
+
+/** True when any step of this route crosses water. */
+function routeCrossesSea(ctx: MilitaryContext, from: ProvinceId, path: ProvinceId[]): boolean {
+  let prev = from;
+  for (const step of path) {
+    if (ctx.index.isSeaLink(prev, step)) return true;
+    prev = step;
+  }
+  return false;
+}
+
 /**
  * Routes a division toward a target. Enemy-held provinces are passable -- the
  * unit will attack into them -- but cost far more, so the pathfinder prefers to
@@ -107,6 +165,13 @@ export function orderMove(
     },
   });
   if (!path || path.length < 2) {
+    d.path = [];
+    return false;
+  }
+  // Refused outright rather than left queueing on a beach forever: a power with
+  // no shipping has no business being given an overseas order at all.
+  if (routeCrossesSea(ctx, d.provinceId, path.slice(1))
+      && sealiftCapacity(state, d.owner) <= 0) {
     d.path = [];
     return false;
   }
@@ -288,12 +353,25 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
   if (d.org < tpl.maxOrg * MIN_ORG_TO_MOVE || d.retreatCooldown > 0) return;
 
   const next = d.path[0];
+  // Shipping is a live resource: a division waits on the quay until a hull is
+  // free, which is what stops an entire army crossing in one tide.
+  const crossing = ctx.index.isSeaLink(d.provinceId, next);
+  if (crossing && d.moveProgress === 0
+      && sealiftInUse(state, ctx, d.owner) >= sealiftCapacity(state, d.owner)) {
+    return;
+  }
   const distance = Math.max(1, ctx.index.distance(d.provinceId, next));
   const kmThisHour = movementSpeed(state, ctx, d, next);
   d.moveProgress += kmThisHour / distance;
   if (d.moveProgress < 1) return;
 
   d.moveProgress = 0;
+  if (crossing) {
+    // Ashore, and disorganised. Without this an amphibious assault is strictly
+    // better than a land attack, because it arrives where the enemy is not.
+    const tplNow = templateOf(state, d);
+    d.org = Math.min(d.org, tplNow.maxOrg * LANDING_ORG_KEPT);
+  }
   const controller = state.provinces[next].controller;
 
   if (isHostile(state, d.owner, controller)) {

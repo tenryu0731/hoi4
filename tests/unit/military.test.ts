@@ -8,7 +8,7 @@ import {
 } from '../../src/sim/military/combat';
 import {
   captureProvince, isHostile, movementSpeed, orderMove, placeDivision,
-  retreat, tickMilitaryHourly, tickReinforcementDaily,
+  retreat, sealiftCapacity, tickMilitaryHourly, tickReinforcementDaily,
 } from '../../src/sim/military/movement';
 import {
   computeSupply, encircledProvinces, supplySources, tickSupplyDaily,
@@ -801,5 +801,68 @@ describe('division templates', () => {
     expect(huge.battalions.length).toBeLessThanOrEqual(24);
     // Duplicate support companies collapse: they are a modifier, not a stack.
     expect(new Set(huge.supports).size).toBe(huge.supports.length);
+  });
+});
+
+/**
+ * Crossing water is a capability, not a discount.
+ *
+ * It used to be a pathfinding cost multiplier, so foot infantry walked the
+ * English Channel with no transports and Britain fell to an army that had
+ * strolled there.
+ */
+describe('sealift', () => {
+  it('scales capacity with dockyards and denies it to landlocked powers', () => {
+    const f = makeFixture({ seed: 1, playerTag: 'GER' });
+    const byTag = (t: string) => f.state.countries.find((c) => c.tag === t)!;
+    const eng = byTag('ENG');
+    const swi = byTag('SWI');
+    expect(swi.economy.dockyards).toBe(0);
+    expect(sealiftCapacity(f.state, swi.id)).toBe(0);
+    expect(sealiftCapacity(f.state, eng.id)).toBeGreaterThan(0);
+    // More yards, more hulls.
+    expect(sealiftCapacity(f.state, eng.id))
+      .toBeGreaterThan(sealiftCapacity(f.state, byTag('GER').id));
+  });
+
+  it('refuses an overseas order to a power with no shipping', () => {
+    const f = makeFixture({ seed: 1, playerTag: 'GER' });
+    const swi = f.state.countries.find((c) => c.tag === 'SWI')!;
+    swi.economy.dockyards = 0;
+    swi.economy.stockpile.convoy = 0;
+    const home = f.index.provinces.find((p) => f.state.provinces[p.id].owner === swi.id)!;
+    // Somewhere only reachable across water.
+    const overseas = f.index.provinces.find((p) => p.ownerTag === 'ENG');
+    if (!overseas) return;
+    const d = spawnDivision(f.state, swi.id, swi.templates[0].id, home.id, 1);
+    expect(orderMove(f.state, ctxOf(f), d, overseas.id)).toBe(false);
+    expect(d.path).toEqual([]);
+  });
+});
+
+/**
+ * Every template computes a supplyUse, and until recently nothing consumed it,
+ * so thirty divisions on one tile were supplied as well as three.
+ */
+describe('supply throughput', () => {
+  it('starves a province that is stacked beyond its infrastructure', () => {
+    const measure = (n: number): number => {
+      const f = makeFixture({ seed: 1, playerTag: 'GER' });
+      const ger = f.state.countries.find((c) => c.tag === 'GER')!;
+      const pol = f.state.countries.find((c) => c.tag === 'POL')!;
+      declareWar(f.state, ger.id, pol.id);
+      const prov = f.index.provinces.find((p) => f.state.provinces[p.id].owner === ger.id)!.id;
+      for (const id of [...f.state.provinces[prov].divisions]) f.state.divisions[id].dead = true;
+      f.state.provinces[prov].divisions = [];
+      for (let i = 0; i < n; i++) {
+        spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, prov, 1);
+      }
+      tickSupplyDaily(f.state, f.index);
+      return f.state.provinces[prov].supply;
+    };
+    const light = measure(4);
+    const heavy = measure(30);
+    expect(light).toBeGreaterThan(0);
+    expect(heavy).toBeLessThan(light * 0.6);
   });
 });
