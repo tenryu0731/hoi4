@@ -283,9 +283,36 @@ export interface StateRuntime {
 // Country
 // ---------------------------------------------------------------------------
 
+/** Identifier of a technology in the trees; see sim/research/techData.ts. */
+export type TechId = string;
+
+/** One research slot: what it is working on, and how far along it is. */
+export interface ResearchSlot {
+  /** Technology being researched, or null when the slot is idle. */
+  tech: TechId | null;
+  /** Research days accumulated toward `required`. */
+  progress: number;
+  /**
+   * Days this technology needs, fixed at the moment research started so the
+   * ahead-of-time penalty is locked in rather than shrinking as time passes.
+   */
+  required: number;
+}
+
 export interface ResearchState {
+  /** Base slots. Technologies may grant more; see effectiveSlotCount(). */
   slots: number;
-  /** Simplified tech: a single research level per branch, raising modifiers. */
+  /**
+   * Per-slot state. Optional only because the 1936 scenario table predates it:
+   * the research runtime creates it on first use.
+   */
+  active?: ResearchSlot[];
+  /** Technologies finished, in completion order. */
+  completed?: TechId[];
+  /**
+   * The pre-tree drip, kept because production.ts still reads
+   * `levels.industry`. Nothing in sim/research writes either field.
+   */
   levels: { infantry: number; armor: number; air: number; industry: number };
   progress: { infantry: number; armor: number; air: number; industry: number };
 }
@@ -388,7 +415,7 @@ export type GameEventBody =
 
 export interface GameEvent {
   day: number;
-  kind: 'war' | 'combat' | 'production' | 'construction' | 'diplomacy' | 'capitulation' | 'outcome';
+  kind: 'war' | 'combat' | 'production' | 'construction' | 'research' | 'diplomacy' | 'capitulation' | 'outcome';
   body: GameEventBody;
   /** Optional province to focus the camera on when tapped. */
   province?: ProvinceId;

@@ -4,10 +4,18 @@ export type Speed = 0 | 1 | 2 | 3 | 4 | 5;
 
 /**
  * Real milliseconds required to advance one in-game hour, per speed step.
- * Speed 0 is paused. Speed 5 (~16ms/hour) is roughly 2.5 in-game months per
- * real minute, which is what "fast forward" needs to feel like on mobile.
+ *
+ * Speed 0 is paused. Speed 1 is a day every 24 seconds, for the hour either
+ * side of a declaration; speed 5 is about a week a second, which puts the
+ * twelve-year campaign inside a ten-minute sitting. The old top speed was
+ * 16ms/hour -- a month every twelve seconds, half an hour for a campaign --
+ * which on a phone reads as the fast-forward being broken rather than fast.
+ *
+ * The simulation costs roughly 2ms per game-day, so even the top step spends
+ * under 2% of a second's compute on the model; the ladder is bounded by what
+ * a player can follow, not by what the machine can do.
  */
-export const MS_PER_HOUR: readonly number[] = [Infinity, 1000, 333, 125, 42, 16];
+export const MS_PER_HOUR: readonly number[] = [Infinity, 1000, 300, 100, 30, 6];
 
 /**
  * Hard cap on catch-up work in one frame. Without it a stalled tab returns and

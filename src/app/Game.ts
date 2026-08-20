@@ -143,7 +143,13 @@ export class Game {
     this.lastFrameTime = performance.now();
     const frame = (now: number) => {
       if (!this.running) return;
-      const dt = Math.min(100, now - this.lastFrameTime);
+      // Clamped generously, not tightly. At 100ms this was a second clock:
+      // any frame slower than 10fps handed the simulation less time than had
+      // actually passed, so on a phone that dipped the date crawled and the
+      // speed control appeared to do nothing. TimeEngine already caps a single
+      // step at a second and caps catch-up ticks, which is where that job
+      // belongs; this only needs to stop `now` jumping after a backgrounded tab.
+      const dt = Math.min(500, now - this.lastFrameTime);
       this.lastFrameTime = now;
       this.tickFrame(dt);
       this.rafId = requestAnimationFrame(frame);
