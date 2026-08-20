@@ -52,6 +52,13 @@ export class Game {
   private running = false;
   private listeners: (() => void)[] = [];
 
+  /**
+   * Opens a HUD panel. Installed by the HUD; the simulation never calls it.
+   * Panels that are not nav destinations -- the designer, the province sheet --
+   * are reached from inside another panel, which needs a way to say so.
+   */
+  openPanel?: (id: string | null) => void;
+
   /** Set by the order-drag gesture so the HUD can draw a preview arrow. */
   dragOrder: { fromX: number; fromY: number; toX: number; toY: number } | null = null;
 

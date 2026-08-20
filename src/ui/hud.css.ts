@@ -217,6 +217,25 @@ export const HUD_CSS = `
   color: var(--accent);
 }
 .panel-build.is-blocked { opacity: 0.55; }
+.panel-build { position: relative; }
+.panel-build.is-on { border-color: var(--accent); color: var(--accent); }
+/* Sits on the recruit tile rather than beside it: the tile is already the
+   width of half the sheet, and a second full-width row per template would
+   push the equipment list off the screen. */
+.panel-edit {
+  position: absolute; top: 4px; right: 4px; min-width: 44px; min-height: 30px;
+  padding: 2px 8px; font-size: 10px; color: var(--ink-dim);
+  background: rgba(0,0,0,0.35); border: 1px solid rgba(58,61,69,0.9);
+  border-radius: 3px;
+}
+.panel-input {
+  flex: 1; min-height: 40px; padding: 8px 10px; font: inherit; font-size: 13px;
+  color: var(--ink); background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(58,61,69,0.9); border-radius: 3px;
+}
+.panel-btn.primary {
+  background: rgba(216,176,74,0.14); border-color: var(--accent); color: var(--accent);
+}
 .panel-build.is-blocked .panel-build-note { color: var(--danger); }
 .panel-kvs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; }
 .panel-kv {

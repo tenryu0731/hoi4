@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { Simulation } from '../../src/sim/Simulation';
+
 import {
   ORG_RECOVERY_PER_HOUR, effectiveness, equipmentRatio, findCombatAt,
   resolveCombatRound, tickDivisionUpkeep,
@@ -734,5 +736,70 @@ describe('territory control', () => {
     placeDivision(f.state, d, b);
     expect(f.state.provinces[a].divisions).not.toContain(d.id);
     expect(f.state.provinces[b].divisions).toContain(d.id);
+  });
+});
+
+/**
+ * Division designer.
+ *
+ * The command was a stub that accepted and discarded everything, so a player
+ * could compose a division and get nothing. These fix the contract the panel
+ * relies on: what it previews is what the simulation fights with.
+ */
+describe('division templates', () => {
+  it('adds a designed template that the country can then recruit', () => {
+    const f = makeFixture({ seed: 7, playerTag: 'GER' });
+    const sim = new Simulation(f.state, f.index);
+    const me = f.state.countries[f.state.meta.playerCountry];
+    const before = me.templates.length;
+
+    sim.execute({
+      t: 'createTemplate', country: me.id, name: '試製師団',
+      battalions: ['infantry', 'infantry', 'artillery'], supports: ['engineer'],
+    });
+
+    expect(me.templates).toHaveLength(before + 1);
+    const tpl = me.templates[me.templates.length - 1];
+    expect(tpl.name).toBe('試製師団');
+    expect(tpl.battalions).toEqual(['infantry', 'infantry', 'artillery']);
+    expect(tpl.softAttack).toBeGreaterThan(0);
+    expect(tpl.equipmentNeed.infantry_equipment).toBeGreaterThan(0);
+  });
+
+  it('replaces a template of the same name rather than piling up duplicates', () => {
+    const f = makeFixture({ seed: 7, playerTag: 'GER' });
+    const sim = new Simulation(f.state, f.index);
+    const me = f.state.countries[f.state.meta.playerCountry];
+    const first = me.templates[0];
+
+    sim.execute({
+      t: 'createTemplate', country: me.id, name: first.name,
+      battalions: ['medium_armor', 'medium_armor'], supports: [],
+    });
+
+    expect(me.templates.filter((t) => t.name === first.name)).toHaveLength(1);
+    expect(me.templates[0].battalions).toEqual(['medium_armor', 'medium_armor']);
+    // Same id, so divisions already in the field follow the edited template.
+    expect(me.templates[0].id).toBe(first.id);
+  });
+
+  it('refuses an empty division and caps an absurd one', () => {
+    const f = makeFixture({ seed: 7, playerTag: 'GER' });
+    const sim = new Simulation(f.state, f.index);
+    const me = f.state.countries[f.state.meta.playerCountry];
+    const before = me.templates.length;
+
+    sim.execute({ t: 'createTemplate', country: me.id, name: 'x', battalions: [], supports: [] });
+    expect(me.templates).toHaveLength(before);
+
+    sim.execute({
+      t: 'createTemplate', country: me.id, name: '巨大',
+      battalions: new Array(60).fill('infantry'),
+      supports: ['engineer', 'engineer', 'recon'],
+    });
+    const huge = me.templates[me.templates.length - 1];
+    expect(huge.battalions.length).toBeLessThanOrEqual(24);
+    // Duplicate support companies collapse: they are a modifier, not a stack.
+    expect(new Set(huge.supports).size).toBe(huge.supports.length);
   });
 });

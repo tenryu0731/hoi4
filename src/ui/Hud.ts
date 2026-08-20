@@ -213,6 +213,10 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     for (const b of navButtons) b.classList.toggle('is-active', b.dataset.panel === openPanel);
   }
 
+  // Panels that are not nav destinations open from inside another panel: the
+  // designer from the army list, the province sheet from a tap on the map.
+  game.openPanel = (id) => togglePanel(id as PanelId | null);
+
   /** The province panel is titled with the place it is showing. */
   function panelTitle(id: PanelId): string {
     if (id !== 'province') return PANELS[id].title;

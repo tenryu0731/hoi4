@@ -348,7 +348,10 @@ export interface GameState {
   factions: Faction[];
   wars: War[];
   worldTension: number;
-  nextIds: { division: number; combat: number; line: number; construction: number; war: number };
+  nextIds: {
+    division: number; combat: number; line: number; construction: number;
+    war: number; template: number;
+  };
   outcome: Outcome;
   /** Ring buffer of player-facing events, newest last. */
   log: GameEvent[];

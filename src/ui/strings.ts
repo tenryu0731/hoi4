@@ -72,6 +72,20 @@ export const UI = {
   templates: '師団テンプレート',
   recruit: '編成',
   equipmentShortage: '装備不足',
+
+  // Division designer
+  designer: '師団編集',
+  newTemplate: '新編師団',
+  battalions: '大隊',
+  supportCompanies: '支援中隊',
+  equipmentPerDivision: '1個師団あたりの装備',
+  saveTemplate: '保存',
+  back: '戻る',
+  edit: '編集',
+  softAttack: '攻撃',
+  defence: '防御',
+  breakthrough: '突破',
+  combatWidth: '戦闘幅',
   shortage: '不足',
   ready: '編成可能',
 

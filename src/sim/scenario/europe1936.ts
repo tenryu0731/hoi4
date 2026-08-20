@@ -254,7 +254,9 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
     ],
     wars: [],
     worldTension: 0,
-    nextIds: { division: 0, combat: 0, line: 0, construction: 0, war: 0 },
+    // Templates start past the four the scenario deals so a player-designed
+    // division can never collide with one every country already has.
+    nextIds: { division: 0, combat: 0, line: 0, construction: 0, war: 0, template: 100 },
     outcome: { status: 'playing' },
     log: [],
   };

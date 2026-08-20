@@ -3,9 +3,11 @@ import {
   BUILDING_COST, EQUIPMENT, FACTORY_OUTPUT,
 } from '../sim/core/data';
 import {
-  EQUIPMENT_TYPES, RESOURCE_TYPES,
-  type BuildingType, type EquipmentType, type ResourceType,
+  BATTALION_TYPES, EQUIPMENT_TYPES, RESOURCE_TYPES, SUPPORT_TYPES,
+  type BattalionType, type BuildingType, type DivisionTemplate,
+  type EquipmentType, type ResourceType, type SupportType,
 } from '../sim/core/types';
+import { deriveTemplate } from '../sim/scenario/europe1936';
 import { canQueueBuilding } from '../sim/economy/production';
 import { occupationRatio } from '../sim/diplomacy/diplomacy';
 import {
@@ -21,7 +23,8 @@ import {
  * sluggish next to a canvas that is already using most of the budget.
  */
 
-export type PanelId = 'production' | 'construction' | 'army' | 'diplomacy' | 'province';
+export type PanelId =
+  | 'production' | 'construction' | 'army' | 'diplomacy' | 'province' | 'designer';
 
 export interface Panel {
   id: PanelId;
@@ -316,9 +319,24 @@ export const armyPanel: Panel = {
           t: 'recruitDivision', country: me.id, template: tpl.id, province: me.capital,
         });
       });
+      const edit = el('button', 'panel-edit', UI.edit);
+      edit.setAttribute('aria-label', `${tpl.name}: ${UI.designer}`);
+      edit.addEventListener('click', (e) => {
+        // The recruit button fills the tile, so the edit affordance sits on top
+        // of it and has to stop the tile firing underneath.
+        e.stopPropagation();
+        editTemplate(tpl);
+        game.openPanel?.('designer');
+      });
+      b.append(edit);
       grid.append(b);
     }
-    root.append(grid);
+    const fresh = el('button', 'panel-btn wide', `+ ${UI.newTemplate}`);
+    fresh.addEventListener('click', () => {
+      editTemplate(deriveTemplate(-1, '', ['infantry', 'infantry', 'infantry'], ['engineer']));
+      game.openPanel?.('designer');
+    });
+    root.append(grid, fresh);
 
     root.append(el('div', 'panel-label', UI.stockpile));
     const stock = el('div', 'panel-list');
@@ -595,12 +613,165 @@ function stat(label: string, value: string): HTMLElement {
 }
 
 
+
+// ---------------------------------------------------------------------------
+// Division designer
+// ---------------------------------------------------------------------------
+
+/**
+ * Composition of the division being edited.
+ *
+ * Held outside the panel because `build` runs again on every change: the panel
+ * is rebuilt from this, not the other way round, so there is one source of
+ * truth for what the player is looking at.
+ */
+let draft: { name: string; battalions: BattalionType[]; supports: SupportType[] } = {
+  name: '', battalions: [], supports: [],
+};
+
+/** Loads a template into the draft. Called when the designer is opened. */
+export function editTemplate(tpl: DivisionTemplate): void {
+  draft = {
+    name: tpl.name,
+    battalions: [...tpl.battalions],
+    supports: [...tpl.supports],
+  };
+}
+
+const MAX_BATTALIONS = 24;
+
+export const designerPanel: Panel = {
+  id: 'designer',
+  title: UI.designer,
+  build(game, root) {
+    root.innerHTML = '';
+    const me = game.state.countries[game.state.meta.playerCountry];
+    // Stats come from the same function the scenario uses, so what the panel
+    // previews is exactly what the simulation will fight with.
+    const preview = deriveTemplate(-1, draft.name || UI.newTemplate,
+      draft.battalions.length > 0 ? draft.battalions : ['infantry'], draft.supports);
+
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.softAttack, preview.softAttack.toFixed(0)),
+      stat(UI.defence, preview.defense.toFixed(0)),
+      stat(UI.breakthrough, preview.breakthrough.toFixed(0)),
+      stat(UI.combatWidth, String(preview.width)),
+    );
+    root.append(head);
+
+    const head2 = el('div', 'panel-head');
+    head2.append(
+      stat(UI.organisation, preview.maxOrg.toFixed(0)),
+      stat(UI.strength, preview.maxHp.toFixed(0)),
+      stat(UI.speed, `${preview.speedKmh.toFixed(0)}`),
+      stat(UI.manpower, formatNumber(preview.manpowerNeed)),
+    );
+    root.append(head2);
+
+    const rebuild = (): void => {
+      designerPanel.build(game, root);
+      designerPanel.refresh?.(game, root);
+    };
+
+    // --- name ---------------------------------------------------------------
+    const nameRow = el('div', 'panel-row');
+    const nameInput = el('input', 'panel-input') as HTMLInputElement;
+    nameInput.value = draft.name;
+    nameInput.placeholder = UI.newTemplate;
+    nameInput.maxLength = 24;
+    nameInput.addEventListener('input', () => { draft.name = nameInput.value; });
+    nameRow.append(nameInput);
+    root.append(nameRow);
+
+    // --- line battalions ----------------------------------------------------
+    root.append(el('div', 'panel-label',
+      `${UI.battalions} ${draft.battalions.length}/${MAX_BATTALIONS}`));
+    const bnCounts = el('div', 'panel-list');
+    for (const b of BATTALION_TYPES) {
+      const n = draft.battalions.filter((x) => x === b).length;
+      const row = el('div', 'panel-row');
+      const main = el('div', 'panel-row-main');
+      main.append(el('div', 'panel-row-title', BATTALION[b]));
+      const controls = el('div', 'panel-row-controls');
+      const minus = el('button', 'panel-btn', '−');
+      const count = el('span', 'panel-count', String(n));
+      const plus = el('button', 'panel-btn', '+');
+      minus.disabled = n === 0;
+      plus.disabled = draft.battalions.length >= MAX_BATTALIONS;
+      minus.addEventListener('click', () => {
+        const i = draft.battalions.lastIndexOf(b);
+        if (i >= 0) draft.battalions.splice(i, 1);
+        rebuild();
+      });
+      plus.addEventListener('click', () => {
+        if (draft.battalions.length < MAX_BATTALIONS) draft.battalions.push(b);
+        rebuild();
+      });
+      controls.append(minus, count, plus);
+      row.append(main, controls);
+      bnCounts.append(row);
+    }
+    root.append(bnCounts);
+
+    // --- support companies --------------------------------------------------
+    root.append(el('div', 'panel-label', UI.supportCompanies));
+    const sup = el('div', 'panel-grid');
+    for (const sc of SUPPORT_TYPES) {
+      const on = draft.supports.includes(sc);
+      const b = el('button', `panel-build${on ? ' is-on' : ''}`);
+      b.append(el('span', 'panel-build-title', SUPPORT[sc]));
+      b.addEventListener('click', () => {
+        draft.supports = on
+          ? draft.supports.filter((x) => x !== sc)
+          : [...draft.supports, sc];
+        rebuild();
+      });
+      sup.append(b);
+    }
+    root.append(sup);
+
+    // --- equipment bill -----------------------------------------------------
+    root.append(el('div', 'panel-label', UI.equipmentPerDivision));
+    const bill = el('div', 'panel-kvs');
+    for (const [eq, need] of Object.entries(preview.equipmentNeed) as [EquipmentType, number][]) {
+      const row = el('div', 'panel-kv');
+      const have = me.economy.stockpile[eq] ?? 0;
+      row.append(
+        el('span', 'panel-k', EQUIPMENT_LABEL[eq]),
+        el('span', `panel-v${have < need ? ' is-short' : ''}`,
+          `${Math.round(need)} / ${formatNumber(have)}`),
+      );
+      bill.append(row);
+    }
+    root.append(bill);
+
+    // --- actions ------------------------------------------------------------
+    const actions = el('div', 'panel-row');
+    const save = el('button', 'panel-btn wide primary', UI.saveTemplate);
+    save.disabled = draft.battalions.length === 0;
+    save.addEventListener('click', () => {
+      game.issue({
+        t: 'createTemplate', country: me.id,
+        name: draft.name || UI.newTemplate,
+        battalions: draft.battalions, supports: draft.supports,
+      });
+      game.openPanel?.('army');
+    });
+    const back = el('button', 'panel-btn wide', UI.back);
+    back.addEventListener('click', () => game.openPanel?.('army'));
+    actions.append(back, save);
+    root.append(actions);
+  },
+};
+
 export const PANELS: Record<PanelId, Panel> = {
   production: productionPanel,
   construction: constructionPanel,
   army: armyPanel,
   diplomacy: diplomacyPanel,
   province: provincePanel,
+  designer: designerPanel,
 };
 
 export { RESOURCE_LABEL, EQUIPMENT_LABEL, RESOURCE_TYPES };
