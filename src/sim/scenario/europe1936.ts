@@ -11,7 +11,8 @@ import type { ProvinceIndex } from '../map/ProvinceIndex';
 import { NATIONS, NATION_BY_TAG, type NationDef } from './nations';
 import { commandersFor } from '../military/commanderData';
 import {
-  appointCommander, ARMY_GROUP_LIMIT, assignDivisions, COMMAND_LIMIT, createArmy, setArmyParent,
+  appointCommander, ARMY_GROUP_LIMIT, ARMY_GROUP_NAME, assignDivisions, COMMAND_LIMIT,
+  createArmy, nextArmyName, setArmyParent,
 } from '../military/command';
 
 /**
@@ -420,7 +421,7 @@ function raiseArmies(state: GameState): void {
       .sort((a, b) => b.skill - a.skill);
     const armies: Army[] = [];
     for (let i = 0; i < armyCount; i++) {
-      const army = createArmy(state, country.id, `${ORDINAL[i] ?? String(i + 1)}${ARMY_SUFFIX}`);
+      const army = createArmy(state, country.id, nextArmyName(state, country.id));
       armies.push(army);
       const general = generals[i];
       if (general) appointCommander(state, army.id, general.id);
@@ -445,10 +446,6 @@ function raiseArmies(state: GameState): void {
   }
 }
 
-/** Army names read as they do on a Japanese map: 第一軍, 第二軍, and so on. */
-const ORDINAL = ['第一', '第二', '第三', '第四', '第五', '第六', '第七', '第八'];
-const ARMY_SUFFIX = '軍';
-const ARMY_GROUP_NAME = '軍集団';
 
 export function spawnDivision(
   state: GameState,

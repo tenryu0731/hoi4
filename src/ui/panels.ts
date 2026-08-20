@@ -16,7 +16,8 @@ import {
   BRANCH_LIST, researchSummary, researchView, techTree, type TechBranch,
 } from '../sim/research';
 import {
-  ARMY_GROUP_LIMIT, COMMAND_LIMIT, armyById, commandLimit, commanderById, idleCommanders,
+  ARMY_GROUP_LIMIT, COMMAND_LIMIT, MAX_ARMIES, armyById, commandLimit, commanderById,
+  idleCommanders, nextArmyName,
 } from '../sim/military/command';
 import { maxPlanning } from '../sim/military/frontline';
 import {
@@ -986,7 +987,7 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
     .filter((c) => c && !c.capitulated);
   const neighbours = enemies.length > 0 ? enemies : borderingCountries(game, me.id);
 
-  for (const enemy of neighbours.slice(0, 6)) {
+  for (const enemy of neighbours.slice(0, 5)) {
     const chip = el('button', 'panel-chip', `${UI.setOrderFront}: ${country(enemy.tag)}`);
     chip.classList.toggle(
       'is-on', army.order?.kind === 'front' && army.order.against === enemy.id,
@@ -999,6 +1000,27 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
       rebuild();
     });
     box.append(chip);
+
+    // An offensive needs objectives, and picking them province by province is
+    // not something a thumb can do. Naming the enemy aims the army at what it
+    // would actually be sent to take: the places worth victory points.
+    const targets = objectivesAgainst(game, enemy.id);
+    if (targets.length === 0) continue;
+    const push = el('button', 'panel-chip', `${UI.setOrderAttack}: ${country(enemy.tag)}`);
+    push.classList.toggle(
+      'is-on',
+      army.order?.kind === 'offensive'
+      && army.order.targets.length === targets.length
+      && army.order.targets[0] === targets[0],
+    );
+    push.addEventListener('click', () => {
+      game.issue({
+        t: 'setArmyOrder', country: me.id, army: army.id,
+        order: { kind: 'offensive', targets },
+      });
+      rebuild();
+    });
+    box.append(push);
   }
 
   const clear = el('button', 'panel-chip', UI.setOrderClear);
@@ -1009,6 +1031,15 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
   });
   box.append(clear);
   return box;
+}
+
+/** An enemy's most valuable provinces: what an offensive is actually for. */
+function objectivesAgainst(game: Game, enemy: CountryId): number[] {
+  return game.index.provinces
+    .filter((p) => game.state.provinces[p.id]?.controller === enemy)
+    .sort((a, b) => b.vp - a.vp || a.id - b.id)
+    .slice(0, 4)
+    .map((p) => p.id);
 }
 
 /** Countries whose territory touches ours; the ones a front could face. */
@@ -1066,7 +1097,34 @@ export const commandPanel: Panel = {
     );
     root.append(head);
 
-    root.append(el('div', 'panel-label', UI.armies));
+    const label = el('div', 'panel-label', UI.armies);
+    root.append(label);
+
+    // Raising a formation by hand matters even though reinforcements find a
+    // home on their own: splitting a front in two is a decision, and the
+    // automatic pass will only ever balance what already exists.
+    const tools = el('div', 'panel-chips');
+    if (armies.length < MAX_ARMIES) {
+      const add = el('button', 'panel-chip', UI.newArmy);
+      add.addEventListener('click', () => {
+        game.issue({ t: 'createArmy', country: me.id, name: nextArmyName(state, me.id) });
+        rebuild();
+      });
+      tools.append(add);
+    }
+    if (groups.length === 0) {
+      const marshal = idleCommanders(state, me.id).find((c) => c.rank === 'field_marshal');
+      if (marshal) {
+        const add = el('button', 'panel-chip', UI.newArmyGroup);
+        add.addEventListener('click', () => {
+          game.issue({ t: 'createArmy', country: me.id, name: UI.armyGroup, isArmyGroup: true });
+          rebuild();
+        });
+        tools.append(add);
+      }
+    }
+    if (tools.childElementCount > 0) root.append(tools);
+
     for (const army of armies) {
       const commander = commanderById(state, army.commander);
       const limit = commander ? commandLimit(commander) : COMMAND_LIMIT;
@@ -1115,6 +1173,14 @@ export const commandPanel: Panel = {
           }
         }
         card.append(orderControls(game, army, rebuild));
+
+        const drop = el('button', 'panel-btn wide danger', UI.disband);
+        drop.addEventListener('click', () => {
+          game.issue({ t: 'disbandArmy', country: me.id, army: army.id });
+          openArmy = -1;
+          rebuild();
+        });
+        card.append(drop);
 
         const bench = idleCommanders(state, me.id).filter((c) => c.rank === 'general');
         if (bench.length > 0) {

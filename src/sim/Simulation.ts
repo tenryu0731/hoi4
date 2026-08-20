@@ -29,7 +29,7 @@ import {
 import { tickSupplyDaily } from './military/supply';
 import {
   appointCommander, armyById, assignDivisions, createArmy, disbandArmy, setArmyParent,
-  tickCommanderExperienceDaily,
+  tickCommandReinforcementDaily, tickCommanderExperienceDaily,
 } from './military/command';
 import { tickBattlePlansDaily } from './military/frontline';
 import { tickAIDaily } from './ai/ai';
@@ -279,6 +279,9 @@ export class Simulation {
     if (ctx.newDay) {
       // Before supply and before the AI: a front that re-forms today should be
       // fed today, and the AI should see where its armies have been sent.
+      // Before the plans run, so a division that joined an army today is
+      // included in today's spread rather than standing where it was built.
+      tickCommandReinforcementDaily(state);
       tickBattlePlansDaily(state, this.ctx);
       tickCommanderExperienceDaily(state);
       tickSupplyDaily(state, this.index);

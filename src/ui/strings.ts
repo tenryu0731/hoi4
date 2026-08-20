@@ -73,6 +73,7 @@ export const UI = {
   orderOffensive: '進攻',
   orderGarrison: '駐屯',
   setOrderFront: '戦線',
+  setOrderAttack: '進攻',
   setOrderClear: '解除',
   pickEnemy: '対象',
   divisionsInArmy: '個師団',

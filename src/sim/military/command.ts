@@ -301,6 +301,78 @@ export function tickCommanderExperienceDaily(state: GameState): void {
   }
 }
 
+/** Army names as they read on a Japanese map: 第一軍, 第二軍, and so on. */
+const ORDINAL = ['第一', '第二', '第三', '第四', '第五', '第六', '第七', '第八', '第九', '第十'];
+export const ARMY_SUFFIX = '軍';
+export const ARMY_GROUP_NAME = '軍集団';
+
+/** The next unused ordinal name for this country. */
+export function nextArmyName(state: GameState, owner: CountryId): string {
+  const taken = new Set(armiesOf(state, owner).map((a) => a.name));
+  for (let i = 0; i < 40; i++) {
+    const name = `${ORDINAL[i] ?? String(i + 1)}${ARMY_SUFFIX}`;
+    if (!taken.has(name)) return name;
+  }
+  return `${armiesOf(state, owner).length + 1}${ARMY_SUFFIX}`;
+}
+
+/**
+ * Ceiling on armies one country may raise.
+ *
+ * Not a rule of the real game -- a safety rail. Divisions are folded into
+ * armies automatically, so without a ceiling a runaway production loop would
+ * also be a runaway army loop, and every one of them ticks a battle plan.
+ */
+export const MAX_ARMIES = 12;
+
+/**
+ * Folds divisions that belong to nobody into the chain of command.
+ *
+ * Every division produced after the scenario begins arrives unattached, and
+ * before this ran there was no path back: measured over 400 days, 32% of the
+ * Soviet army and 48% of the British were commanded by nobody, fighting at
+ * exactly the base numbers while their generals sat over the divisions that
+ * happened to exist in 1936. The player had no way to fix it and the AI does
+ * not know armies exist, so the whole chain of command was quietly decaying
+ * into decoration as the war went on.
+ *
+ * New divisions go to the army with the most room, which keeps formations
+ * balanced rather than filling one to its limit and spilling into the next.
+ */
+export function tickCommandReinforcementDaily(state: GameState): void {
+  commandState(state);
+  const loose = state.divisions.filter((d) => !d.dead && d.armyId === null);
+  if (loose.length === 0) return;
+
+  for (const div of loose) {
+    const armies = armiesOf(state, div.owner).filter((a) => !a.isArmyGroup);
+    let best: Army | null = null;
+    let bestRoom = 0;
+    for (const army of armies) {
+      const commander = commanderById(state, army.commander);
+      const limit = commander ? commandLimit(commander) : COMMAND_LIMIT;
+      const room = limit - army.divisions.length;
+      // Lowest id wins a tie, so the same save always produces the same
+      // organisation chart.
+      if (room > bestRoom || (room === bestRoom && best !== null && army.id < best.id)) {
+        if (room > 0) { best = army; bestRoom = room; }
+      }
+    }
+    if (!best && armies.length < MAX_ARMIES) {
+      best = createArmy(state, div.owner, nextArmyName(state, div.owner));
+      const general = idleCommanders(state, div.owner)
+        .filter((c) => c.rank === 'general')
+        .sort((a, b) => b.skill - a.skill || a.id - b.id)[0];
+      if (general) appointCommander(state, best.id, general.id);
+      // A new formation inherits the standing order of the army it was raised
+      // beside, so reinforcements walk to the front rather than to the capital.
+      const sibling = armies[0];
+      if (sibling?.order) best.order = sibling.order;
+    }
+    if (best) assignDivisions(state, best.id, [div.id]);
+  }
+}
+
 /** Provinces held by an army's divisions; the anchor for its front. */
 export function armyProvinces(state: GameState, army: Army): ProvinceId[] {
   const seen = new Set<ProvinceId>();

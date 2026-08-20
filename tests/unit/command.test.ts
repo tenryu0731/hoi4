@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ARMY_GROUP_LIMIT, COMMAND_LIMIT, appointCommander, armyById, assignDivisions,
-  commandLimit, commandModifiers, commanderById, createArmy, disbandArmy,
-  overloadScale, setArmyParent, tickCommanderExperienceDaily,
+  MAX_ARMIES, commandLimit, commandModifiers, commanderById, createArmy, disbandArmy,
+  overloadScale, setArmyParent, tickCommandReinforcementDaily, tickCommanderExperienceDaily,
 } from '../../src/sim/military/command';
 import {
   BASE_MAX_PLANNING, PLANNING_DECAY_PER_DAY, PLANNING_PER_DAY, frontProvinces,
@@ -13,6 +13,7 @@ import { COMMANDERS, commandersFor } from '../../src/sim/military/commanderData'
 import { checkInvariants } from '../../src/sim/core/invariants';
 import { Simulation } from '../../src/sim/Simulation';
 import { TimeEngine } from '../../src/sim/time/TimeEngine';
+import { spawnDivision } from '../../src/sim/scenario/europe1936';
 import { makeFixture, type Fixture } from './helpers/fixture';
 import type { Army, Commander, GameState } from '../../src/sim/core/types';
 
@@ -305,6 +306,63 @@ describe('battle plans', () => {
     });
     expect(army.planning).toBe(0);
   });
+});
+
+describe('reinforcements', () => {
+  it('folds a division that belongs to nobody into an army with room', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    // Make room, then set a division loose.
+    const div = f.state.divisions.find((d) => d.id === army.divisions[0])!;
+    assignDivisions(f.state, null, [div.id]);
+    expect(div.armyId).toBeNull();
+
+    tickCommandReinforcementDaily(f.state);
+    expect(div.armyId).not.toBeNull();
+    expect(commandErrors(f.state, f.index.count)).toEqual([]);
+    expect(ger.id).toBeGreaterThanOrEqual(0);
+  });
+
+  it('raises a new army when every existing one is full', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const before = armiesOf(f.state, 'GER').filter((a) => !a.isArmyGroup).length;
+    // Germany starts with one full army; a fresh division has nowhere to go.
+    const home = f.state.divisions.find((d) => d.owner === ger.id && !d.dead)!;
+    spawnDivision(f.state, ger.id, home.templateId, home.provinceId, 1);
+    tickCommandReinforcementDaily(f.state);
+    const after = armiesOf(f.state, 'GER').filter((a) => !a.isArmyGroup);
+    expect(after.length).toBe(before + 1);
+    expect(after[after.length - 1].commander).not.toBeNull();
+    expect(commandErrors(f.state, f.index.count)).toEqual([]);
+  });
+
+  it('never leaves a division uncommanded once the war is running', () => {
+    const f = makeFixture();
+    const sim = new Simulation(f.state, f.index);
+    const time = new TimeEngine(f.state.clock.totalHours);
+    time.on((c) => sim.tick(c));
+    time.step(24 * 400);
+    // Before this pass existed, 32% of the Soviet army and 48% of the British
+    // were commanded by nobody after four hundred days.
+    const loose = f.state.divisions.filter((d) => !d.dead && d.armyId === null);
+    expect(loose.length).toBe(0);
+    expect(commandErrors(f.state, f.index.count)).toEqual([]);
+  }, 60_000);
+
+  it('keeps the number of armies bounded however long the war runs', () => {
+    const f = makeFixture();
+    const sim = new Simulation(f.state, f.index);
+    const time = new TimeEngine(f.state.clock.totalHours);
+    time.on((c) => sim.tick(c));
+    time.step(24 * 900);
+    for (const country of f.state.countries) {
+      const mine = (f.state.armies ?? [])
+        .filter((a) => a.owner === country.id && !a.isArmyGroup);
+      expect(mine.length, country.tag).toBeLessThanOrEqual(MAX_ARMIES);
+    }
+  }, 90_000);
 });
 
 describe('officers in the field', () => {
