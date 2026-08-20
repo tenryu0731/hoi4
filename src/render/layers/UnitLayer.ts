@@ -82,8 +82,8 @@ const SYMBOL = 0xf6f0e2;
 const PLATE_FACE = 0x2b2d33;
 
 /** On-screen counter width in CSS pixels, ramped between these zoom levels. */
-const COUNTER_MIN_PX = 15;
-const COUNTER_MAX_PX = 34;
+const COUNTER_MIN_PX = 14;
+const COUNTER_MAX_PX = 24;
 const ZOOM_SMALL = 0.05;
 const ZOOM_LARGE = 0.28;
 
@@ -97,7 +97,16 @@ const ZOOM_LARGE = 0.28;
  * the widest view where the map itself is the information.
  */
 const ZOOM_HIDE_COUNTERS = 0.055;
-const ZOOM_AGGREGATE_STATES = 0.13;
+/*
+ * Measured before this was raised, on a 412x869 screen: at the zoom the game
+ * opens at, 173 counters covered 28.2% of the map, and at 0.3 it was 42.5% --
+ * nearly half the board was unit symbols. The threshold sat at 0.13, just
+ * below the opening view, so aggregation almost never applied when it was
+ * most needed. It now covers the whole of the range a player reads the
+ * continent at, and only breaks into per-province counters once the camera is
+ * close enough that the provinces themselves are large.
+ */
+const ZOOM_AGGREGATE_STATES = 0.22;
 
 /** Below this the bevel and the readouts are smaller than a pixel: skip them. */
 const ZOOM_DETAIL = 0.09;

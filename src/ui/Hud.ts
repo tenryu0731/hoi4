@@ -4,6 +4,7 @@ import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
 import { PANELS, formatNumber, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
+import { createSheetView } from './sheetView';
 import { RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
 
 /**
@@ -21,6 +22,7 @@ import { RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings
 
 const MAP_MODES: [MapMode, string][] = [
   ['political', UI.modePolitical],
+  ['state', UI.modeState],
   ['terrain', UI.modeTerrain],
   ['resource', UI.modeResource],
   ['supply', UI.modeSupply],
@@ -37,6 +39,7 @@ const NAV: [PanelId, string, string][] = [
   ['research', UI.navResearch, 'ui-research'],
   ['construction', UI.navConstruction, 'ui-construction'],
   ['production', UI.navProduction, 'ui-production'],
+  ['command', UI.navCommand, 'ui-command'],
   ['army', UI.navArmy, 'ui-army'],
   ['diplomacy', UI.navDiplomacy, 'ui-diplomacy'],
 ];
@@ -120,40 +123,54 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const countryTag = el('div', 'hud-country-tag');
   nameBox.append(countryName, countryTag);
 
+  // One strip of icon-and-number chips, the way HOI4's top bar reads: the
+  // icon identifies the figure and the name is the accessible label. Stacked
+  // value-over-label boxes needed 30px of height each and still could not fit
+  // five figures plus six resources across 412px.
   const stats = el('div', 'hud-stats');
   const statNodes: Record<string, HTMLElement> = {};
-  const addStat = (key: string, label: string) => {
+  const addStat = (key: string, label: string, icon: string) => {
     const box = el('div', 'hud-stat');
     const v = el('span', 'hud-stat-v', '0');
-    box.append(v, el('span', 'hud-stat-l', label));
+    box.title = label;
+    box.setAttribute('aria-label', label);
+    box.append(iconNode('hud-res-icon', `icons/${icon}.svg`), v);
     stats.append(box);
     statNodes[key] = v;
   };
-  addStat('pp', UI.politicalPower);
-  addStat('mp', UI.manpower);
-  addStat('civ', UI.civFactories);
-  addStat('mil', UI.milFactories);
-  addStat('div', UI.divisions);
+  addStat('pp', UI.politicalPower, 'ui-political_power');
+  addStat('mp', UI.manpower, 'ui-manpower');
+  addStat('civ', UI.civFactories, 'ui-factory');
+  addStat('mil', UI.milFactories, 'ui-military_factory');
+  addStat('div', UI.divisions, 'ui-army');
 
+  // The clock is a cluster of real buttons, not a row of hairlines. The speed
+  // used to be five 8px pips two pixels apart: a target no thumb can hit, in a
+  // corner where it collided with the resource strip below it. Slower and
+  // faster are steppers now, with the step shown between them.
   const clock = el('div', 'hud-clock');
   const dateNode = el('div', 'hud-date', '');
   const speedRow = el('div', 'hud-speed');
+  const slower = el('button', 'hud-btn hud-step', '−');
+  slower.setAttribute('aria-label', `${UI.speed} −`);
   const pauseBtn = el('button', 'hud-btn hud-pause', '▶');
   pauseBtn.setAttribute('aria-label', UI.playPause);
-  const speedPips = el('div', 'hud-pips');
-  const pips: HTMLElement[] = [];
-  for (let i = 1; i <= 5; i++) {
-    const pip = el('button', 'hud-pip');
-    pip.dataset.speed = String(i);
-    pip.setAttribute('aria-label', `${UI.speed} ${i}`);
-    pips.push(pip);
-    speedPips.append(pip);
-  }
-  speedRow.append(pauseBtn, speedPips);
+  const speedNode = el('span', 'hud-speed-v', '2');
+  const faster = el('button', 'hud-btn hud-step', '＋');
+  faster.setAttribute('aria-label', `${UI.speed} ＋`);
+  speedRow.append(slower, pauseBtn, speedNode, faster);
   clock.append(dateNode, speedRow);
-  top.append(flag, nameBox, stats, clock);
+
+  // Two rows: identity and clock above, the figures below. One row cannot hold
+  // a flag, a name, five figures and a clock on a 412px screen without one of
+  // them being pushed off, which is what was happening.
+  const topRow = el('div', 'hud-top-row');
+  topRow.append(flag, nameBox, el('div', 'hud-spacer'), clock);
 
   // --- resource strip ------------------------------------------------------
+  // Its own row under the figures, not absolutely positioned 48px down: that
+  // offset was measured against a one-row top bar and left the strip lying
+  // across the figures the moment the bar needed two rows.
   const resStrip = el('div', 'hud-resources');
   const resNodes: Partial<Record<ResourceType, HTMLElement>> = {};
   for (const r of RESOURCE_TYPES) {
@@ -193,11 +210,26 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const sheetGrip = el('div', 'hud-sheet-grip');
   const sheetHeader = el('div', 'hud-sheet-header');
   const sheetTitle = el('div', 'hud-sheet-title', '');
+  // The zoom cluster sits in the panel header, where HOI4 puts its own: a
+  // phone panel has to serve a 320px screen and a 480px one, and no single
+  // type size does that.
+  const zoomOut = el('button', 'hud-sheet-zoom', '−');
+  zoomOut.setAttribute('aria-label', UI.zoomOut);
+  const zoomLabel = el('span', 'hud-sheet-zoom-v', '100%');
+  const zoomIn = el('button', 'hud-sheet-zoom', '＋');
+  zoomIn.setAttribute('aria-label', UI.zoomIn);
   const sheetClose = el('button', 'hud-sheet-close', '×');
   sheetClose.setAttribute('aria-label', UI.closePanel);
-  sheetHeader.append(sheetTitle, sheetClose);
+  sheetHeader.append(sheetTitle, zoomOut, zoomLabel, zoomIn, sheetClose);
   const sheetBody = el('div', 'hud-sheet-body');
   sheet.append(sheetGrip, sheetHeader, sheetBody);
+
+  const sheetView = createSheetView(sheet, (z) => {
+    setText(zoomLabel, `${Math.round(z * 100)}%`);
+  });
+  zoomOut.addEventListener('click', () => sheetView.stepZoom(-1));
+  zoomIn.addEventListener('click', () => sheetView.stepZoom(1));
+  const unbindPinch = sheetView.bindPinch(sheetBody);
 
   // --- bottom navigation ---------------------------------------------------
   const nav = el('div', 'hud-nav');
@@ -227,7 +259,25 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   outcomeCard.append(outcomeTitle, outcomeSub, outcomeAgain);
   outcome.append(outcomeCard);
 
-  root.append(top, resStrip, modeBar, toasts, sheet, nav, outcome);
+  // Two rows of chips, not one scrolling row. Eleven chips need 610px and the
+  // screen is 412: a third of the strip -- four of the six strategic resources
+  // -- was parked behind the fade with nothing to say it was there. Split by
+  // kind, each row fits, and the whole national position is visible at once
+  // the way it is in the real game.
+  top.append(topRow, stats, resStrip);
+
+  root.append(top, modeBar, toasts, sheet, nav, outcome);
+
+  // Everything below the top bar is placed against its measured height rather
+  // than a constant. The constant was 78px, chosen when the bar was one row;
+  // the bar grows with the safe-area inset and with the text size the player
+  // has chosen, and the map-mode buttons were landing on top of it.
+  const measureTop = () => {
+    root.style.setProperty('--hud-top-h', `${Math.round(top.getBoundingClientRect().height)}px`);
+  };
+  const topObserver = new ResizeObserver(measureTop);
+  topObserver.observe(top);
+  measureTop();
 
   // -------------------------------------------------------------------------
   // Behaviour
@@ -268,26 +318,51 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     if (openPanel === 'province') game.selectProvince(null);
     togglePanel(null);
   });
-  // Swipe the grip down to dismiss, which is the gesture the shape invites.
+  // The grip both resizes and dismisses, which is what the shape invites: drag
+  // up for more of the panel, drag down for less, drag down past the smallest
+  // size to put it away. A sheet fixed at 52vh is too short for the research
+  // list and too tall for the province card.
   let gripStartY = 0;
-  sheetGrip.addEventListener('pointerdown', (e) => { gripStartY = e.clientY; });
-  sheetGrip.addEventListener('pointerup', (e) => {
-    if (e.clientY - gripStartY > 24) {
+  let gripStartH = 0;
+  let gripDragging = false;
+  sheetGrip.addEventListener('pointerdown', (e) => {
+    gripStartY = e.clientY;
+    gripStartH = sheet.getBoundingClientRect().height;
+    gripDragging = true;
+    sheetGrip.setPointerCapture(e.pointerId);
+    sheet.classList.add('is-dragging');
+  });
+  sheetGrip.addEventListener('pointermove', (e) => {
+    if (!gripDragging) return;
+    sheetView.setHeight((gripStartH + (gripStartY - e.clientY)) / window.innerHeight);
+  });
+  const endGrip = (e: PointerEvent): void => {
+    if (!gripDragging) return;
+    gripDragging = false;
+    sheet.classList.remove('is-dragging');
+    if (e.clientY - gripStartY > 48) {
       if (openPanel === 'province') game.selectProvince(null);
       togglePanel(null);
     }
-  });
+  };
+  sheetGrip.addEventListener('pointerup', endGrip);
+  sheetGrip.addEventListener('pointercancel', endGrip);
 
+  // The steppers move the chosen speed, which is remembered across a pause, so
+  // pressing + while paused sets the speed you will resume at rather than
+  // silently unpausing.
+  const step = (delta: number) => {
+    const next = Math.min(5, Math.max(1, game.chosenSpeed + delta)) as 1 | 2 | 3 | 4 | 5;
+    if (game.speed === 0) game.pauseAt(next);
+    else game.setSpeed(next);
+    syncSpeed();
+  };
+  slower.addEventListener('click', () => step(-1));
+  faster.addEventListener('click', () => step(1));
   pauseBtn.addEventListener('click', () => {
     game.togglePause();
     syncSpeed();
   });
-  for (const pip of pips) {
-    pip.addEventListener('click', () => {
-      game.setSpeed(Number(pip.dataset.speed) as 1 | 2 | 3 | 4 | 5);
-      syncSpeed();
-    });
-  }
 
   function syncModes(): void {
     for (const b of modeButtons) {
@@ -299,7 +374,13 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     const s = game.speed;
     setText(pauseBtn, s === 0 ? '▶' : '⏸');
     pauseBtn.classList.toggle('is-paused', s === 0);
-    pips.forEach((pip, i) => pip.classList.toggle('is-on', s > i));
+    // The stepper shows the speed the clock will run at, which is the stored
+    // speed even while paused: pausing is not the same as choosing speed 0,
+    // and a player who pauses at 5 expects 5 back when they resume.
+    setText(speedNode, String(game.chosenSpeed));
+    speedNode.classList.toggle('is-paused', s === 0);
+    slower.classList.toggle('is-off', game.chosenSpeed <= 1);
+    faster.classList.toggle('is-off', game.chosenSpeed >= 5);
   }
 
   // --- toasts --------------------------------------------------------------
@@ -422,6 +503,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
   return () => {
     unsubscribe();
+    topObserver.disconnect();
+    unbindPinch();
     root.innerHTML = '';
   };
 }

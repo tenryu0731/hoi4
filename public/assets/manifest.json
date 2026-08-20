@@ -3,11 +3,11 @@
   "counts": {
     "flags": 30,
     "resourceIcons": 6,
-    "uiIcons": 16,
+    "uiIcons": 17,
     "unitIcons": 12
   },
-  "totalBytes": 22662,
-  "totalGzipBytes": 13830,
+  "totalBytes": 23015,
+  "totalGzipBytes": 14250,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -161,113 +161,118 @@
     },
     {
       "path": "assets/icons/resource-aluminium.svg",
-      "bytes": 245,
-      "gzipBytes": 182
+      "bytes": 244,
+      "gzipBytes": 195
     },
     {
       "path": "assets/icons/resource-chromium.svg",
-      "bytes": 267,
-      "gzipBytes": 192
+      "bytes": 262,
+      "gzipBytes": 211
     },
     {
       "path": "assets/icons/resource-oil.svg",
-      "bytes": 389,
-      "gzipBytes": 242
-    },
-    {
-      "path": "assets/icons/resource-rubber.svg",
-      "bytes": 292,
-      "gzipBytes": 201
-    },
-    {
-      "path": "assets/icons/resource-steel.svg",
-      "bytes": 274,
-      "gzipBytes": 197
-    },
-    {
-      "path": "assets/icons/resource-tungsten.svg",
-      "bytes": 265,
-      "gzipBytes": 200
-    },
-    {
-      "path": "assets/icons/ui-army.svg",
-      "bytes": 271,
-      "gzipBytes": 198
-    },
-    {
-      "path": "assets/icons/ui-construction.svg",
-      "bytes": 263,
-      "gzipBytes": 191
-    },
-    {
-      "path": "assets/icons/ui-diplomacy.svg",
-      "bytes": 310,
-      "gzipBytes": 233
-    },
-    {
-      "path": "assets/icons/ui-dockyard.svg",
-      "bytes": 297,
-      "gzipBytes": 213
-    },
-    {
-      "path": "assets/icons/ui-factory.svg",
-      "bytes": 255,
-      "gzipBytes": 188
-    },
-    {
-      "path": "assets/icons/ui-fast_forward.svg",
-      "bytes": 226,
-      "gzipBytes": 175
-    },
-    {
-      "path": "assets/icons/ui-manpower.svg",
-      "bytes": 255,
-      "gzipBytes": 198
-    },
-    {
-      "path": "assets/icons/ui-military_factory.svg",
-      "bytes": 253,
-      "gzipBytes": 189
-    },
-    {
-      "path": "assets/icons/ui-pause.svg",
-      "bytes": 284,
-      "gzipBytes": 180
-    },
-    {
-      "path": "assets/icons/ui-play.svg",
-      "bytes": 217,
-      "gzipBytes": 172
-    },
-    {
-      "path": "assets/icons/ui-political_power.svg",
-      "bytes": 271,
-      "gzipBytes": 212
-    },
-    {
-      "path": "assets/icons/ui-production.svg",
-      "bytes": 256,
+      "bytes": 233,
       "gzipBytes": 186
     },
     {
+      "path": "assets/icons/resource-rubber.svg",
+      "bytes": 368,
+      "gzipBytes": 236
+    },
+    {
+      "path": "assets/icons/resource-steel.svg",
+      "bytes": 189,
+      "gzipBytes": 170
+    },
+    {
+      "path": "assets/icons/resource-tungsten.svg",
+      "bytes": 201,
+      "gzipBytes": 179
+    },
+    {
+      "path": "assets/icons/ui-army.svg",
+      "bytes": 236,
+      "gzipBytes": 191
+    },
+    {
+      "path": "assets/icons/ui-command.svg",
+      "bytes": 249,
+      "gzipBytes": 192
+    },
+    {
+      "path": "assets/icons/ui-construction.svg",
+      "bytes": 331,
+      "gzipBytes": 221
+    },
+    {
+      "path": "assets/icons/ui-diplomacy.svg",
+      "bytes": 408,
+      "gzipBytes": 264
+    },
+    {
+      "path": "assets/icons/ui-dockyard.svg",
+      "bytes": 345,
+      "gzipBytes": 259
+    },
+    {
+      "path": "assets/icons/ui-factory.svg",
+      "bytes": 279,
+      "gzipBytes": 211
+    },
+    {
+      "path": "assets/icons/ui-fast_forward.svg",
+      "bytes": 183,
+      "gzipBytes": 162
+    },
+    {
+      "path": "assets/icons/ui-manpower.svg",
+      "bytes": 243,
+      "gzipBytes": 204
+    },
+    {
+      "path": "assets/icons/ui-military_factory.svg",
+      "bytes": 352,
+      "gzipBytes": 243
+    },
+    {
+      "path": "assets/icons/ui-pause.svg",
+      "bytes": 174,
+      "gzipBytes": 160
+    },
+    {
+      "path": "assets/icons/ui-play.svg",
+      "bytes": 161,
+      "gzipBytes": 152
+    },
+    {
+      "path": "assets/icons/ui-political_power.svg",
+      "bytes": 309,
+      "gzipBytes": 209
+    },
+    {
+      "path": "assets/icons/ui-production.svg",
+      "bytes": 369,
+      "gzipBytes": 255
+    },
+    {
       "path": "assets/icons/ui-research.svg",
-      "bytes": 240,
-      "gzipBytes": 183
+      "bytes": 306,
+      "gzipBytes": 240
     },
     {
       "path": "assets/icons/ui-supply.svg",
-      "bytes": 332,
-      "gzipBytes": 223
+      "bytes": 442,
+      "gzipBytes": 255
     },
     {
       "path": "assets/icons/ui-victory_point.svg",
-      "bytes": 251,
-      "gzipBytes": 200
+      "bytes": 220,
+      "gzipBytes": 186
     },
     {
       "path": "assets/icons/ui-warning.svg",
-      "bytes": 243,
-      "gzipBytes": 182
+      "bytes": 205,
+      "gzipBytes": 176
     },
     {
       "path": "assets/units/air.svg",

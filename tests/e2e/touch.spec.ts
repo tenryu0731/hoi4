@@ -214,7 +214,7 @@ test.describe('touch input', () => {
 
   test('map mode buttons recolour without errors', async ({ page }) => {
     const errors = await bootGame(page);
-    for (const mode of ['terrain', 'resource', 'supply', 'victory', 'political']) {
+    for (const mode of ['state', 'terrain', 'resource', 'supply', 'victory', 'political']) {
       await page.locator(`.hud-mode[data-mode="${mode}"]`).click();
       const active = await page.evaluate(() => window.__game!.renderer.mapMode);
       expect(active).toBe(mode);
@@ -224,8 +224,11 @@ test.describe('touch input', () => {
 
   test('speed controls drive the clock', async ({ page }) => {
     await bootGame(page, { static: false });
-    await page.locator('.hud-pip[data-speed="5"]').click();
+    // Step up to the top of the range; the stepper clamps rather than wrapping.
+    const faster = page.locator('.hud-step').last();
+    for (let i = 0; i < 6; i++) await faster.click();
     expect(await page.evaluate(() => window.__game!.speed)).toBe(5);
+    await expect(page.locator('.hud-speed-v')).toHaveText('5');
 
     const before = await page.evaluate(() => window.__game!.state.clock.totalHours);
     await page.waitForTimeout(1200);
@@ -237,6 +240,74 @@ test.describe('touch input', () => {
     const paused = await page.evaluate(() => window.__game!.state.clock.totalHours);
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => window.__game!.state.clock.totalHours)).toBe(paused);
+
+    // Resuming returns the speed the player chose, not a constant.
+    await page.locator('.hud-pause').click();
+    expect(await page.evaluate(() => window.__game!.speed)).toBe(5);
+  });
+
+  test('every control in the top bar is thumb-sized and on screen', async ({ page }) => {
+    await bootGame(page);
+    const bad = await page.evaluate(() => {
+      const w = window.innerWidth;
+      const out: string[] = [];
+      for (const b of document.querySelectorAll<HTMLElement>('.hud-btn')) {
+        const r = b.getBoundingClientRect();
+        if (r.width < 44 || r.height < 44) out.push(`small ${r.width}x${r.height}`);
+        if (r.left < 0 || r.right > w) out.push(`offscreen ${r.left}..${r.right} of ${w}`);
+      }
+      // The bar must not lie across the row of figures underneath it.
+      const top = document.querySelector('.hud-top')!.getBoundingClientRect();
+      const modes = document.querySelector('.hud-modes')!.getBoundingClientRect();
+      if (modes.top < top.bottom) out.push(`modes overlap top bar by ${top.bottom - modes.top}`);
+      return out;
+    });
+    expect(bad, bad.join('\n')).toEqual([]);
+  });
+
+  test('a finger can scroll a panel that is taller than the sheet', async ({ page }) => {
+    await bootGame(page);
+    // The sheet's open transition never advances in this headless browser --
+    // the document timeline only ticks when something forces a composite, and
+    // nothing here does -- so the panel would still be below the fold when the
+    // swipe was dispatched, and the gesture would land outside the viewport.
+    // Removing the transition puts it where a player would see it; the
+    // animation is not what this test is about.
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+    await page.evaluate(() => window.__game!.openPanel!('research'));
+    const box = (await page.locator('.hud-sheet-body').boundingBox())!;
+    expect(box.y).toBeLessThan(page.viewportSize()!.height - 100);
+    const overflows = await page.evaluate(() => {
+      const b = document.querySelector('.hud-sheet-body')!;
+      return b.scrollHeight - b.clientHeight;
+    });
+    expect(overflows).toBeGreaterThan(80);
+
+    await swipe(
+      page,
+      { x: box.x + box.width / 2, y: box.y + box.height - 30 },
+      { x: box.x + box.width / 2, y: box.y + 30 },
+    );
+    await page.waitForTimeout(300);
+    const scrolled = await page.evaluate(
+      () => document.querySelector('.hud-sheet-body')!.scrollTop,
+    );
+    expect(scrolled).toBeGreaterThan(40);
+  });
+
+  test('the panel zoom changes the size of what is in the sheet', async ({ page }) => {
+    await bootGame(page);
+    await page.evaluate(() => window.__game!.openPanel!('research'));
+    const rowHeight = () =>
+      page.evaluate(() => document.querySelector('.panel-focus')!.getBoundingClientRect().height);
+    const at100 = await rowHeight();
+    for (let i = 0; i < 4; i++) await page.locator('.hud-sheet-zoom').last().click();
+    await expect(page.locator('.hud-sheet-zoom-v')).toHaveText('140%');
+    expect(await rowHeight()).toBeGreaterThan(at100 * 1.2);
+    for (let i = 0; i < 8; i++) await page.locator('.hud-sheet-zoom').first().click();
+    // Clamped, not wrapped: pressing minus past the floor must not jump to max.
+    await expect(page.locator('.hud-sheet-zoom-v')).toHaveText('80%');
+    expect(await rowHeight()).toBeLessThan(at100);
   });
 
   test('the page itself never scrolls or browser-zooms', async ({ page }) => {

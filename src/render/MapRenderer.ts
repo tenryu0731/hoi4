@@ -13,6 +13,7 @@ import {
   createGrainTexture, createOceanTexture, createReliefTexture, createVerticalRamp,
 } from './textures';
 import { NATIONS } from '../sim/scenario/nations';
+import { supplyCapacity } from '../sim/military/supply';
 import { LabelLayer } from './layers/LabelLayer';
 import { UnitLayer, type DragOrder } from './layers/UnitLayer';
 import { country } from '../ui/strings';
@@ -314,10 +315,23 @@ export class MapRenderer {
     const g = this.borderLayer;
     g.clear();
 
-    const showProvince = step >= 3 && this.index.data.borders.province.length > 0;
-    if (showProvince) {
-      for (const line of this.index.data.borders.province) this.tracePolyline(g, line);
-      g.stroke({ color: PALETTE.borderProvince, width: px(0.9), alpha: 0.45, join: 'round' });
+    // Province seams first, then the state seams over them: the two tiers are
+    // the whole shape of the game -- provinces are what a division stands in
+    // and states are what a factory is built in -- and until now neither was
+    // drawn, so a country read as one flat slab of colour.
+    const internal = this.internalBorders();
+    if (step >= 2) {
+      for (const line of internal.province) this.tracePolyline(g, line);
+      g.stroke({ color: 0x0f0d09, width: px(1.0), alpha: 0.34, join: 'round' });
+    }
+    if (step >= 1) {
+      // A halo under the state seam, as the country border gets: the fills
+      // either side are the same colour, so a dark line alone has nothing to
+      // separate it from and reads as a scratch rather than a boundary.
+      for (const line of internal.state) this.tracePolyline(g, line);
+      g.stroke({ color: 0xf0e6cf, width: px(2.6), alpha: 0.22, join: 'round', cap: 'round' });
+      for (const line of internal.state) this.tracePolyline(g, line);
+      g.stroke({ color: 0x0f0d09, width: px(1.3), alpha: 0.62, join: 'round', cap: 'round' });
     }
 
     for (const line of this.index.data.borders.coast) this.tracePolyline(g, line);
@@ -393,12 +407,26 @@ export class MapRenderer {
     }
   }
 
+  /** The richest province on the map, so the victory ramp has a real top. */
+  private get maxVp(): number {
+    if (this.maxVpCache === 0) {
+      for (const p of this.index.provinces) {
+        if (p.vp > this.maxVpCache) this.maxVpCache = p.vp;
+      }
+      this.maxVpCache = Math.max(1, this.maxVpCache);
+    }
+    return this.maxVpCache;
+  }
+
+  private maxVpCache = 0;
+
   private tintKeyFor(id: ProvinceId, state: GameState | null): string {
     if (!state) return `${this.mode}:static`;
     const p = state.provinces[id];
     switch (this.mode) {
       case 'political': return `p${p.controller}:${p.owner}`;
-      case 'supply': return `s${Math.round(p.supply * 20)}`;
+      case 'state': return `st${p.controller}:${this.index.provinces[id].stateId}`;
+      case 'supply': return `s${Math.round(p.supply * 20)}:${this.index.provinces[id].stateId}`;
       case 'terrain': return 't';
       case 'resource': return 'r';
       case 'victory': return `v${p.controller}`;
@@ -415,10 +443,42 @@ export class MapRenderer {
         const total = Object.values(st.resources).reduce((s, v) => s + (v ?? 0), 0);
         return ramp(Math.min(1, total / 45), RESOURCE_RAMP);
       }
-      case 'supply':
-        return state ? ramp(state.provinces[id].supply, SUPPLY_RAMP) : PALETTE.landBase;
+      case 'supply': {
+        // Capacity times shortage. Shortage alone is a wartime quantity -- a
+        // country at peace is at full supply everywhere -- so on its own this
+        // mode was a single flat colour over the whole map until the first war
+        // broke out, four years into a twelve-year campaign. Multiplying by
+        // what the roads can carry means the mode always shows the logistics
+        // network, and shows the war eating into it once there is one.
+        const capacity = supplyCapacity(this.index, id);
+        const shortage = state ? state.provinces[id].supply : 1;
+        return ramp(capacity * shortage, SUPPLY_RAMP);
+      }
       case 'victory':
-        return ramp(Math.min(1, geo.vp / 60), VICTORY_RAMP);
+        // Against the largest prize on the map, on a square-root curve. The
+        // divisor used to be a flat 60 while the richest province on the board
+        // is worth 34, so the whole map lived in the bottom half of the ramp
+        // -- and since two thirds of provinces are worth 1 to 5, they lived in
+        // the bottom twelfth of it and were indistinguishable. The curve
+        // spends the ramp where the provinces actually are.
+        return ramp(Math.sqrt(geo.vp / this.maxVp), VICTORY_RAMP);
+      case 'state': {
+        // Every state a distinguishable shade of whoever holds it. Provinces
+        // of one state share a tone, so the administrative tier reads as
+        // patches rather than having to be inferred from the seams.
+        if (!state) return PALETTE.landBase;
+        const p = state.provinces[id];
+        const base = rgbToHex(state.countries[p.controller].color);
+        // A cheap integer hash, not a random: the map must look the same on
+        // every machine and across every reload.
+        const h = (geo.stateId * 2654435761) >>> 0;
+        // Signed, so half the states lift and half sink. Mixing in one
+        // direction only crushed every German state toward black, because
+        // Germany's own colour is already dark; the darkening side is also
+        // gentler than the lightening one for the same reason.
+        const t = (((h >>> 8) & 0xff) / 255 - 0.5) * 0.9;
+        return t >= 0 ? mix(base, 0xf2ead8, t) : mix(base, 0x14120e, -t * 0.7);
+      }
       case 'political':
       default: {
         if (!state) return PALETTE.landBase;
@@ -584,6 +644,38 @@ export class MapRenderer {
     g.stroke({ color: PALETTE.frontline, width: 10 / zoom, alpha: 0.2, cap: 'round', join: 'round' });
     for (const r of runs) this.tracePolyline(g, r);
     g.stroke({ color: PALETTE.frontline, width: 3.2 / zoom, alpha: 0.95, cap: 'round', join: 'round' });
+  }
+
+  /**
+   * Seams inside a country, split by which tier they separate.
+   *
+   * The baked map carries none of these: classifyBorders in the map build
+   * decides what an arc separates from provinceOfUnit, which maps the source
+   * geometry to pre-subdivision ids, so after --subdivide every arc inside a
+   * country looks internal to one province and borders.province ships empty.
+   * Rather than reach back into the build, they are recovered here from the
+   * ring vertices two provinces share -- the same routine the front line uses
+   * -- and cached, since neither tier changes for the life of the map.
+   */
+  private internalCache: { province: number[][]; state: number[][] } | null = null;
+
+  private internalBorders(): { province: number[][]; state: number[][] } {
+    if (this.internalCache) return this.internalCache;
+    const province: number[][] = [];
+    const stateSeams: number[][] = [];
+    for (const p of this.index.provinces) {
+      for (const nb of p.neighbors) {
+        // Each seam belongs to exactly one of its two provinces.
+        if (nb <= p.id) continue;
+        const other = this.index.provinces[nb];
+        if (!other) continue;
+        const runs = this.sharedBorderCached(p.id, nb);
+        if (other.stateId === p.stateId) province.push(...runs);
+        else stateSeams.push(...runs);
+      }
+    }
+    this.internalCache = { province, state: stateSeams };
+    return this.internalCache;
   }
 
   private frontCache = new Map<number, number[][]>();

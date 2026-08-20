@@ -12,31 +12,80 @@
  * eats them.
  */
 export const HUD_CSS = `
+/* A column, not a row. Portrait screens are 412px wide: a flag, a name, five
+   figures and a clock on one line pushed the clock off the right-hand edge,
+   which is exactly the control a player needs most. */
 .hud-top {
   position: absolute; top: 0; left: 0; right: 0;
-  display: flex; align-items: center; gap: 8px;
-  padding: calc(var(--safe-top) + 8px) 10px 8px;
-  background: linear-gradient(180deg, rgba(10,13,18,0.96) 0%, rgba(10,13,18,0.82) 65%, rgba(10,13,18,0) 100%);
+  display: flex; flex-direction: column; gap: 4px; touch-action: manipulation;
+  padding: calc(var(--safe-top) + 6px) 8px 8px;
+  /* Opaque and warm, not a fade to nothing. HOI4's top bar is a solid strip of
+     dark steel with a hard bottom edge; a gradient dissolving into the map
+     left the figures sitting on whatever colour the terrain happened to be. */
+  background: linear-gradient(180deg, #2c2b28 0%, #232220 62%, #1b1a17 100%);
+  border-bottom: 1px solid #0d0c0a;
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 2px 8px rgba(0,0,0,0.55);
   pointer-events: auto;
 }
+.hud-top-row { display: flex; align-items: center; gap: 8px; }
+.hud-spacer { flex: 1 1 auto; }
 .hud-flag {
-  width: 32px; height: 22px; border-radius: 2px; flex: 0 0 auto;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.6);
-  background: #2b2e34;
+  width: 34px; height: 23px; flex: 0 0 auto;
+  /* Framed, the way every flag in the game is: a hard dark rule with a thin
+     gold inner edge. An unframed rectangle reads as a placeholder image. */
+  border: 1px solid #0d0c0a;
+  box-shadow: 0 0 0 1px rgba(211,171,99,0.45), 0 1px 3px rgba(0,0,0,0.7);
+  background: #2b2a26;
 }
 .hud-country { min-width: 0; flex: 0 0 auto; }
 .hud-country-name {
-  font-size: 13px; font-weight: 700; letter-spacing: 0;
+  font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 74px;
 }
-.hud-country-tag { font-size: 9px; color: var(--ink-dim); letter-spacing: 1.4px; }
-
-.hud-stats { display: flex; gap: 9px; flex: 1 1 auto; justify-content: center; }
-.hud-stat { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
-.hud-stat-v {
-  font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
-  min-width: 4ch; text-align: center;
+.hud-country-tag {
+  font-size: 9px; color: var(--accent-dim); letter-spacing: var(--track);
 }
+
+/* The figures and the resources are one scrolling row of identical chips. */
+/* The panning these rows want, declared rather than assumed. The page sets
+   touch-action: none on body, and the spec says the used value is the
+   intersection along the hit-test chain, which would veto scrolling here --
+   but measured on Chromium it does not: a swipe scrolls these rows to 287px
+   with the body rule in force and with it removed alike. So these are an
+   explicit statement of intent, not a fix for anything. */
+.hud-stats, .hud-resources {
+  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
+  touch-action: pan-x;
+  /* Should a row still not fit, fading the trailing edge is what tells the
+     player it continues, rather than the last chip being guillotined by the
+     screen edge with no affordance at all. */
+  -webkit-mask-image: linear-gradient(90deg, #000 94%, transparent);
+          mask-image: linear-gradient(90deg, #000 94%, transparent);
+}
+.hud-stats::-webkit-scrollbar, .hud-resources::-webkit-scrollbar { display: none; }
+.hud-stats > *, .hud-resources > * { flex: 0 0 auto; }
+.hud-stat, .hud-res {
+  display: flex; align-items: center; gap: 4px;
+  background: linear-gradient(180deg, #302e29 0%, #211f1b 100%);
+  border: 1px solid #100f0d; border-radius: 2px;
+  box-shadow: var(--bevel);
+  padding: 3px 6px; white-space: nowrap;
+}
+.hud-stat-v {
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+/* The caption next to a figure. Without this rule it inherits the body
+   default -- 16px, regular weight, full-strength ink -- which is larger and
+   louder than the number it is labelling, in seventeen places across the
+   panels. HOI4 does the exact inverse: a big bright value, a small dim name.
+   The top bar has no captions at all; only the panel headers use these. */
+.hud-stat-l {
+  font-size: 10px; font-weight: 400; letter-spacing: var(--track);
+  color: var(--ink-dim);
+}
+.panel-head .hud-stat-v { font-size: 16px; }
+.panel-head .hud-stat { gap: 5px; padding: 5px 7px; }
 /* A brief tint as a figure moves, so a change is noticed without the player
    having to be looking at that number when it happens. */
 .hud-stat-v.is-changing { animation: hud-flash 520ms ease-out; }
@@ -44,43 +93,40 @@ export const HUD_CSS = `
   0% { color: var(--accent); }
   100% { color: inherit; }
 }
-.hud-stat-l { font-size: 10px; color: var(--ink-dim); letter-spacing: 0; text-align: center; }
 
-.hud-clock { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: 0 0 auto; }
-.hud-date { font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.hud-speed { display: flex; align-items: center; gap: 5px; }
+.hud-clock { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.hud-date {
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+  white-space: nowrap; text-align: right; letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.hud-speed { display: flex; align-items: center; gap: 3px; }
+/* 44px square. The speed used to be five 8px pips two pixels apart, which no
+   thumb can hit; these are the controls a player reaches for most. */
 .hud-btn {
-  min-width: 44px; min-height: 30px;
-  background: var(--panel-2); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 4px;
-  font-size: 13px; line-height: 1; cursor: pointer;
+  min-width: 44px; min-height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #3a372f 0%, #26241f 100%);
+  color: var(--ink);
+  border: 1px solid #100f0d; border-radius: 2px;
+  box-shadow: var(--bevel);
+  font-size: 16px; line-height: 1; cursor: pointer;
 }
-.hud-btn.is-paused { color: var(--accent); border-color: var(--accent); }
-.hud-pips { display: flex; gap: 2px; }
-.hud-pip {
-  width: 8px; height: 26px; padding: 0;
-  background: #2b2e34; border: 1px solid var(--line); border-radius: 2px; cursor: pointer;
+.hud-btn:active { background: linear-gradient(180deg, #211f1b 0%, #2b2924 100%); }
+.hud-btn.is-paused { color: var(--accent); border-color: var(--accent-dim); }
+.hud-step { font-size: 20px; font-weight: 700; }
+/* Dimmed, not disabled: a disabled button gives no feedback at all when a
+   player presses it and cannot tell why nothing happened. */
+.hud-step.is-off { color: var(--ink-dim); opacity: 0.45; }
+.hud-speed-v {
+  font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
+  min-width: 1.4ch; text-align: center; color: var(--accent);
 }
-.hud-pip.is-on { background: var(--accent); border-color: var(--accent); }
+/* Greyed while paused: the number is the speed you will resume at, and it
+   should not read as the speed the clock is running at right now. */
+.hud-speed-v.is-paused { color: var(--ink-dim); }
 
-.hud-resources {
-  position: absolute; top: calc(var(--safe-top) + 48px); left: 0; right: 0;
-  display: flex; gap: 5px; padding: 0 10px; overflow-x: auto;
-  scrollbar-width: none; pointer-events: auto;
-  /* Six chips do not fit 412px. Fading the trailing edge is what tells the
-     player the row continues, rather than the last chip being guillotined by
-     the screen edge with no affordance at all. */
-  -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent);
-          mask-image: linear-gradient(90deg, #000 90%, transparent);
-}
-.hud-resources::-webkit-scrollbar { display: none; }
-.hud-res {
-  display: flex; align-items: center; gap: 4px;
-  /* Opaque: at 0.86 the map showed through, and unit counters were legible
-     behind the numbers they were supposed to be read against. */
-  background: #12151b; border: 1px solid rgba(58,61,69,0.75);
-  border-radius: 3px; padding: 3px 6px; white-space: nowrap;
-}
+
 /* Masked rather than drawn: see iconNode. The background supplies the colour,
    so these tint with whatever colour the enclosing control carries. */
 .hud-res-icon, .hud-nav-icon {
@@ -95,33 +141,41 @@ export const HUD_CSS = `
   min-width: 3ch; text-align: right;
 }
 .hud-res-v.is-short { color: var(--danger); font-weight: 700; }
-.hud-res-l { font-size: 10px; color: var(--ink-dim); letter-spacing: 0; }
+.hud-res-l { font-size: 11px; color: var(--ink-dim); letter-spacing: 0; }
 
 /* Map modes hug the top-right so the centre of the screen stays gesture-only. */
 .hud-modes {
-  position: absolute; top: calc(var(--safe-top) + 78px); right: 8px;
-  display: flex; flex-direction: column; gap: 3px; pointer-events: auto;
+  position: absolute; top: calc(var(--hud-top-h, 88px) + 6px); right: 8px;
+  display: flex; flex-direction: column; gap: 5px; pointer-events: auto;
+  touch-action: manipulation;
 }
+/* 44px, like everything else. These were 28px tall on a 31px pitch, and they
+   are the only way to change map mode. */
 .hud-mode {
-  min-width: 58px; min-height: 26px; padding: 0 7px;
-  font-size: 11px; letter-spacing: 0;
-  background: rgba(16,19,25,0.82); color: var(--ink-dim);
-  border: 1px solid rgba(58,61,69,0.85); border-radius: 3px; cursor: pointer;
+  min-width: 58px; min-height: 44px; padding: 0 7px;
+  font-size: 11px; letter-spacing: 0.05em;
+  background: linear-gradient(180deg, rgba(48,46,41,0.94) 0%, rgba(29,28,24,0.94) 100%);
+  color: var(--ink-dim);
+  border: 1px solid #100f0d; border-radius: 2px;
+  box-shadow: var(--bevel); cursor: pointer;
 }
 .hud-mode.is-active {
-  color: #12151b; background: var(--accent); border-color: var(--accent); font-weight: 700;
+  color: #1a1811; font-weight: 700;
+  background: linear-gradient(180deg, #e0bd7c 0%, #b08f4e 100%);
+  border-color: #6d5730;
 }
 
 /* --- alerts -------------------------------------------------------------- */
 .hud-toasts {
-  position: absolute; top: calc(var(--safe-top) + 78px); left: 10px;
+  position: absolute; top: calc(var(--hud-top-h, 88px) + 6px); left: 10px;
   display: flex; flex-direction: column; gap: 4px;
   max-width: 62%; pointer-events: none;
 }
 .hud-toast {
-  font-size: 10px; line-height: 1.3; padding: 5px 8px;
-  background: rgba(16,19,25,0.94); border-left: 3px solid var(--accent);
-  border-radius: 2px; opacity: 1; transition: opacity 500ms ease;
+  font-size: 11px; line-height: 1.45; padding: 6px 9px;
+  background: rgba(28,26,22,0.95); border-left: 3px solid var(--accent);
+  border-radius: 0 2px 2px 0; box-shadow: var(--bevel);
+  opacity: 1; transition: opacity 500ms ease;
 }
 .hud-toast.is-out { opacity: 0; }
 .hud-toast.kind-war { border-left-color: var(--danger); }
@@ -132,47 +186,102 @@ export const HUD_CSS = `
 /* --- bottom sheet -------------------------------------------------------- */
 .hud-sheet {
   position: absolute; left: 0; right: 0; bottom: calc(var(--safe-bottom) + 56px);
-  background: linear-gradient(180deg, rgba(22,25,31,0.98) 0%, rgba(15,17,22,0.99) 100%);
-  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, #2a2823 0%, #201f1b 34%, #1b1a17 100%);
+  border-top: 1px solid #0d0c0a;
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 -4px 14px rgba(0,0,0,0.6);
   transform: translateY(calc(100% + var(--safe-bottom) + 56px));
   transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
-  pointer-events: auto; max-height: 52vh; display: flex; flex-direction: column;
+  pointer-events: auto;
+  /* Height is the player's, dragged on the grip and remembered. One fixed
+     52vh was too short for the technology list and too tall for a province
+     card, and there was no way to say so. */
+  height: var(--sheet-h, 52vh);
+  display: flex; flex-direction: column;
 }
 .hud-sheet.is-open { transform: translateY(0); }
+/* No easing while a finger is on the grip: the transition made the panel lag
+   half a second behind the drag. */
+.hud-sheet.is-dragging { transition: none; }
 .hud-sheet-grip {
-  width: 100%; padding: 7px 0 3px; flex: 0 0 auto; cursor: grab;
-  display: flex; justify-content: center;
+  width: 100%; padding: 14px 0 10px; flex: 0 0 auto; cursor: grab;
+  display: flex; justify-content: center; touch-action: none;
 }
 .hud-sheet-grip::after {
-  content: ''; display: block; width: 34px; height: 4px; border-radius: 2px; background: #4a4e57;
+  content: ''; display: block; width: 40px; height: 4px; border-radius: 2px;
+  background: #56503f; box-shadow: 0 1px 0 rgba(0,0,0,0.6);
 }
 .hud-sheet-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 12px 6px; flex: 0 0 auto;
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 8px 7px; flex: 0 0 auto;
+  border-bottom: 1px solid #0d0c0a;
+  box-shadow: 0 1px 0 var(--edge-hi);
+  margin-bottom: 9px;
 }
-.hud-sheet-title { font-size: 15px; font-weight: 700; }
+/* Letterspaced, the way every panel heading in HOI4 is set. Japanese has no
+   small caps, so the tracking alone has to carry that register. */
+.hud-sheet-title {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 14px; font-weight: 700; letter-spacing: var(--track);
+  color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hud-sheet-zoom {
+  width: 40px; height: 44px; flex: 0 0 auto; font-size: 16px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #37342d 0%, #24221e 100%);
+  color: var(--ink); border: 1px solid #100f0d; border-radius: 2px;
+  box-shadow: var(--bevel); cursor: pointer;
+}
+.hud-sheet-zoom-v {
+  min-width: 4ch; text-align: center; flex: 0 0 auto;
+  font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-dim);
+}
 .hud-sheet-close {
-  width: 32px; height: 32px; font-size: 20px; line-height: 1;
+  width: 40px; height: 44px; flex: 0 0 auto; font-size: 20px; line-height: 1;
   background: transparent; color: var(--ink-dim); border: none; cursor: pointer;
 }
-.hud-sheet-body { padding: 0 12px 12px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.hud-sheet-body {
+  padding: 0 10px 14px; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  /* CSS zoom, not a scaled transform: zoom takes part in layout, so the text
+     rewraps and the scroll height is right. A transform would draw the panel
+     larger while laying it out for the old size, leaving the bottom of a
+     zoomed panel unreachable. */
+  zoom: var(--sheet-zoom, 1);
+}
 
 /* --- panels -------------------------------------------------------------- */
+/* Scrolls rather than clips. Four figures with Japanese labels need about
+   560px and the sheet is 392px wide, so the last one was being cut in half by
+   the panel edge with nothing to say it was there. */
 .panel-head {
-  display: flex; gap: 16px; padding: 6px 0 10px;
-  border-bottom: 1px solid rgba(58,61,69,0.5); margin-bottom: 8px;
+  display: flex; gap: 6px; padding: 8px 9px 9px; margin-bottom: 9px;
+  background: linear-gradient(180deg, #302d27 0%, #232119 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+  overflow-x: auto; scrollbar-width: none; touch-action: pan-x;
+  -webkit-mask-image: linear-gradient(90deg, #000 93%, transparent);
+          mask-image: linear-gradient(90deg, #000 93%, transparent);
 }
+.panel-head::-webkit-scrollbar { display: none; }
+.panel-head > * { flex: 0 0 auto; }
 .panel-sub { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
+/* A section heading with the gold rule HOI4 draws under its own. */
 .panel-label {
-  font-size: 11px; letter-spacing: 0;
-  color: var(--ink-dim); margin: 10px 0 5px;
+  font-size: 11px; letter-spacing: var(--track); font-weight: 700;
+  color: var(--accent); margin: 13px 0 6px; padding-bottom: 4px;
+  border-bottom: 1px solid rgba(211,171,99,0.22);
 }
 .panel-list { display: flex; flex-direction: column; gap: 3px; }
 .panel-row {
   display: flex; align-items: center; gap: 8px;
-  padding: 6px 7px; background: rgba(255,255,255,0.03); border-radius: 3px;
+  padding: 7px 8px; border-radius: 2px;
+  background: linear-gradient(180deg, #2b2924 0%, #211f1b 100%);
+  border: 1px solid #100f0d; box-shadow: var(--bevel);
 }
-.panel-row.is-hostile { background: rgba(210,69,58,0.14); }
+.panel-row.is-hostile {
+  background: linear-gradient(180deg, #3a2622 0%, #2a1a17 100%);
+  border-color: #1a0d0b;
+}
 .panel-row.is-dead { opacity: 0.45; }
 .panel-row-main { flex: 1 1 auto; min-width: 0; }
 .panel-row-title {
@@ -181,37 +290,54 @@ export const HUD_CSS = `
 }
 .panel-row-sub { font-size: 11px; color: var(--ink-dim); margin-top: 2px; line-height: 1.6; }
 .panel-row-controls { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
-.panel-swatch {
-  width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.5);
+/* The same frame the player's own flag carries in the top bar, at list size. */
+.panel-flag {
+  width: 26px; height: 17px; flex: 0 0 auto; object-fit: cover;
+  border: 1px solid #0d0c0a;
+  box-shadow: 0 0 0 1px rgba(211,171,99,0.35), 0 1px 2px rgba(0,0,0,0.7);
 }
 .panel-btn {
-  min-width: 32px; min-height: 32px; padding: 0 6px;
-  background: var(--panel-2); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 3px;
+  min-width: 44px; min-height: 44px; padding: 0 8px;
+  background: linear-gradient(180deg, #38352d 0%, #25231e 100%); color: var(--ink);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
   font-size: 13px; line-height: 1; cursor: pointer;
 }
-.panel-btn.wide { min-width: 52px; font-size: 10px; }
-.panel-btn.danger { color: #ffb0a8; border-color: #6e3a34; }
-.panel-btn:disabled { opacity: 0.35; }
+.panel-btn:active { background: linear-gradient(180deg, #201e1a 0%, #2a2823 100%); }
+/* Japanese has no ascender/descender rhythm to fall back on, so 10px glyphs
+   lose their internal strokes entirely. These are primary verbs -- declare
+   war, start a focus, add a division -- and they were the smallest text on
+   the screen. 12px is the floor for CJK now. */
+.panel-btn.wide { min-width: 64px; font-size: 12px; }
+.panel-btn.danger {
+  color: #f0a49a; border-color: #100f0d;
+  background: linear-gradient(180deg, #43302b 0%, #2c1e1a 100%);
+}
+.panel-btn:disabled { color: #7d7566; background: #1c1b17; }
 .panel-count {
   min-width: 22px; text-align: center; font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+/* Sunk into the plate rather than laid on top of it, and thick enough to
+   read: three transparent pixels were invisible against the row behind. */
 .panel-bar {
-  height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px;
-  margin-top: 4px; overflow: hidden;
+  height: 6px; background: #14130f; border: 1px solid #0b0a08; border-radius: 1px;
+  margin-top: 5px; overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.7);
 }
-.panel-bar-fill { display: block; height: 100%; width: 0%; background: var(--accent); }
+.panel-bar-fill {
+  display: block; height: 100%; width: 0%;
+  background: linear-gradient(180deg, #e2c184 0%, #a8853f 100%);
+}
 .panel-empty { font-size: 11px; color: var(--ink-dim); padding: 8px 0; }
 .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
 .panel-build {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-  min-height: 44px; padding: 6px 8px; text-align: left;
-  background: var(--panel-2); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 3px; cursor: pointer;
+  min-height: 46px; padding: 7px 9px; text-align: left;
+  background: linear-gradient(180deg, #33302a 0%, #232119 100%); color: var(--ink);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+  cursor: pointer;
 }
-.panel-build:disabled { opacity: 0.35; }
+.panel-build:disabled { color: #8b8371; }
 .panel-build-title { font-size: 13px; font-weight: 700; }
 .panel-build-sub {
   font-size: 11px; color: var(--ink-dim); line-height: 1.7;
@@ -223,31 +349,40 @@ export const HUD_CSS = `
   display: block; margin-top: 5px; font-size: 11px; letter-spacing: 0;
   color: var(--accent);
 }
-.panel-build.is-blocked { opacity: 0.55; }
+.panel-build.is-blocked {
+  background: linear-gradient(180deg, #2a2822 0%, #1e1c18 100%);
+  color: #a49b89;
+}
+.panel-build.is-blocked .panel-build-sub { color: #8b8371; }
 .panel-build { position: relative; }
-.panel-build.is-on { border-color: var(--accent); color: var(--accent); }
+.panel-build.is-on {
+  border-color: var(--accent-dim); color: var(--accent);
+  background: linear-gradient(180deg, #3d3626 0%, #2a2418 100%);
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(211,171,99,0.18);
+}
 /* Sits on the recruit tile rather than beside it: the tile is already the
    width of half the sheet, and a second full-width row per template would
    push the equipment list off the screen. */
 .panel-edit {
-  position: absolute; top: 4px; right: 4px; min-width: 44px; min-height: 30px;
-  padding: 2px 8px; font-size: 10px; color: var(--ink-dim);
-  background: rgba(0,0,0,0.35); border: 1px solid rgba(58,61,69,0.9);
-  border-radius: 3px;
+  position: absolute; top: 4px; right: 4px; min-width: 44px; min-height: 44px;
+  padding: 2px 8px; font-size: 12px; color: var(--ink-dim);
+  background: rgba(0,0,0,0.4); border: 1px solid #100f0d; border-radius: 2px;
 }
 .panel-input {
   flex: 1; min-height: 40px; padding: 8px 10px; font: inherit; font-size: 13px;
-  color: var(--ink); background: rgba(0,0,0,0.35);
-  border: 1px solid rgba(58,61,69,0.9); border-radius: 3px;
+  color: var(--ink); background: #14130f;
+  border: 1px solid #0b0a08; border-radius: 2px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.7);
 }
 .panel-btn.primary {
-  background: rgba(216,176,74,0.14); border-color: var(--accent); color: var(--accent);
+  background: linear-gradient(180deg, #e0bd7c 0%, #a8853f 100%);
+  border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
 .panel-build.is-blocked .panel-build-note { color: var(--danger); }
 .panel-kvs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; }
 .panel-kv {
-  display: flex; justify-content: space-between; gap: 8px; font-size: 10px;
-  padding: 3px 0; border-bottom: 1px solid rgba(58,61,69,0.35);
+  display: flex; justify-content: space-between; gap: 8px; font-size: 12px;
+  padding: 3px 0; border-bottom: 1px dotted rgba(157,148,132,0.3);
 }
 .panel-k { color: var(--ink-dim); }
 .panel-v { font-variant-numeric: tabular-nums; text-align: right; }
@@ -255,10 +390,14 @@ export const HUD_CSS = `
 /* --- bottom navigation --------------------------------------------------- */
 .hud-nav {
   position: absolute; left: 0; right: 0; bottom: 0;
-  display: flex; padding-bottom: var(--safe-bottom);
-  background: rgba(12,14,19,0.97); border-top: 1px solid var(--line);
+  display: flex; padding-bottom: var(--safe-bottom); touch-action: manipulation;
+  background: linear-gradient(180deg, #2c2a25 0%, #1c1b17 100%);
+  border-top: 1px solid #0d0c0a;
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 -2px 8px rgba(0,0,0,0.5);
   pointer-events: auto;
 }
+/* A hairline between tabs, as on the real toolbar. */
+.hud-nav-btn + .hud-nav-btn { border-left: 1px solid rgba(0,0,0,0.45); }
 .hud-nav-btn {
   flex: 1 1 0; min-width: 0; min-height: 56px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
@@ -269,14 +408,17 @@ export const HUD_CSS = `
    square corners and no relationship to anything else on screen, so it read as
    a compositing seam rather than a selected tab. */
 .hud-nav-btn { position: relative; }
-.hud-nav-btn.is-active { color: var(--accent); background: transparent; }
+.hud-nav-btn.is-active {
+  color: var(--accent);
+  background: linear-gradient(180deg, rgba(211,171,99,0.14) 0%, rgba(211,171,99,0) 70%);
+}
 .hud-nav-btn.is-active::before {
   content: ''; position: absolute; top: 0; left: 22%; right: 22%;
   height: 2px; background: var(--accent); border-radius: 0 0 2px 2px;
 }
 .hud-nav-icon { width: 18px; height: 18px; }
 .hud-nav-label {
-  font-size: 10px; letter-spacing: 0; white-space: nowrap;
+  font-size: 11px; letter-spacing: 0; white-space: nowrap;
   overflow: hidden; text-overflow: clip;
 }
 
@@ -307,57 +449,157 @@ export const HUD_CSS = `
 }
 
 @media (max-width: 380px) {
-  .hud-stats { gap: 5px; }
+  .hud-stats { gap: 3px; }
+  /* Below 380px the clock cannot keep its 44px targets and the country name
+     at the same time. The flag and the three-letter tag already say who you
+     are; the speed control is the one thing on this bar a player must hit. */
+  .hud-country-name { display: none; }
   .panel-kvs, .panel-grid { grid-template-columns: 1fr; }
 }
 @media (min-width: 700px) {
-  .hud-sheet { max-height: 44vh; }
   .panel-kvs { grid-template-columns: 1fr 1fr 1fr; }
+}
+/* A phone on its side is 412px tall. A bottom sheet at half of that, over an
+   86px bar and a 57px tab strip, leaves 55px of map -- the panel and the map
+   cannot both be bottom-anchored on a landscape phone. Dock it to the left
+   instead, which is where HOI4 docks its own panels. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .hud-sheet {
+    top: var(--hud-top-h, 88px);
+    bottom: calc(var(--safe-bottom) + 56px);
+    right: auto; width: min(62%, 430px); height: auto;
+    border-top: none; border-right: 1px solid #0d0c0a;
+    box-shadow: inset -1px 0 0 var(--edge-hi), 4px 0 14px rgba(0,0,0,0.6);
+    transform: translateX(-101%);
+  }
+  .hud-sheet.is-open { transform: translateX(0); }
+  /* Nothing to drag vertically when the panel is already full height. */
+  .hud-sheet-grip { display: none; }
+  .hud-sheet-header { padding-top: 8px; }
+  /* The map modes would sit on top of the docked panel. */
+  .hud-modes { top: auto; bottom: calc(var(--safe-bottom) + 62px); flex-direction: row; }
+  .hud-toasts { max-width: 34%; left: auto; right: 10px; }
 }
 
 button { transition: background 90ms ease, transform 90ms ease, color 90ms ease; }
 button:active { transform: scale(0.96); }
-.hud-pip:active, .hud-nav-btn:active { transform: none; }
+.hud-nav-btn:active { transform: none; }
 
 .panel-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
 .panel-chip {
-  min-height: 34px; padding: 6px 11px; font-size: 12px;
-  background: rgba(30,33,40,0.9); border: 1px solid var(--line);
+  min-height: 44px; padding: 7px 11px; font-size: 12px;
+  background: linear-gradient(180deg, #35322b 0%, #24221d 100%);
+  border: 1px solid #100f0d; box-shadow: var(--bevel);
   border-radius: 3px; color: var(--ink-dim);
 }
 .panel-chip.is-on {
-  background: rgba(216,176,74,0.16); border-color: var(--accent); color: var(--accent);
-  font-weight: 700;
+  background: linear-gradient(180deg, #e0bd7c 0%, #b08f4e 100%);
+  border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
 .panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
 /* A state row is the tap target for "build here", so it is a button and needs
    to look like a row rather than like a control. */
 .panel-row.wide-row {
   width: 100%; min-height: 46px; text-align: left; cursor: pointer;
-  background: transparent; border: none; border-bottom: 1px solid rgba(58,61,69,0.35);
+  background: transparent; border: none;
+  border-bottom: 1px solid rgba(157,148,132,0.18);
+  box-shadow: none;
   display: flex; align-items: center; gap: 8px; color: inherit;
 }
-.panel-row.wide-row.is-blocked { opacity: 0.45; }
+.panel-row.wide-row.is-blocked { color: #8b8371; }
 .panel-row-tag { font-size: 12px; color: var(--accent); flex: none; }
 .panel-row.wide-row.is-blocked .panel-row-tag { color: var(--ink-dim); }
+
+/* A section heading that opens and closes. Sized as a full-width control,
+   because it is one. */
+.panel-section {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  min-height: 44px; padding: 0 10px; margin: 12px 0 6px;
+  background: linear-gradient(180deg, #322f28 0%, #232119 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--accent); font: inherit; font-size: 12px; font-weight: 700;
+  letter-spacing: var(--track); text-align: left; cursor: pointer;
+}
+.panel-section-l { flex: 1 1 auto; min-width: 0; }
+.panel-section-n {
+  flex: 0 0 auto; min-width: 2.2ch; padding: 2px 6px;
+  background: #14130f; border-radius: 2px;
+  color: var(--ink-dim); font-size: 11px; font-variant-numeric: tabular-nums;
+  letter-spacing: 0; text-align: center;
+}
+.panel-caret {
+  flex: 0 0 auto; width: 0; height: 0;
+  border-left: 5px solid var(--accent);
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  transition: transform 140ms ease;
+}
+.panel-section.is-open .panel-caret { transform: rotate(90deg) translateX(1px); }
 
 /* A focus or a research slot is a card, not a row: it carries a name, a
    sentence, a bar and an action, and squeezing that into a list row makes all
    four illegible. */
 .panel-focus {
-  padding: 10px 11px; margin-bottom: 7px;
-  background: rgba(26,29,36,0.85); border: 1px solid var(--line); border-radius: 3px;
+  padding: 11px 12px; margin-bottom: 8px;
+  background: linear-gradient(180deg, #2d2a24 0%, #201f1b 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
 }
-.panel-focus.is-current { border-color: var(--accent); background: rgba(216,176,74,0.08); }
+.panel-focus.is-current {
+  border-color: var(--accent-dim);
+  background: linear-gradient(180deg, #3a3323 0%, #262117 100%);
+  box-shadow: var(--bevel), inset 0 0 0 1px rgba(211,171,99,0.2);
+}
+/* Dimmed by token, not by opacity. Compositing a whole card at 0.5 took the
+   prerequisite line to 1.76:1 and the description to 2.42:1 against a 4.5:1
+   floor -- and at the 1936 start every focus but one is locked, so most of the
+   panel was unreadable. The blocking reason keeps its full strength: it is the
+   one line a player who cannot press the button actually needs. */
 .panel-focus.is-done { opacity: 0.62; }
-.panel-focus.is-locked { opacity: 0.5; }
+.panel-focus.is-locked {
+  background: linear-gradient(180deg, #262420 0%, #1c1b18 100%);
+}
+.panel-focus.is-locked .panel-focus-name { color: #a49b89; }
+.panel-focus.is-locked .panel-focus-desc,
+.panel-focus.is-locked .panel-focus-meta { color: #8b8371; }
 .panel-focus-name { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
 .panel-focus-desc { font-size: 11px; line-height: 1.65; color: var(--ink-dim); }
 .panel-focus-effect {
-  margin-top: 5px; font-size: 11px; line-height: 1.6; color: #9fc08a;
+  margin-top: 5px; font-size: 11px; line-height: 1.6; color: #a8c47f;
 }
 .panel-focus-block { margin-top: 6px; font-size: 11px; color: var(--danger); }
 .panel-focus-meta { margin-top: 4px; font-size: 11px; color: var(--ink-dim); }
-.panel-focus .panel-btn.wide { margin-top: 8px; width: 100%; min-height: 38px; }
+.panel-focus .panel-btn.wide { margin-top: 9px; width: 100%; min-height: 46px; }
+
+/* --- chain of command ---------------------------------------------------- */
+/* The whole card header is the control that opens it, so it is a button with
+   the title's typography rather than a title with a button beside it. */
+.panel-army-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: 44px; padding: 0; margin-bottom: 2px;
+  background: none; border: none; box-shadow: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.panel-army-head .panel-focus-name { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.panel-army-count {
+  flex: 0 0 auto; padding: 3px 8px;
+  background: #14130f; border: 1px solid #0b0a08; border-radius: 2px;
+  font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-dim);
+}
+/* A general with more divisions than he can handle is the one number on this
+   panel the player has to notice, so it is the one thing painted in alarm. */
+.panel-army-head.is-over .panel-army-count {
+  color: var(--danger); border-color: #4a1f1a; font-weight: 700;
+}
+.panel-attrs { display: flex; gap: 5px; margin: 8px 0 2px; }
+.panel-attr {
+  flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 5px 2px;
+  background: linear-gradient(180deg, #302d27 0%, #232119 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+}
+.panel-attr-l { font-size: 10px; color: var(--ink-dim); letter-spacing: var(--track); }
+.panel-attr-v {
+  font-size: 16px; font-weight: 700; color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
 .panel-focus .panel-bar { margin-top: 7px; }
 `;

@@ -1,14 +1,37 @@
+/*
+ * The palette is sampled from the real game rather than invented: the six
+ * screenshots under docs/reference were read pixel by pixel, and the dominant
+ * colours of HOI4's own chrome are what these tokens hold. The scheme used to
+ * be a cool near-black with a blue cast (#1b1c20, #24262b, #3a3d45); HOI4's
+ * chrome is warm -- red above green above blue in every plate it draws --
+ * which is what gives it the look of oiled steel and map varnish rather than
+ * of a phone settings screen.
+ */
 :root {
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --ink: #f2ead8;
-  --ink-dim: #b6a98c;
-  --panel: #1b1c20;
-  --panel-2: #24262b;
-  --line: #3a3d45;
-  --accent: #d8b04a;
-  --danger: #d2453a;
-  --good: #5fbf6a;
+  --ink: #e9e3d5;
+  --ink-dim: #9d9484;
+  /* Panel body, sampled at (35,34,30); the deep tone is the inset well the
+     game drops its lists into. */
+  --panel: #23221e;
+  --panel-2: #2e2b26;
+  --panel-deep: #171613;
+  --line: #3e3a32;
+  /* The bevel. Every frame in HOI4 catches a warm light on its top edge and
+     drops a hard shadow off its bottom one; a flat 1px border is the single
+     largest thing separating a mock-up from the real chrome. */
+  --edge-hi: rgba(244,216,158,0.11);
+  --edge-lo: rgba(0,0,0,0.55);
+  --bevel: inset 0 1px 0 var(--edge-hi), inset 0 -1px 0 var(--edge-lo);
+  /* Frame gold, sampled off a focus icon's highlight at (242,211,146). */
+  --accent: #d3ab63;
+  --accent-dim: #8a7040;
+  --danger: #c0483c;
+  --good: #7ba649;
+  /* Tracking. Latin chrome in HOI4 is letterspaced small caps; Japanese has no
+     case, so the tracking alone has to carry the register. */
+  --track: 0.13em;
 }
 
 * { box-sizing: border-box; }
@@ -19,7 +42,7 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #0b1622;
+  background: #101b26;
   color: var(--ink);
   font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
     "Noto Sans CJK JP", Meiryo, "Yu Gothic UI", "Helvetica Neue", Arial,
@@ -50,7 +73,7 @@ html, body {
   z-index: 50;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle at 50% 40%, #1d3550 0%, #0b1622 70%);
+  background: radial-gradient(circle at 50% 40%, #24303a 0%, #12100d 72%);
   transition: opacity 420ms ease;
 }
 #boot.done { opacity: 0; pointer-events: none; }
@@ -74,7 +97,7 @@ html, body {
   margin: 26px auto 10px;
   height: 3px;
   width: 100%;
-  background: #23303f;
+  background: #2b2820;
   overflow: hidden;
 }
 .boot-bar span {
