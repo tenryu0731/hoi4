@@ -120,41 +120,55 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const countryTag = el('div', 'hud-country-tag');
   nameBox.append(countryName, countryTag);
 
+  // One strip of icon-and-number chips, the way HOI4's top bar reads: the
+  // icon identifies the figure and the name is the accessible label. Stacked
+  // value-over-label boxes needed 30px of height each and still could not fit
+  // five figures plus six resources across 412px.
   const stats = el('div', 'hud-stats');
   const statNodes: Record<string, HTMLElement> = {};
-  const addStat = (key: string, label: string) => {
+  const addStat = (key: string, label: string, icon: string) => {
     const box = el('div', 'hud-stat');
     const v = el('span', 'hud-stat-v', '0');
-    box.append(v, el('span', 'hud-stat-l', label));
+    box.title = label;
+    box.setAttribute('aria-label', label);
+    box.append(iconNode('hud-res-icon', `icons/${icon}.svg`), v);
     stats.append(box);
     statNodes[key] = v;
   };
-  addStat('pp', UI.politicalPower);
-  addStat('mp', UI.manpower);
-  addStat('civ', UI.civFactories);
-  addStat('mil', UI.milFactories);
-  addStat('div', UI.divisions);
+  addStat('pp', UI.politicalPower, 'ui-political_power');
+  addStat('mp', UI.manpower, 'ui-manpower');
+  addStat('civ', UI.civFactories, 'ui-factory');
+  addStat('mil', UI.milFactories, 'ui-military_factory');
+  addStat('div', UI.divisions, 'ui-army');
 
+  // The clock is a cluster of real buttons, not a row of hairlines. The speed
+  // used to be five 8px pips two pixels apart: a target no thumb can hit, in a
+  // corner where it collided with the resource strip below it. Slower and
+  // faster are steppers now, with the step shown between them.
   const clock = el('div', 'hud-clock');
   const dateNode = el('div', 'hud-date', '');
   const speedRow = el('div', 'hud-speed');
+  const slower = el('button', 'hud-btn hud-step', '−');
+  slower.setAttribute('aria-label', `${UI.speed} −`);
   const pauseBtn = el('button', 'hud-btn hud-pause', '▶');
   pauseBtn.setAttribute('aria-label', UI.playPause);
-  const speedPips = el('div', 'hud-pips');
-  const pips: HTMLElement[] = [];
-  for (let i = 1; i <= 5; i++) {
-    const pip = el('button', 'hud-pip');
-    pip.dataset.speed = String(i);
-    pip.setAttribute('aria-label', `${UI.speed} ${i}`);
-    pips.push(pip);
-    speedPips.append(pip);
-  }
-  speedRow.append(pauseBtn, speedPips);
+  const speedNode = el('span', 'hud-speed-v', '2');
+  const faster = el('button', 'hud-btn hud-step', '＋');
+  faster.setAttribute('aria-label', `${UI.speed} ＋`);
+  speedRow.append(slower, pauseBtn, speedNode, faster);
   clock.append(dateNode, speedRow);
-  top.append(flag, nameBox, stats, clock);
+
+  // Two rows: identity and clock above, the figures below. One row cannot hold
+  // a flag, a name, five figures and a clock on a 412px screen without one of
+  // them being pushed off, which is what was happening.
+  const topRow = el('div', 'hud-top-row');
+  topRow.append(flag, nameBox, el('div', 'hud-spacer'), clock);
 
   // --- resource strip ------------------------------------------------------
-  const resStrip = el('div', 'hud-resources');
+  // Appended to the same row as the figures rather than absolutely positioned
+  // 48px down: that offset was measured against a one-row top bar and left the
+  // strip lying across the figures the moment the bar needed two rows.
+  const resStrip = stats;
   const resNodes: Partial<Record<ResourceType, HTMLElement>> = {};
   for (const r of RESOURCE_TYPES) {
     const chip = el('div', 'hud-res');
@@ -227,7 +241,22 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   outcomeCard.append(outcomeTitle, outcomeSub, outcomeAgain);
   outcome.append(outcomeCard);
 
-  root.append(top, resStrip, modeBar, toasts, sheet, nav, outcome);
+  const strip = el('div', 'hud-strip');
+  strip.append(stats);
+  top.append(topRow, strip);
+
+  root.append(top, modeBar, toasts, sheet, nav, outcome);
+
+  // Everything below the top bar is placed against its measured height rather
+  // than a constant. The constant was 78px, chosen when the bar was one row;
+  // the bar grows with the safe-area inset and with the text size the player
+  // has chosen, and the map-mode buttons were landing on top of it.
+  const measureTop = () => {
+    root.style.setProperty('--hud-top-h', `${Math.round(top.getBoundingClientRect().height)}px`);
+  };
+  const topObserver = new ResizeObserver(measureTop);
+  topObserver.observe(top);
+  measureTop();
 
   // -------------------------------------------------------------------------
   // Behaviour
@@ -278,16 +307,21 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     }
   });
 
+  // The steppers move the chosen speed, which is remembered across a pause, so
+  // pressing + while paused sets the speed you will resume at rather than
+  // silently unpausing.
+  const step = (delta: number) => {
+    const next = Math.min(5, Math.max(1, game.chosenSpeed + delta)) as 1 | 2 | 3 | 4 | 5;
+    if (game.speed === 0) game.pauseAt(next);
+    else game.setSpeed(next);
+    syncSpeed();
+  };
+  slower.addEventListener('click', () => step(-1));
+  faster.addEventListener('click', () => step(1));
   pauseBtn.addEventListener('click', () => {
     game.togglePause();
     syncSpeed();
   });
-  for (const pip of pips) {
-    pip.addEventListener('click', () => {
-      game.setSpeed(Number(pip.dataset.speed) as 1 | 2 | 3 | 4 | 5);
-      syncSpeed();
-    });
-  }
 
   function syncModes(): void {
     for (const b of modeButtons) {
@@ -299,7 +333,13 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     const s = game.speed;
     setText(pauseBtn, s === 0 ? '▶' : '⏸');
     pauseBtn.classList.toggle('is-paused', s === 0);
-    pips.forEach((pip, i) => pip.classList.toggle('is-on', s > i));
+    // The stepper shows the speed the clock will run at, which is the stored
+    // speed even while paused: pausing is not the same as choosing speed 0,
+    // and a player who pauses at 5 expects 5 back when they resume.
+    setText(speedNode, String(game.chosenSpeed));
+    speedNode.classList.toggle('is-paused', s === 0);
+    slower.classList.toggle('is-off', game.chosenSpeed <= 1);
+    faster.classList.toggle('is-off', game.chosenSpeed >= 5);
   }
 
   // --- toasts --------------------------------------------------------------
@@ -422,6 +462,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
   return () => {
     unsubscribe();
+    topObserver.disconnect();
     root.innerHTML = '';
   };
 }

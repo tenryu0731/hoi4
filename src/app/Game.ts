@@ -226,12 +226,34 @@ export class Game {
     return this.time.speed;
   }
 
+  /** The speed the clock runs at when unpaused; survives a pause. */
+  private resumeSpeed: Exclude<Speed, 0> = 3;
+
+  /** Choose the speed to resume at without leaving the pause. */
+  pauseAt(s: Exclude<Speed, 0>): void {
+    this.resumeSpeed = s;
+  }
+
+  /** What the speed control should read, paused or not. */
+  get chosenSpeed(): Exclude<Speed, 0> {
+    return this.time.speed === 0 ? this.resumeSpeed : this.time.speed;
+  }
+
   setSpeed(s: Speed): void {
+    if (s !== 0) this.resumeSpeed = s;
     this.time.speed = s;
   }
 
   togglePause(): void {
-    this.time.speed = this.time.speed === 0 ? 3 : 0;
+    // Resume at the speed the player chose, not at a constant. Pausing at 5 to
+    // read a battle and coming back at 3 is a speed change the player did not
+    // ask for, and they have no way to tell it happened.
+    if (this.time.speed === 0) {
+      this.time.speed = this.resumeSpeed;
+    } else {
+      this.resumeSpeed = this.time.speed;
+      this.time.speed = 0;
+    }
   }
 
   setMapMode(mode: MapMode): void {

@@ -12,13 +12,18 @@
  * eats them.
  */
 export const HUD_CSS = `
+/* A column, not a row. Portrait screens are 412px wide: a flag, a name, five
+   figures and a clock on one line pushed the clock off the right-hand edge,
+   which is exactly the control a player needs most. */
 .hud-top {
   position: absolute; top: 0; left: 0; right: 0;
-  display: flex; align-items: center; gap: 8px;
-  padding: calc(var(--safe-top) + 8px) 10px 8px;
-  background: linear-gradient(180deg, rgba(10,13,18,0.96) 0%, rgba(10,13,18,0.82) 65%, rgba(10,13,18,0) 100%);
+  display: flex; flex-direction: column; gap: 6px;
+  padding: calc(var(--safe-top) + 6px) 8px 8px;
+  background: linear-gradient(180deg, rgba(10,13,18,0.96) 0%, rgba(10,13,18,0.90) 72%, rgba(10,13,18,0) 100%);
   pointer-events: auto;
 }
+.hud-top-row { display: flex; align-items: center; gap: 8px; }
+.hud-spacer { flex: 1 1 auto; }
 .hud-flag {
   width: 32px; height: 22px; border-radius: 2px; flex: 0 0 auto;
   box-shadow: 0 1px 3px rgba(0,0,0,0.6);
@@ -31,11 +36,24 @@ export const HUD_CSS = `
 }
 .hud-country-tag { font-size: 9px; color: var(--ink-dim); letter-spacing: 1.4px; }
 
-.hud-stats { display: flex; gap: 9px; flex: 1 1 auto; justify-content: center; }
-.hud-stat { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+/* The figures and the resources are one scrolling row of identical chips. */
+.hud-strip {
+  display: flex; overflow-x: auto; scrollbar-width: none;
+  /* Fading the trailing edge is what tells the player the row continues,
+     rather than the last chip being guillotined by the screen edge. */
+  -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent);
+          mask-image: linear-gradient(90deg, #000 92%, transparent);
+}
+.hud-strip::-webkit-scrollbar { display: none; }
+.hud-stats { display: flex; gap: 4px; flex: 0 0 auto; padding-right: 14px; }
+.hud-stat {
+  display: flex; align-items: center; gap: 4px;
+  background: #12151b; border: 1px solid rgba(58,61,69,0.75);
+  border-radius: 3px; padding: 3px 6px; white-space: nowrap;
+}
 .hud-stat-v {
-  font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
-  min-width: 4ch; text-align: center;
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 /* A brief tint as a figure moves, so a change is noticed without the player
    having to be looking at that number when it happens. */
@@ -44,36 +62,36 @@ export const HUD_CSS = `
   0% { color: var(--accent); }
   100% { color: inherit; }
 }
-.hud-stat-l { font-size: 10px; color: var(--ink-dim); letter-spacing: 0; text-align: center; }
 
-.hud-clock { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: 0 0 auto; }
-.hud-date { font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.hud-speed { display: flex; align-items: center; gap: 5px; }
+.hud-clock { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.hud-date {
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+  white-space: nowrap; text-align: right;
+}
+.hud-speed { display: flex; align-items: center; gap: 3px; }
+/* 44px square. The speed used to be five 8px pips two pixels apart, which no
+   thumb can hit; these are the controls a player reaches for most. */
 .hud-btn {
-  min-width: 44px; min-height: 30px;
+  min-width: 44px; min-height: 44px;
+  display: flex; align-items: center; justify-content: center;
   background: var(--panel-2); color: var(--ink);
   border: 1px solid var(--line); border-radius: 4px;
-  font-size: 13px; line-height: 1; cursor: pointer;
+  font-size: 16px; line-height: 1; cursor: pointer;
 }
 .hud-btn.is-paused { color: var(--accent); border-color: var(--accent); }
-.hud-pips { display: flex; gap: 2px; }
-.hud-pip {
-  width: 8px; height: 26px; padding: 0;
-  background: #2b2e34; border: 1px solid var(--line); border-radius: 2px; cursor: pointer;
+.hud-step { font-size: 20px; font-weight: 700; }
+/* Dimmed, not disabled: a disabled button gives no feedback at all when a
+   player presses it and cannot tell why nothing happened. */
+.hud-step.is-off { color: var(--ink-dim); opacity: 0.45; }
+.hud-speed-v {
+  font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
+  min-width: 1.4ch; text-align: center; color: var(--accent);
 }
-.hud-pip.is-on { background: var(--accent); border-color: var(--accent); }
+/* Greyed while paused: the number is the speed you will resume at, and it
+   should not read as the speed the clock is running at right now. */
+.hud-speed-v.is-paused { color: var(--ink-dim); }
 
-.hud-resources {
-  position: absolute; top: calc(var(--safe-top) + 48px); left: 0; right: 0;
-  display: flex; gap: 5px; padding: 0 10px; overflow-x: auto;
-  scrollbar-width: none; pointer-events: auto;
-  /* Six chips do not fit 412px. Fading the trailing edge is what tells the
-     player the row continues, rather than the last chip being guillotined by
-     the screen edge with no affordance at all. */
-  -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent);
-          mask-image: linear-gradient(90deg, #000 90%, transparent);
-}
-.hud-resources::-webkit-scrollbar { display: none; }
+.hud-resources { display: flex; gap: 4px; flex: 0 0 auto; }
 .hud-res {
   display: flex; align-items: center; gap: 4px;
   /* Opaque: at 0.86 the map showed through, and unit counters were legible
@@ -99,7 +117,7 @@ export const HUD_CSS = `
 
 /* Map modes hug the top-right so the centre of the screen stays gesture-only. */
 .hud-modes {
-  position: absolute; top: calc(var(--safe-top) + 78px); right: 8px;
+  position: absolute; top: calc(var(--hud-top-h, 88px) + 6px); right: 8px;
   display: flex; flex-direction: column; gap: 3px; pointer-events: auto;
 }
 .hud-mode {
@@ -114,7 +132,7 @@ export const HUD_CSS = `
 
 /* --- alerts -------------------------------------------------------------- */
 .hud-toasts {
-  position: absolute; top: calc(var(--safe-top) + 78px); left: 10px;
+  position: absolute; top: calc(var(--hud-top-h, 88px) + 6px); left: 10px;
   display: flex; flex-direction: column; gap: 4px;
   max-width: 62%; pointer-events: none;
 }
@@ -307,7 +325,11 @@ export const HUD_CSS = `
 }
 
 @media (max-width: 380px) {
-  .hud-stats { gap: 5px; }
+  .hud-stats { gap: 3px; }
+  /* Below 380px the clock cannot keep its 44px targets and the country name
+     at the same time. The flag and the three-letter tag already say who you
+     are; the speed control is the one thing on this bar a player must hit. */
+  .hud-country-name { display: none; }
   .panel-kvs, .panel-grid { grid-template-columns: 1fr; }
 }
 @media (min-width: 700px) {
@@ -317,7 +339,7 @@ export const HUD_CSS = `
 
 button { transition: background 90ms ease, transform 90ms ease, color 90ms ease; }
 button:active { transform: scale(0.96); }
-.hud-pip:active, .hud-nav-btn:active { transform: none; }
+.hud-nav-btn:active { transform: none; }
 
 .panel-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
 .panel-chip {
