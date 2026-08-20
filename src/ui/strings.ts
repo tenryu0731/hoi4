@@ -50,6 +50,35 @@ export const UI = {
 
   // National focus
   focusTree: '方針ツリー',
+  // --- chain of command ---
+  navCommand: '軍',
+  armies: '編制',
+  armyGroup: '軍集団',
+  noCommander: '司令官 空席',
+  appointCommander: '司令官を任命',
+  commanderPool: '待機中の将官',
+  fieldMarshal: '元帥',
+  general: '将軍',
+  skill: '練度',
+  attrAttack: '攻撃',
+  attrDefence: '防御',
+  attrPlanning: '計画',
+  attrLogistics: '兵站',
+  commandLoad: '指揮下',
+  overloaded: '指揮過多',
+  planningBonus: '準備',
+  orderNone: '命令なし',
+  orderFront: '戦線を保持',
+  orderOffensive: '進攻',
+  orderGarrison: '駐屯',
+  setOrderFront: '戦線',
+  setOrderClear: '解除',
+  pickEnemy: '対象',
+  divisionsInArmy: '個師団',
+  newArmy: '＋軍を編成',
+  newArmyGroup: '＋軍集団',
+  disband: '解隊',
+  unassigned: '未編入',
   focusAvailable: '着手できる方針',
   focusLocked: '前提を満たしていない方針',
   focusCompleted: '完了した方針',
@@ -205,6 +234,26 @@ export const BUILDING: Record<BuildingType, string> = {
 export const TERRAIN: Record<TerrainType, string> = {
   plains: '平地', forest: '森林', hills: '丘陵', mountain: '山岳',
   urban: '市街地', marsh: '湿地', desert: '砂漠',
+};
+
+/**
+ * Commander traits.
+ *
+ * Named for what the officer is known for rather than translated literally --
+ * "logistics wizard" is a joke in English and reads as nonsense in Japanese,
+ * where the military register wants a noun.
+ */
+export const TRAIT: Record<string, string> = {
+  organiser: '組織家',
+  logistics_wizard: '兵站の達人',
+  defensive_doctrine: '防勢ドクトリン',
+  fast_planner: '迅速な立案',
+  thorough_planner: '周到な立案',
+  panzer_leader: '装甲部隊指揮官',
+  infantry_leader: '歩兵指揮官',
+  trickster: '謀略家',
+  winter_specialist: '冬季戦の専門家',
+  naval_invader: '上陸戦の専門家',
 };
 
 export const BATTALION: Record<BattalionType, string> = {

@@ -4,8 +4,9 @@ import {
 } from '../sim/core/data';
 import {
   BATTALION_TYPES, EQUIPMENT_TYPES, RESOURCE_TYPES, SUPPORT_TYPES,
-  type BattalionType, type BuildingType, type DivisionTemplate,
-  type EquipmentType, type ResourceType, type StateRuntime, type SupportType,
+  type Army, type BattalionType, type BuildingType, type Commander, type Country,
+  type CountryId, type DivisionTemplate, type EquipmentType, type ResourceType,
+  type StateRuntime, type SupportType,
 } from '../sim/core/types';
 import { deriveTemplate } from '../sim/scenario/europe1936';
 import { canQueueBuilding } from '../sim/economy/production';
@@ -15,8 +16,12 @@ import {
   BRANCH_LIST, researchSummary, researchView, techTree, type TechBranch,
 } from '../sim/research';
 import {
+  ARMY_GROUP_LIMIT, COMMAND_LIMIT, armyById, commandLimit, commanderById, idleCommanders,
+} from '../sim/military/command';
+import { maxPlanning } from '../sim/military/frontline';
+import {
   BATTALION, BUILDING, EQUIPMENT as EQUIPMENT_NAME, IDEOLOGY, RESOURCE,
-  SUPPORT, TERRAIN, UI, country,
+  SUPPORT, TERRAIN, TRAIT, UI, country,
 } from './strings';
 
 /**
@@ -28,7 +33,7 @@ import {
  */
 
 export type PanelId =
-  | 'focus' | 'research' | 'production' | 'construction' | 'army'
+  | 'focus' | 'research' | 'production' | 'construction' | 'army' | 'command'
   | 'diplomacy' | 'province' | 'designer';
 
 export interface Panel {
@@ -927,6 +932,7 @@ export const designerPanel: Panel = {
 export const PANELS: Record<PanelId, Panel> = {
   get focus() { return focusPanel; },
   get research() { return researchPanel; },
+  get command() { return commandPanel; },
   production: productionPanel,
   construction: constructionPanel,
   army: armyPanel,
@@ -936,6 +942,257 @@ export const PANELS: Record<PanelId, Panel> = {
 } as Record<PanelId, Panel>;
 
 export { RESOURCE_LABEL, EQUIPMENT_LABEL, RESOURCE_TYPES };
+
+// ---------------------------------------------------------------------------
+// Chain of command
+// ---------------------------------------------------------------------------
+
+/** The army whose detail is expanded; -1 while the list is collapsed. */
+let openArmy = -1;
+
+function attributeRow(c: Commander): HTMLElement {
+  const row = el('div', 'panel-attrs');
+  const pairs: [string, number][] = [
+    [UI.attrAttack, c.attack],
+    [UI.attrDefence, c.defence],
+    [UI.attrPlanning, c.planning],
+    [UI.attrLogistics, c.logistics],
+  ];
+  for (const [label, value] of pairs) {
+    const box = el('div', 'panel-attr');
+    box.append(el('span', 'panel-attr-l', label), el('span', 'panel-attr-v', String(value)));
+    row.append(box);
+  }
+  return row;
+}
+
+/**
+ * The order line for one army.
+ *
+ * A front is picked by naming an enemy rather than by drawing on the map: a
+ * finger cannot trace a line along a border on a 412px screen with any
+ * precision, and the enemy is what the player is actually thinking about.
+ */
+function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement {
+  const me = game.state.countries[game.state.meta.playerCountry];
+  const box = el('div', 'panel-chips');
+
+  const enemies = me.atWarWith
+    .map((id) => game.state.countries[id])
+    .filter((c) => c && !c.capitulated);
+  const neighbours = enemies.length > 0 ? enemies : borderingCountries(game, me.id);
+
+  for (const enemy of neighbours.slice(0, 6)) {
+    const chip = el('button', 'panel-chip', `${UI.setOrderFront}: ${country(enemy.tag)}`);
+    chip.classList.toggle(
+      'is-on', army.order?.kind === 'front' && army.order.against === enemy.id,
+    );
+    chip.addEventListener('click', () => {
+      game.issue({
+        t: 'setArmyOrder', country: me.id, army: army.id,
+        order: { kind: 'front', against: enemy.id },
+      });
+      rebuild();
+    });
+    box.append(chip);
+  }
+
+  const clear = el('button', 'panel-chip', UI.setOrderClear);
+  clear.classList.toggle('is-on', army.order === null);
+  clear.addEventListener('click', () => {
+    game.issue({ t: 'setArmyOrder', country: me.id, army: army.id, order: null });
+    rebuild();
+  });
+  box.append(clear);
+  return box;
+}
+
+/** Countries whose territory touches ours; the ones a front could face. */
+function borderingCountries(game: Game, me: CountryId): Country[] {
+  const seen = new Set<CountryId>();
+  for (const province of game.index.provinces) {
+    if (game.state.provinces[province.id]?.controller !== me) continue;
+    for (const nb of province.neighbors) {
+      const other = game.state.provinces[nb]?.controller;
+      if (other !== undefined && other !== me) seen.add(other);
+    }
+  }
+  return [...seen]
+    .sort((a, b) => a - b)
+    .map((id) => game.state.countries[id])
+    .filter((c) => c && !c.capitulated);
+}
+
+function orderLabel(game: Game, army: Army): string {
+  if (!army.order) return UI.orderNone;
+  switch (army.order.kind) {
+    // eslint-disable-next-line no-fallthrough
+    case 'front': {
+      const enemy = game.state.countries[army.order.against];
+      return `${UI.orderFront} · ${enemy ? country(enemy.tag) : '—'}`;
+    }
+    case 'offensive': return UI.orderOffensive;
+    case 'garrison': return UI.orderGarrison;
+  }
+}
+
+export const commandPanel: Panel = {
+  id: 'command',
+  title: UI.navCommand,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const rebuild = () => commandPanel.build(game, root);
+
+    const mine = (state.armies ?? []).filter((a) => a.owner === me.id);
+    const groups = mine.filter((a) => a.isArmyGroup);
+    const armies = mine.filter((a) => !a.isArmyGroup);
+    const loose = state.divisions.filter(
+      (d) => d.owner === me.id && !d.dead && d.armyId === null,
+    ).length;
+
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.armies, String(armies.length)),
+      stat(UI.armyGroup, String(groups.length)),
+      stat(UI.divisions, String(state.divisions.filter(
+        (d) => d.owner === me.id && !d.dead).length)),
+      stat(UI.unassigned, String(loose)),
+    );
+    root.append(head);
+
+    root.append(el('div', 'panel-label', UI.armies));
+    for (const army of armies) {
+      const commander = commanderById(state, army.commander);
+      const limit = commander ? commandLimit(commander) : COMMAND_LIMIT;
+      const over = army.divisions.length > limit;
+
+      const card = el('div', 'panel-focus');
+      card.classList.toggle('is-current', openArmy === army.id);
+
+      const title = el('button', 'panel-army-head');
+      const group = armyById(state, army.parent);
+      title.append(
+        el('span', 'panel-focus-name', army.name + (group ? ` · ${group.name}` : '')),
+        el('span', 'panel-army-count',
+          `${army.divisions.length}/${limit}${UI.divisionsInArmy}`),
+      );
+      if (over) title.classList.add('is-over');
+      title.addEventListener('click', () => {
+        openArmy = openArmy === army.id ? -1 : army.id;
+        rebuild();
+      });
+      card.append(title);
+
+      card.append(el('div', 'panel-row-sub',
+        commander
+          ? `${commander.name}（${UI.skill} ${commander.skill}）`
+          : UI.noCommander));
+      if (over) card.append(el('div', 'panel-focus-block', UI.overloaded));
+
+      // Preparation, as a bar: it is a number that only means anything as a
+      // proportion of what it could be.
+      const ceiling = maxPlanning(state, army);
+      const bar = el('div', 'panel-bar');
+      const fill = el('i', 'panel-bar-fill');
+      fill.style.width = `${Math.min(100, (army.planning / Math.max(0.01, ceiling)) * 100).toFixed(1)}%`;
+      bar.append(fill);
+      card.append(el('div', 'panel-focus-meta',
+        `${orderLabel(game, army)} · ${UI.planningBonus} ${(army.planning * 100).toFixed(0)}%`));
+      card.append(bar);
+
+      if (openArmy === army.id) {
+        if (commander) {
+          card.append(attributeRow(commander));
+          if (commander.traits.length > 0) {
+            card.append(el('div', 'panel-focus-effect',
+              commander.traits.map((t) => TRAIT[t] ?? t).join('・')));
+          }
+        }
+        card.append(orderControls(game, army, rebuild));
+
+        const bench = idleCommanders(state, me.id).filter((c) => c.rank === 'general');
+        if (bench.length > 0) {
+          card.append(el('div', 'panel-label', UI.appointCommander));
+          const chips = el('div', 'panel-chips');
+          for (const candidate of bench.slice(0, 8)) {
+            const chip = el('button', 'panel-chip',
+              `${candidate.name}（${candidate.skill}）`);
+            chip.addEventListener('click', () => {
+              game.issue({
+                t: 'appointCommander', country: me.id, army: army.id, commander: candidate.id,
+              });
+              rebuild();
+            });
+            chips.append(chip);
+          }
+          card.append(chips);
+        }
+      }
+      root.append(card);
+    }
+
+    if (groups.length > 0) {
+      root.append(el('div', 'panel-label', UI.armyGroup));
+      for (const group of groups) {
+        const marshal = commanderById(state, group.commander);
+        const row = el('div', 'panel-row');
+        const main = el('div', 'panel-row-main');
+        main.append(
+          el('div', 'panel-row-title', group.name),
+          el('div', 'panel-row-sub',
+            marshal
+              ? `${UI.fieldMarshal} ${marshal.name}（${UI.skill} ${marshal.skill}）`
+              : UI.noCommander),
+        );
+        row.append(main);
+        row.append(el('div', 'panel-army-count',
+          `${group.children.length}/${ARMY_GROUP_LIMIT}`));
+        root.append(row);
+      }
+    }
+
+    // The bench. An officer nobody has given a post to is doing nothing at all,
+    // and the player has no other way to find out he exists.
+    const bench = idleCommanders(state, me.id);
+    if (bench.length > 0) {
+      root.append(el('div', 'panel-label', UI.commanderPool));
+      for (const c of bench.slice(0, 12)) {
+        const row = el('div', 'panel-row');
+        const main = el('div', 'panel-row-main');
+        main.append(
+          el('div', 'panel-row-title',
+            `${c.name}${c.rank === 'field_marshal' ? ` · ${UI.fieldMarshal}` : ''}`),
+          el('div', 'panel-row-sub',
+            `${UI.skill} ${c.skill} · ${UI.attrAttack}${c.attack} ${UI.attrDefence}${c.defence}`
+            + ` ${UI.attrPlanning}${c.planning} ${UI.attrLogistics}${c.logistics}`
+            + (c.traits.length > 0
+              ? ` · ${c.traits.map((t) => TRAIT[t] ?? t).join('・')}`
+              : '')),
+        );
+        row.append(main);
+        root.append(row);
+      }
+    }
+  },
+  refresh(game, root) {
+    // Only the preparation bars move between commands, so only they are
+    // rewritten; rebuilding the panel every tick would close the open army
+    // under the player's finger.
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const armies = (state.armies ?? []).filter((a) => a.owner === me.id && !a.isArmyGroup);
+    const bars = root.querySelectorAll<HTMLElement>('.panel-bar-fill');
+    armies.forEach((army, i) => {
+      const bar = bars[i];
+      if (!bar) return;
+      const ceiling = maxPlanning(state, army);
+      bar.style.width =
+        `${Math.min(100, (army.planning / Math.max(0.01, ceiling)) * 100).toFixed(1)}%`;
+    });
+  },
+};
 
 // ---------------------------------------------------------------------------
 // National focus

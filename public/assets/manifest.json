@@ -3,11 +3,11 @@
   "counts": {
     "flags": 30,
     "resourceIcons": 6,
-    "uiIcons": 16,
+    "uiIcons": 17,
     "unitIcons": 12
   },
-  "totalBytes": 22766,
-  "totalGzipBytes": 14058,
+  "totalBytes": 23015,
+  "totalGzipBytes": 14250,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -193,6 +193,11 @@
       "path": "assets/icons/ui-army.svg",
       "bytes": 236,
       "gzipBytes": 191
+    },
+    {
+      "path": "assets/icons/ui-command.svg",
+      "bytes": 249,
+      "gzipBytes": 192
     },
     {
       "path": "assets/icons/ui-construction.svg",

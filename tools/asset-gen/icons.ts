@@ -161,6 +161,12 @@ export const UI_ICONS: Record<string, string> = {
     '<path d="M8.4 23.6a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z"/>' +
     '<path d="M23.2 23.6a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z"/>',
   ),
+  // Rank insignia: the chain of command is about who is in charge, and a
+  // chevron stack says that at 18px where a portrait cannot.
+  command: solid(
+    '<path d="M16 3.2L29 13.4l-3.4 2.6L16 8.6 6.4 16 3 13.4z"/>' +
+    '<path d="M16 12.4L29 22.6l-3.4 2.6L16 17.8l-9.6 7.4L3 22.6z"/>',
+  ),
   warning: solid(
     '<path d="M16 2.8l14 25.4H2z' +
     'M14.6 11.4h2.8v8.4h-2.8z' +

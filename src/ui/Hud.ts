@@ -38,6 +38,7 @@ const NAV: [PanelId, string, string][] = [
   ['research', UI.navResearch, 'ui-research'],
   ['construction', UI.navConstruction, 'ui-construction'],
   ['production', UI.navProduction, 'ui-production'],
+  ['command', UI.navCommand, 'ui-command'],
   ['army', UI.navArmy, 'ui-army'],
   ['diplomacy', UI.navDiplomacy, 'ui-diplomacy'],
 ];

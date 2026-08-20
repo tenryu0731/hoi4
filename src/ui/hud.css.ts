@@ -568,5 +568,38 @@ button:active { transform: scale(0.96); }
 .panel-focus-block { margin-top: 6px; font-size: 11px; color: var(--danger); }
 .panel-focus-meta { margin-top: 4px; font-size: 11px; color: var(--ink-dim); }
 .panel-focus .panel-btn.wide { margin-top: 9px; width: 100%; min-height: 46px; }
+
+/* --- chain of command ---------------------------------------------------- */
+/* The whole card header is the control that opens it, so it is a button with
+   the title's typography rather than a title with a button beside it. */
+.panel-army-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: 44px; padding: 0; margin-bottom: 2px;
+  background: none; border: none; box-shadow: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.panel-army-head .panel-focus-name { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.panel-army-count {
+  flex: 0 0 auto; padding: 3px 8px;
+  background: #14130f; border: 1px solid #0b0a08; border-radius: 2px;
+  font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-dim);
+}
+/* A general with more divisions than he can handle is the one number on this
+   panel the player has to notice, so it is the one thing painted in alarm. */
+.panel-army-head.is-over .panel-army-count {
+  color: var(--danger); border-color: #4a1f1a; font-weight: 700;
+}
+.panel-attrs { display: flex; gap: 5px; margin: 8px 0 2px; }
+.panel-attr {
+  flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 5px 2px;
+  background: linear-gradient(180deg, #302d27 0%, #232119 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+}
+.panel-attr-l { font-size: 10px; color: var(--ink-dim); letter-spacing: var(--track); }
+.panel-attr-v {
+  font-size: 16px; font-weight: 700; color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
 .panel-focus .panel-bar { margin-top: 7px; }
 `;
