@@ -19,9 +19,9 @@ import {
   tickEconomyDaily,
 } from './economy/production';
 import {
-  declareWar, guarantee, improveRelations, joinFaction, leaveFaction,
-  startJustification, tickCapitulationDaily, tickJustificationsDaily,
-  tickTensionMonthly,
+  declareWar, demandSubmission, guarantee, improveRelations,
+  joinFaction, leaveFaction, startJustification, tickCapitulationDaily,
+  tickJustificationsDaily, tickTensionMonthly,
 } from './diplomacy/diplomacy';
 import {
   orderMove, stopDivision, tickMilitaryHourly, tickReinforcementDaily,
@@ -166,6 +166,10 @@ export class Simulation {
       // --- diplomacy ------------------------------------------------------
       case 'justifyWar': {
         startJustification(state, cmd.country, cmd.target);
+        return;
+      }
+      case 'demandSubmission': {
+        demandSubmission(state, this.ctx, cmd.country, cmd.target);
         return;
       }
       case 'declareWar': {

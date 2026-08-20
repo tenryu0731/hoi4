@@ -9,7 +9,7 @@ import {
 } from '../sim/core/types';
 import { deriveTemplate } from '../sim/scenario/europe1936';
 import { canQueueBuilding } from '../sim/economy/production';
-import { occupationRatio } from '../sim/diplomacy/diplomacy';
+import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
 import {
   BATTALION, BUILDING, EQUIPMENT as EQUIPMENT_NAME, IDEOLOGY, RESOURCE,
   SUPPORT, TERRAIN, UI, country,
@@ -462,7 +462,17 @@ export const diplomacyPanel: Panel = {
       declare.addEventListener('click', () => {
         game.issue({ t: 'declareWar', country: me.id, target: c.id });
       });
-      controls.append(justify, declare);
+      // Only offered where it could actually be accepted, so the button is not
+      // a lottery ticket the player buys with political power every turn.
+      const controlsList = [justify, declare];
+      if (canDemand(game.state, me.id, c.id)) {
+        const demand = el('button', 'panel-btn wide', UI.demand);
+        demand.addEventListener('click', () => {
+          game.issue({ t: 'demandSubmission', country: me.id, target: c.id });
+        });
+        controlsList.unshift(demand);
+      }
+      controls.append(...controlsList);
 
       row.append(swatch, main, controls);
       list.append(row);

@@ -25,6 +25,13 @@ export type Command =
   | { t: 'setDivisionOrder'; divisions: DivisionId[]; order: 'defend' | 'attack'; target?: ProvinceId }
   // --- diplomacy ------------------------------------------------------------
   | { t: 'justifyWar'; country: CountryId; target: CountryId }
+  /**
+   * An ultimatum: submit or be invaded. Succeeds or fails on the spot against
+   * the strength ratio, so it is a gamble on the target's nerve rather than a
+   * negotiation. The AI has always been able to do this; the player must be
+   * able to as well, or the two are not playing the same game.
+   */
+  | { t: 'demandSubmission'; country: CountryId; target: CountryId }
   | { t: 'declareWar'; country: CountryId; target: CountryId }
   | { t: 'guarantee'; country: CountryId; target: CountryId }
   | { t: 'improveRelations'; country: CountryId; target: CountryId }

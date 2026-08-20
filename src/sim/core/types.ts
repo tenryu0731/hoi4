@@ -253,6 +253,17 @@ export interface ProvinceState {
   divisions: DivisionId[];
   /** Hours the current attacker has held the province, gates re-capture churn. */
   lastChangeHour: number;
+  /**
+   * Part of the original owner's metropolitan territory rather than an
+   * overseas possession. Fixed at scenario creation and never reassigned:
+   * conquering Alsace does not make it German heartland.
+   *
+   * Surrender is measured over core territory only. Britain's victory points
+   * include Egypt and Iraq and France's include Algeria and Syria, so counting
+   * everything meant the whole metropole could fall without either reaching
+   * its surrender threshold -- they were unconquerable by construction.
+   */
+  core: boolean;
 }
 
 export interface StateRuntime {
@@ -369,6 +380,7 @@ export type GameEventBody =
   | { k: 'warDeclared'; attacker: string; defender: string }
   | { k: 'joinedFaction'; country: string; faction: string }
   | { k: 'capitulated'; country: string; occupation: number }
+  | { k: 'annexed'; country: string; by: string }
   | { k: 'itemCompleted'; country: string; item: string }
   | { k: 'divisionLost'; country: string }
   | { k: 'attack'; attacker: string; defender: string; province: ProvinceId }

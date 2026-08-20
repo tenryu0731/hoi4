@@ -98,6 +98,7 @@ export const UI = {
   justifying: '宣戦布告理由を作成中',
   justifyWar: '宣戦布告理由',
   declareWar: '宣戦布告',
+  demand: '要求',
   joinFaction: '陣営に加入',
   noRelations: '特筆すべき関係なし',
 
@@ -209,6 +210,8 @@ export function eventText(
       return `${country(body.country)}が${body.faction}に加入`;
     case 'capitulated':
       return `${country(body.country)}が降伏 (占領率 ${Math.round(body.occupation * 100)}%)`;
+    case 'annexed':
+      return `${country(body.by)}が${country(body.country)}を併合`;
     case 'itemCompleted':
       return `${country(body.country)}: ${BUILDING[body.item as BuildingType] ?? body.item}が完成`;
     case 'divisionLost':

@@ -212,8 +212,19 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
     };
   });
 
+  // Anything within this of its owner's capital is metropolitan territory. It
+  // is a blunt instrument, but it separates Normandy from Algeria and Kent from
+  // Egypt, which is the distinction that matters.
+  const HOME_RADIUS_KM = 1600;
+  const capitalOf = new Map<string, { x: number; y: number }>();
+  for (const c of countries) {
+    const cap = index.provinces[c.capital];
+    if (cap) capitalOf.set(c.tag, { x: cap.centerX, y: cap.centerY });
+  }
+
   const provinces: ProvinceState[] = index.provinces.map((p) => {
     const owner = idOf.get(p.ownerTag)!;
+    const home = capitalOf.get(p.ownerTag);
     return {
       owner, controller: owner,
       vp: p.vp,
@@ -221,6 +232,8 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       fortLevel: 0,
       divisions: [],
       lastChangeHour: 0,
+      core: home === undefined
+        || Math.hypot(p.centerX - home.x, p.centerY - home.y) <= HOME_RADIUS_KM,
     };
   });
 
