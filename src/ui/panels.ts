@@ -5,7 +5,7 @@ import {
 import {
   BATTALION_TYPES, EQUIPMENT_TYPES, RESOURCE_TYPES, SUPPORT_TYPES,
   type BattalionType, type BuildingType, type DivisionTemplate,
-  type EquipmentType, type ResourceType, type SupportType,
+  type EquipmentType, type ResourceType, type StateRuntime, type SupportType,
 } from '../sim/core/types';
 import { deriveTemplate } from '../sim/scenario/europe1936';
 import { canQueueBuilding } from '../sim/economy/production';
@@ -179,6 +179,17 @@ export const productionPanel: Panel = {
 // Construction
 // ---------------------------------------------------------------------------
 
+/**
+ * Construction, in the order the real game does it: choose what to build, then
+ * choose where.
+ *
+ * This used to run the other way round -- select a province on the map, and the
+ * panel offered whatever that province's state could take. That put a map
+ * hunt in front of every build order and hid the decision that actually
+ * matters, which is where the empire has slots free.
+ */
+let buildKind: BuildingType = 'civilian_factory';
+
 export const constructionPanel: Panel = {
   id: 'construction',
   title: UI.navConstruction,
@@ -195,41 +206,63 @@ export const constructionPanel: Panel = {
     );
     root.append(head);
 
-    // Queue.
+    // --- what to build ---
+    root.append(el('div', 'panel-label', UI.chooseBuilding));
+    const kinds = el('div', 'panel-chips');
+    for (const kind of BUILDABLE) {
+      const b = el('button', 'panel-chip', BUILDING[kind]);
+      b.dataset.kind = kind;
+      b.classList.toggle('is-on', kind === buildKind);
+      b.addEventListener('click', () => {
+        buildKind = kind;
+        constructionPanel.build(game, root);
+      });
+      kinds.append(b);
+    }
+    root.append(kinds);
+    root.append(el('div', 'panel-note',
+      `${BUILDING[buildKind]} · ${UI.cost} ${formatNumber(BUILDING_COST[buildKind])}`));
+
+    // --- where ---
+    root.append(el('div', 'panel-label', UI.chooseState));
+    const list = el('div', 'panel-list');
+    const owned = state.states
+      .map((st, id) => ({ st, id }))
+      .filter((x) => x.st && x.st.controller === me.id)
+      .sort((a, b) => slotsFree(b.st) - slotsFree(a.st));
+
+    if (owned.length === 0) {
+      list.append(el('div', 'panel-empty', UI.noStates));
+    }
+    for (const { st, id } of owned) {
+      const row = el('button', 'panel-row wide-row');
+      const allowed = canQueueBuilding(state, me, id, buildKind);
+      row.disabled = !allowed;
+      row.classList.toggle('is-blocked', !allowed);
+
+      const main = el('div', 'panel-row-main');
+      const name = game.index.data.states[id]?.name ?? `#${id}`;
+      main.append(
+        el('div', 'panel-row-title', name),
+        el('div', 'panel-row-sub',
+          `${UI.buildSlots} ${slotsUsed(st)}/${st.buildingSlots}` +
+          ` · ${UI.infrastructure} ${st.infrastructure}` +
+          ` · ${BUILDING[buildKind]} ${levelOf(st, buildKind)}`),
+      );
+      row.append(main, el('span', 'panel-row-tag', allowed ? '＋' : UI.noSlots));
+      row.addEventListener('click', () => {
+        game.issue({ t: 'queueConstruction', country: me.id, kind: buildKind, state: id });
+        constructionPanel.build(game, root);
+      });
+      list.append(row);
+    }
+    root.append(list);
+
+    // --- what is already under way ---
     const queue = el('div', 'panel-list');
     queue.dataset.role = 'queue';
     root.append(el('div', 'panel-label', UI.queue), queue);
     renderQueue(game, queue);
-
-    // What can be started, in the state the player has selected.
-    const selected = game.selection.province;
-    const stateId = selected !== null ? game.index.get(selected).stateId : -1;
-    const stateName = stateId >= 0 ? game.index.data.states[stateId].name : null;
-    root.append(el(
-      'div', 'panel-label',
-      stateName ? `${stateName}に建設` : UI.selectProvinceToBuild,
-    ));
-
-    if (stateId >= 0) {
-      const grid = el('div', 'panel-grid');
-      for (const kind of BUILDABLE) {
-        const label = BUILDING[kind];
-        const b = el('button', 'panel-build');
-        const allowed = canQueueBuilding(state, me, stateId, kind);
-        b.disabled = !allowed;
-        b.append(
-          el('span', 'panel-build-title', label),
-          el('span', 'panel-build-sub', `${formatNumber(BUILDING_COST[kind])} pts`),
-        );
-        b.addEventListener('click', () => {
-          game.issue({ t: 'queueConstruction', country: me.id, kind, state: stateId });
-          // Rebuild after the command lands on the next tick.
-          setTimeout(() => constructionPanel.build(game, root), 60);
-        });
-        grid.append(b);
-      }
-      root.append(grid);
-    }
   },
   refresh(game, root) {
     const queue = root.querySelector<HTMLElement>('[data-role="queue"]');
@@ -237,13 +270,32 @@ export const constructionPanel: Panel = {
   },
 };
 
+function levelOf(st: StateRuntime, kind: BuildingType): number {
+  switch (kind) {
+    case 'civilian_factory': return st.civilianFactories;
+    case 'military_factory': return st.militaryFactories;
+    case 'dockyard': return st.dockyards;
+    case 'infrastructure': return st.infrastructure;
+    default: return 0;
+  }
+}
+
+/** Factory slots a state has spent; infrastructure and forts do not use them. */
+function slotsUsed(st: StateRuntime): number {
+  return st.civilianFactories + st.militaryFactories + st.dockyards;
+}
+
+function slotsFree(st: StateRuntime): number {
+  return st.buildingSlots - slotsUsed(st);
+}
+
 function renderQueue(game: Game, host: HTMLElement): void {
   const me = game.state.countries[game.state.meta.playerCountry];
   const items = me.constructionQueue;
   if (host.childElementCount !== items.length || items.length === 0) {
     host.innerHTML = '';
     if (items.length === 0) {
-      host.append(el('div', 'panel-empty', 'Nothing under construction.'));
+      host.append(el('div', 'panel-empty', UI.nothingUnderConstruction));
       return;
     }
     for (const item of items) {
@@ -252,7 +304,7 @@ function renderQueue(game: Game, host: HTMLElement): void {
       const main = el('div', 'panel-row-main');
       const stateName = game.index.data.states[item.stateId]?.name ?? '';
       main.append(
-        el('div', 'panel-row-title', `${item.kind.replace('_', ' ')} — ${stateName}`),
+        el('div', 'panel-row-title', `${BUILDING[item.kind]} — ${stateName}`),
         el('div', 'panel-row-sub', ''),
       );
       const bar = el('div', 'panel-bar');
@@ -275,17 +327,29 @@ function renderQueue(game: Game, host: HTMLElement): void {
     const fill = row.querySelector<HTMLElement>('.panel-bar-fill');
     if (fill) fill.style.width = `${(pct * 100).toFixed(1)}%`;
     const sub = row.querySelector<HTMLElement>('.panel-row-sub');
-    if (sub) setText(sub, `${Math.round(pct * 100)}% complete`);
+    if (sub) setText(sub, `${Math.round(pct * 100)}% ${UI.complete}`);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Army
+// Recruit and deploy
 // ---------------------------------------------------------------------------
+
+/** State new divisions are sent to; -1 until the panel picks the capital. */
+let deployState = -1;
+
+/** A province inside the chosen deployment state that the player controls. */
+function deployProvince(game: Game, owner: number): number {
+  const inState = game.index.data.states[deployState]?.provinces ?? [];
+  for (const id of inState) {
+    if (game.state.provinces[id]?.controller === owner) return id;
+  }
+  return game.state.countries[owner].capital;
+}
 
 export const armyPanel: Panel = {
   id: 'army',
-  title: UI.navArmy,
+  title: UI.recruitAndDeploy,
   build(game, root) {
     root.innerHTML = '';
     const state = game.state;
@@ -294,6 +358,29 @@ export const armyPanel: Panel = {
     const head = el('div', 'panel-head');
     head.dataset.role = 'army-head';
     root.append(head);
+
+    // Where new divisions appear. The real game lets you pick; sending every
+    // formation to the capital and marching it out is the thing this replaces.
+    root.append(el('div', 'panel-label', UI.deployTo));
+    const deploy = el('div', 'panel-chips');
+    const homeStates = state.states
+      .map((st, id) => ({ st, id }))
+      .filter((x) => x.st && x.st.controller === me.id)
+      .slice(0, 8);
+    if (deployState === -1 || state.states[deployState]?.controller !== me.id) {
+      deployState = game.index.get(me.capital).stateId;
+    }
+    for (const { id } of homeStates) {
+      const chip = el('button', 'panel-chip', game.index.data.states[id]?.name ?? `#${id}`);
+      chip.classList.toggle('is-on', id === deployState);
+      chip.addEventListener('click', () => {
+        deployState = id;
+        armyPanel.build(game, root);
+      });
+      deploy.append(chip);
+    }
+    root.append(deploy);
+    root.append(el('div', 'panel-note', UI.deployHint));
 
     root.append(el('div', 'panel-label', UI.recruit));
     const grid = el('div', 'panel-grid');
@@ -316,7 +403,8 @@ export const armyPanel: Panel = {
       );
       b.addEventListener('click', () => {
         game.issue({
-          t: 'recruitDivision', country: me.id, template: tpl.id, province: me.capital,
+          t: 'recruitDivision', country: me.id, template: tpl.id,
+          province: deployProvince(game, me.id),
         });
       });
       const edit = el('button', 'panel-edit', UI.edit);

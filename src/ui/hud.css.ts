@@ -260,9 +260,10 @@ export const HUD_CSS = `
   pointer-events: auto;
 }
 .hud-nav-btn {
-  flex: 1 1 0; min-height: 56px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  flex: 1 1 0; min-width: 0; min-height: 56px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   background: transparent; border: none; color: var(--ink-dim); cursor: pointer;
+  padding: 0 2px;
 }
 /* An indicator, not a block. The full-height olive rectangle it replaces had
    square corners and no relationship to anything else on screen, so it read as
@@ -273,8 +274,11 @@ export const HUD_CSS = `
   content: ''; position: absolute; top: 0; left: 22%; right: 22%;
   height: 2px; background: var(--accent); border-radius: 0 0 2px 2px;
 }
-.hud-nav-icon { width: 20px; height: 20px; }
-.hud-nav-label { font-size: 11px; letter-spacing: 0; }
+.hud-nav-icon { width: 18px; height: 18px; }
+.hud-nav-label {
+  font-size: 10px; letter-spacing: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: clip;
+}
 
 /* --- outcome ------------------------------------------------------------- */
 .hud-outcome {
@@ -314,4 +318,26 @@ export const HUD_CSS = `
 button { transition: background 90ms ease, transform 90ms ease, color 90ms ease; }
 button:active { transform: scale(0.96); }
 .hud-pip:active, .hud-nav-btn:active { transform: none; }
+
+.panel-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+.panel-chip {
+  min-height: 34px; padding: 6px 11px; font-size: 12px;
+  background: rgba(30,33,40,0.9); border: 1px solid var(--line);
+  border-radius: 3px; color: var(--ink-dim);
+}
+.panel-chip.is-on {
+  background: rgba(216,176,74,0.16); border-color: var(--accent); color: var(--accent);
+  font-weight: 700;
+}
+.panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
+/* A state row is the tap target for "build here", so it is a button and needs
+   to look like a row rather than like a control. */
+.panel-row.wide-row {
+  width: 100%; min-height: 46px; text-align: left; cursor: pointer;
+  background: transparent; border: none; border-bottom: 1px solid rgba(58,61,69,0.35);
+  display: flex; align-items: center; gap: 8px; color: inherit;
+}
+.panel-row.wide-row.is-blocked { opacity: 0.45; }
+.panel-row-tag { font-size: 12px; color: var(--accent); flex: none; }
+.panel-row.wide-row.is-blocked .panel-row-tag { color: var(--ink-dim); }
 `;

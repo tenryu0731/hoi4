@@ -36,7 +36,10 @@ export const UI = {
   // Bottom navigation
   navProduction: '生産',
   navConstruction: '建設',
-  navArmy: '陸軍',
+  navArmy: '徴兵',
+  recruitAndDeploy: '徴兵と配備',
+  deployTo: '配備先',
+  deployHint: '新しい師団が現れる州',
   navDiplomacy: '外交',
   closePanel: 'パネルを閉じる',
 
@@ -59,7 +62,13 @@ export const UI = {
   queue: '建設キュー',
   selectProvinceToBuild: '建設する州を選択してください',
   buildSlots: '建設スロット',
-  noSlots: '空きスロットなし',
+  noSlots: '空きなし',
+  chooseBuilding: '建設する建物',
+  chooseState: '建設地',
+  cost: '建設コスト',
+  noStates: '所有する州がありません。',
+  nothingUnderConstruction: '建設中のものはありません。',
+  complete: '完了',
 
   // Army panel
   totalDivisions: '総師団数',
