@@ -44,6 +44,9 @@ export const UI = {
   deployHint: '新しい師団が現れる州',
   navDiplomacy: '外交',
   closePanel: 'パネルを閉じる',
+  zoomIn: '表示を拡大',
+  zoomOut: '表示を縮小',
+  panelHeight: 'パネルの高さ',
 
   // National focus
   focusTree: '方針ツリー',

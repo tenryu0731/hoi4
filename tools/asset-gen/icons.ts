@@ -9,11 +9,24 @@
 
 const S = 32;
 
-function svg(body: string, size = S): string {
+/**
+ * A filled icon.
+ *
+ * The interface icons used to be 2px outlines, and at the size they are
+ * actually shown -- 13px in a top-bar chip, 18px on a tab -- a 2px outline is
+ * a grey smear: the stroke and the gap between strokes are both about one
+ * device pixel, so antialiasing averages them into the background. HOI4 draws
+ * solid, high-contrast shapes for the same reason. Interior detail is cut out
+ * with the even-odd rule rather than drawn in a second colour, because these
+ * are used as CSS masks and only carry one ink.
+ *
+ * The NATO unit symbols below stay outlines: that is what the symbology is,
+ * and they are drawn at 48x32 on a counter, not at 13px in a chip.
+ */
+function solid(body: string, size = S): string {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" ` +
-    `width="${size}" height="${size}" fill="none" ` +
-    `stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
+    `width="${size}" height="${size}" fill="currentColor" fill-rule="evenodd">` +
     body +
     `</svg>`
   );
@@ -24,37 +37,40 @@ function svg(body: string, size = S): string {
 // ---------------------------------------------------------------------------
 
 export const RESOURCE_ICONS: Record<string, string> = {
-  // Oil: a derrick over a drop.
-  oil: svg(
-    '<path d="M6 27h20"/>' +
-    '<path d="M16 27V9"/><path d="M10 27 16 9l6 18"/>' +
-    '<path d="M16 22c-2 0-3.4-1.5-3.4-3.2 0-1.9 3.4-5.4 3.4-5.4s3.4 3.5 3.4 5.4C19.4 20.5 18 22 16 22z" fill="currentColor" stroke="none"/>',
+  // Oil: a drum, which is the unit the game counts it in. Drawn with rolled
+  // ends -- a plain rectangle with two bars across it is a hamburger menu.
+  oil: solid(
+    '<path d="M8 7.4a8 3.6 0 0 1 16 0v17.2a8 3.6 0 0 1-16 0z' +
+    'M8.8 12.4h14.4v2.6H8.8z' +
+    'M8.8 18.2h14.4v2.6H8.8z"/>',
   ),
-  // Steel: an ingot stack.
-  steel: svg(
-    '<path d="M5 20h22l-3 7H8z"/>' +
-    '<path d="M9 13h14l-2 6H11z"/>' +
-    '<path d="M13 7h6l-1.5 5h-3z"/>',
+  // Steel: an I-beam, the shape it is sold in.
+  steel: solid(
+    '<path d="M4 4.8h24v4.4h-9.6v13.6H28v4.4H4v-4.4h9.6V9.2H4z"/>',
   ),
-  // Aluminium: a light sheet, folded.
-  aluminium: svg(
-    '<path d="M4 22 12 8h8l8 14z"/>' +
-    '<path d="M12 8 16 22 20 8"/>',
+  // Aluminium: three stacked ingots.
+  aluminium: solid(
+    '<path d="M11.4 7h9.2l2.6 5.6H8.8z"/>' +
+    '<path d="M6.2 14.8h19.6l2.8 5.8H3.4z"/>' +
+    '<path d="M2.4 22.8h27.2l-1.4 4.4H3.8z"/>',
   ),
-  // Tungsten: a hard crystal.
-  tungsten: svg(
-    '<path d="M16 4 27 12v12L16 28 5 24V12z"/>' +
-    '<path d="M5 12 16 16l11-4M16 16v12"/>',
+  // Tungsten: a cut gem. The hexagon over a stem it replaces was a map pin.
+  tungsten: solid(
+    '<path d="M6.4 4.4h19.2l4.4 6.8L16 27.8 2 11.2z' +
+    'M4.2 11.8h23.6v1.8H4.2z"/>',
   ),
-  // Rubber: a tyre.
-  rubber: svg(
-    '<circle cx="16" cy="16" r="11"/><circle cx="16" cy="16" r="5"/>' +
-    '<path d="M16 5v6M16 21v6M5 16h6M21 16h6"/>',
+  // Rubber: a tyre, hub cut out.
+  rubber: solid(
+    '<path d="M16 3.2C8.9 3.2 3.2 8.9 3.2 16S8.9 28.8 16 28.8 28.8 23.1 28.8 16 23.1 3.2 16 3.2z' +
+    'M16 10.4a5.6 5.6 0 1 0 0 11.2 5.6 5.6 0 0 0 0-11.2z"/>' +
+    '<path d="M14.6 3.4h2.8v6h-2.8zM14.6 22.6h2.8v6h-2.8z' +
+    'M3.4 14.6h6v2.8h-6zM22.6 14.6h6v2.8h-6z"/>',
   ),
-  // Chromium: a polished bar with a highlight.
-  chromium: svg(
-    '<rect x="6" y="10" width="20" height="12" rx="2"/>' +
-    '<path d="M10 10v12M16 10v12"/>',
+  // Chromium: a plated hexagonal blank.
+  chromium: solid(
+    '<path d="M16 2.8l11.4 6.6v13.2L16 29.2 4.6 22.6V9.4z' +
+    'M16 7.2L8.4 11.6v8.8L16 24.8l7.6-4.4v-8.8z"/>' +
+    '<path d="M12.6 12.8h6.8v6.4h-6.8z"/>',
   ),
 };
 
@@ -62,55 +78,93 @@ export const RESOURCE_ICONS: Record<string, string> = {
 // Interface
 // ---------------------------------------------------------------------------
 
+/** The civilian plant; the military one is the same building plus a shell. */
+const FACTORY_BODY =
+  '<path d="M3.4 28.6V13.4l7 4.1v-4.1l7 4.1V7.6h11.2v21z' +
+  'M20.6 12.4h6.2v2.4h-6.2z' +
+  'M20.6 17.4h6.2v2.4h-6.2z' +
+  'M6.4 21.4h3.6v3.4H6.4z' +
+  'M13.4 21.4h3.6v3.4h-3.6z"/>';
+
 export const UI_ICONS: Record<string, string> = {
-  factory: svg(
-    '<path d="M4 27V14l7 4V14l7 4V9h10v18z"/>' +
-    '<path d="M22 14h4M22 19h4"/>',
+  factory: solid(FACTORY_BODY),
+  // The two plants stand next to each other in the top bar, so the military
+  // one needs a mark that survives being 13px wide: a shell over the roofline.
+  military_factory: solid(
+    FACTORY_BODY +
+    '<path d="M24 1.6c1 1 1.6 2.3 1.6 3.6v1.2h-3.2V5.2c0-1.3.6-2.6 1.6-3.6z"/>',
   ),
-  military_factory: svg(
-    '<path d="M4 27V14l7 4V14l7 4V9h10v18z"/>' +
-    '<path d="M24 5v4M22 7h4"/>',
+  dockyard: solid(
+    '<path d="M14.4 8.9a2.6 2.6 0 1 1 3.2 0v1.9h3.2v3H17.6v10.6c2.9-.6 5.1-3 5.5-5.9h-2.4l3.9-5.4 3.9 5.4' +
+    'h-2.3c-.5 5.3-4.9 9.5-10.2 9.5S6.2 23.8 5.7 18.5H3.4l3.9-5.4 3.9 5.4H8.8c.4 2.9 2.6 5.3 5.6 5.9V13.8' +
+    'h-3.2v-3h3.2z"/>',
   ),
-  dockyard: svg(
-    '<path d="M5 20c2 4 6 6 11 6s9-2 11-6"/>' +
-    '<path d="M16 26V8"/><circle cx="16" cy="6" r="2"/><path d="M10 11h12"/>',
+  manpower: solid(
+    '<circle cx="16" cy="9.6" r="5.1"/>' +
+    '<path d="M16 16.4c-5.1 0-9.2 3.6-9.2 8.1v3.2h18.4v-3.2c0-4.5-4.1-8.1-9.2-8.1z"/>',
   ),
-  manpower: svg(
-    '<circle cx="16" cy="10" r="4"/>' +
-    '<path d="M7 27c0-5 4-9 9-9s9 4 9 9"/>',
+  // A parliament portico. A star was indistinguishable from the victory-point
+  // icon at chip size, and a raised fist at 13px is an unreadable blob.
+  political_power: solid(
+    '<path d="M16 2.4l14 6.6v2.6H2V9z"/>' +
+    '<path d="M4.6 13.4h3.6v11.2H4.6zM11.6 13.4h3.6v11.2h-3.6z' +
+    'M16.8 13.4h3.6v11.2h-3.6zM23.8 13.4h3.6v11.2h-3.6z"/>' +
+    '<path d="M2.4 26.2h27.2v3.2H2.4z"/>',
   ),
-  political_power: svg(
-    '<path d="M16 4l3.6 7.6L28 12.8l-6 5.8 1.5 8.2-7.5-4-7.5 4L10 18.6l-6-5.8 8.4-1.2z"/>',
+  // A laboratory flask, not a magnifying glass: the glass read as "search".
+  research: solid(
+    '<path d="M12.4 3.4h7.2v3h-1.3v6.1l6.6 11.7c1.1 2 -.3 4.4 -2.6 4.4H9.7c-2.3 0-3.7-2.4-2.6-4.4' +
+    'l6.6-11.7V6.4h-1.3z' +
+    'M13.9 17.4l-3.2 5.7c-.2.4.1.8.5.8h9.6c.4 0 .7-.4.5-.8l-3.2-5.7z"/>',
   ),
-  research: svg(
-    '<circle cx="14" cy="14" r="8"/><path d="M20 20l7 7"/>',
+  // A tower crane, mast to the left. The house it replaces meant "home", and
+  // a centred mast under a full-width jib just draws the letter T.
+  construction: solid(
+    '<path d="M7 6.2h4.2v20.4H7z"/>' +
+    '<path d="M2.4 3.2h27.2v3H2.4z"/>' +
+    '<path d="M2.4 6.2h3.4v5.6H2.4z"/>' +
+    '<path d="M24.2 6.2h1.8v6.4h-1.8z"/>' +
+    '<path d="M21.6 12.2h6.8l-1.8 4.6h-3.2z"/>' +
+    '<path d="M3 26.6h12.2v2.6H3z"/>',
   ),
-  construction: svg(
-    '<path d="M5 27h22"/><path d="M8 27V13l8-6 8 6v14"/><path d="M13 27v-7h6v7"/>',
+  // A cogwheel. The bar chart it replaces read as "statistics".
+  production: solid(
+    '<path d="M16 3.2l2.6 1.5 2.9-.6 1.4 2.6 2.9.7-.1 3 2.3 1.9-1.5 2.6 1 2.8-2.6 1.5-.5 2.9-3 .3' +
+    '-1.7 2.5-2.8-1-2.4 1.8-2.3-1.9-2.9.5-1.3-2.7-2.9-.8.2-3-2.2-2 1.6-2.5-.9-2.9 2.6-1.4.6-2.9 3-.2z' +
+    'M16 11.2a4.8 4.8 0 1 0 0 9.6 4.8 4.8 0 0 0 0-9.6z"/>',
   ),
-  production: svg(
-    '<path d="M5 24h22"/><path d="M8 24v-6M14 24v-11M20 24v-8M26 24v-14"/>',
+  // The NATO infantry counter the map already draws: a solid plate with the
+  // saltire cut out of it. The saltire stops short of the corners, because an
+  // X that runs into them draws the flap of an envelope instead.
+  army: solid(
+    '<path d="M2.6 7.4h26.8v17.2H2.6z' +
+    'M7.4 10.4l-1.9 1.3 19.1 9.9 1.9-1.3z' +
+    'M24.6 10.4l1.9 1.3-19.1 9.9-1.9-1.3z"/>',
   ),
-  army: svg(
-    '<rect x="5" y="10" width="22" height="14" rx="1"/>' +
-    '<path d="M5 10l22 14M27 10 5 24"/>',
+  diplomacy: solid(
+    '<path d="M16 2.6C8.6 2.6 2.6 8.6 2.6 16S8.6 29.4 16 29.4 29.4 23.4 29.4 16 23.4 2.6 16 2.6z' +
+    'M3.6 14.6h24.8v2.8H3.6z' +
+    'M16 2.6c-3.9 0-7.1 6-7.1 13.4S12.1 29.4 16 29.4s7.1-6 7.1-13.4S19.9 2.6 16 2.6z' +
+    'M16 5.4c-2.4 0-4.3 4.7-4.3 10.6S13.6 26.6 16 26.6s4.3-4.7 4.3-10.6S18.4 5.4 16 5.4z"/>',
   ),
-  diplomacy: svg(
-    '<circle cx="16" cy="16" r="11"/>' +
-    '<path d="M5 16h22M16 5c3 3.4 4.5 7 4.5 11S19 24.6 16 27c-3-2.4-4.5-6-4.5-11S13 8.4 16 5z"/>',
+  pause: solid('<path d="M8 5h5.4v22H8zM18.6 5H24v22h-5.4z"/>'),
+  play: solid('<path d="M8 4.6L27 16 8 27.4z"/>'),
+  fast_forward: solid('<path d="M3 5.6L15 16 3 26.4zM17 5.6L29 16 17 26.4z"/>'),
+  victory_point: solid(
+    '<path d="M16 2.4l4.1 8.6 9.3 1.3-6.8 6.7 1.7 9.4L16 24l-8.3 4.4 1.7-9.4-6.8-6.7 9.3-1.3z"/>',
   ),
-  pause: svg('<rect x="9" y="7" width="5" height="18" rx="1"/><rect x="18" y="7" width="5" height="18" rx="1"/>'),
-  play: svg('<path d="M11 6l14 10-14 10z"/>'),
-  fast_forward: svg('<path d="M5 8l9 8-9 8zM17 8l9 8-9 8z"/>'),
-  victory_point: svg(
-    '<path d="M16 4l4 8 8 1-6 6 1.6 8L16 23l-7.6 4L10 19l-6-6 8-1z"/>',
+  supply: solid(
+    '<path d="M1.8 8.4h15.4v12.8H1.8z"/>' +
+    '<path d="M18.6 12.2h5.6l4.8 5.2v3.8h-10.4z"/>' +
+    '<path d="M1.8 22.4h26.6v2.2H1.8z"/>' +
+    '<circle cx="8.4" cy="25.2" r="3.4"/><circle cx="23.2" cy="25.2" r="3.4"/>' +
+    '<path d="M8.4 23.6a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z"/>' +
+    '<path d="M23.2 23.6a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z"/>',
   ),
-  supply: svg(
-    '<rect x="4" y="12" width="14" height="10" rx="1"/>' +
-    '<path d="M18 15h5l4 4v3h-9z"/><circle cx="9" cy="24" r="2.5"/><circle cx="22" cy="24" r="2.5"/>',
-  ),
-  warning: svg(
-    '<path d="M16 5 29 27H3z"/><path d="M16 13v6M16 23h.01"/>',
+  warning: solid(
+    '<path d="M16 2.8l14 25.4H2z' +
+    'M14.6 11.4h2.8v8.4h-2.8z' +
+    'M14.6 21.6h2.8v3h-2.8z"/>',
   ),
 };
 

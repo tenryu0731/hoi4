@@ -4,6 +4,7 @@ import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
 import { PANELS, formatNumber, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
+import { createSheetView } from './sheetView';
 import { RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
 
 /**
@@ -207,11 +208,26 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const sheetGrip = el('div', 'hud-sheet-grip');
   const sheetHeader = el('div', 'hud-sheet-header');
   const sheetTitle = el('div', 'hud-sheet-title', '');
+  // The zoom cluster sits in the panel header, where HOI4 puts its own: a
+  // phone panel has to serve a 320px screen and a 480px one, and no single
+  // type size does that.
+  const zoomOut = el('button', 'hud-sheet-zoom', '−');
+  zoomOut.setAttribute('aria-label', UI.zoomOut);
+  const zoomLabel = el('span', 'hud-sheet-zoom-v', '100%');
+  const zoomIn = el('button', 'hud-sheet-zoom', '＋');
+  zoomIn.setAttribute('aria-label', UI.zoomIn);
   const sheetClose = el('button', 'hud-sheet-close', '×');
   sheetClose.setAttribute('aria-label', UI.closePanel);
-  sheetHeader.append(sheetTitle, sheetClose);
+  sheetHeader.append(sheetTitle, zoomOut, zoomLabel, zoomIn, sheetClose);
   const sheetBody = el('div', 'hud-sheet-body');
   sheet.append(sheetGrip, sheetHeader, sheetBody);
+
+  const sheetView = createSheetView(sheet, (z) => {
+    setText(zoomLabel, `${Math.round(z * 100)}%`);
+  });
+  zoomOut.addEventListener('click', () => sheetView.stepZoom(-1));
+  zoomIn.addEventListener('click', () => sheetView.stepZoom(1));
+  const unbindPinch = sheetView.bindPinch(sheetBody);
 
   // --- bottom navigation ---------------------------------------------------
   const nav = el('div', 'hud-nav');
@@ -297,15 +313,35 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     if (openPanel === 'province') game.selectProvince(null);
     togglePanel(null);
   });
-  // Swipe the grip down to dismiss, which is the gesture the shape invites.
+  // The grip both resizes and dismisses, which is what the shape invites: drag
+  // up for more of the panel, drag down for less, drag down past the smallest
+  // size to put it away. A sheet fixed at 52vh is too short for the research
+  // list and too tall for the province card.
   let gripStartY = 0;
-  sheetGrip.addEventListener('pointerdown', (e) => { gripStartY = e.clientY; });
-  sheetGrip.addEventListener('pointerup', (e) => {
-    if (e.clientY - gripStartY > 24) {
+  let gripStartH = 0;
+  let gripDragging = false;
+  sheetGrip.addEventListener('pointerdown', (e) => {
+    gripStartY = e.clientY;
+    gripStartH = sheet.getBoundingClientRect().height;
+    gripDragging = true;
+    sheetGrip.setPointerCapture(e.pointerId);
+    sheet.classList.add('is-dragging');
+  });
+  sheetGrip.addEventListener('pointermove', (e) => {
+    if (!gripDragging) return;
+    sheetView.setHeight((gripStartH + (gripStartY - e.clientY)) / window.innerHeight);
+  });
+  const endGrip = (e: PointerEvent): void => {
+    if (!gripDragging) return;
+    gripDragging = false;
+    sheet.classList.remove('is-dragging');
+    if (e.clientY - gripStartY > 48) {
       if (openPanel === 'province') game.selectProvince(null);
       togglePanel(null);
     }
-  });
+  };
+  sheetGrip.addEventListener('pointerup', endGrip);
+  sheetGrip.addEventListener('pointercancel', endGrip);
 
   // The steppers move the chosen speed, which is remembered across a pause, so
   // pressing + while paused sets the speed you will resume at rather than
@@ -463,6 +499,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   return () => {
     unsubscribe();
     topObserver.disconnect();
+    unbindPinch();
     root.innerHTML = '';
   };
 }
