@@ -66,11 +66,28 @@ describe('TimeEngine', () => {
     let ticks = 0;
     te.on(() => ticks++);
     te.speed = 1;
+    const per = MS_PER_HOUR[1];
     // advance() clamps a single dt to 1000ms, so feed it in frame-sized slices.
-    for (let i = 0; i < 10; i++) te.advance(1000);
+    for (let i = 0; i < 10; i++) te.advance(per);
     expect(ticks).toBe(10);
     expect(te.hours).toBe(10);
-    expect(MS_PER_HOUR[1]).toBe(1000);
+  });
+
+  it('keeps every speed step a step, and none of them a chasm', () => {
+    // The ladder is what the player actually experiences, so it is asserted
+    // rather than left to whatever the constants happen to be. Slowest is a
+    // few seconds to the day; fastest clears a year in under a minute; and no
+    // single step more than triples, which is what made the old ladder read as
+    // "only the top one works".
+    const secondsPerDay = (speed: number) => (MS_PER_HOUR[speed] * 24) / 1000;
+    expect(secondsPerDay(1)).toBeGreaterThan(3);
+    expect(secondsPerDay(1)).toBeLessThan(9);
+    expect(secondsPerDay(5)).toBeLessThan(0.2);
+    for (let s = 2; s <= 5; s++) {
+      const jump = MS_PER_HOUR[s - 1] / MS_PER_HOUR[s];
+      expect(jump, `speed ${s - 1} -> ${s}`).toBeGreaterThan(1.7);
+      expect(jump, `speed ${s - 1} -> ${s}`).toBeLessThan(3);
+    }
   });
 
   it('caps catch-up work so a stalled frame cannot spiral', () => {
@@ -125,9 +142,9 @@ describe('TimeEngine', () => {
     let ticks = 0;
     te.on(() => ticks++);
     te.speed = 1;
-    te.advance(900);       // 90% of the way to a tick
+    te.advance(MS_PER_HOUR[1] * 0.9); // 90% of the way to a tick
     expect(ticks).toBe(0);
-    te.speed = 2;          // discards the partial hour
+    te.speed = 2;                     // discards the partial hour
     expect(te.alpha).toBe(0);
     // Derived from the ladder rather than written out, so retuning a speed
     // cannot silently turn this into a test of nothing.
@@ -141,7 +158,7 @@ describe('TimeEngine', () => {
   it('reports interpolation alpha between ticks', () => {
     const te = new TimeEngine();
     te.speed = 1;
-    te.advance(500);
+    te.advance(MS_PER_HOUR[1] / 2);
     expect(te.alpha).toBeCloseTo(0.5, 5);
   });
 

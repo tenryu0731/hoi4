@@ -5,17 +5,23 @@ export type Speed = 0 | 1 | 2 | 3 | 4 | 5;
 /**
  * Real milliseconds required to advance one in-game hour, per speed step.
  *
- * Speed 0 is paused. Speed 1 is a day every 24 seconds, for the hour either
- * side of a declaration; speed 5 is about a week a second, which puts the
- * twelve-year campaign inside a ten-minute sitting. The old top speed was
- * 16ms/hour -- a month every twelve seconds, half an hour for a campaign --
- * which on a phone reads as the fast-forward being broken rather than fast.
+ * Speed 0 is paused. The other five are a geometric ladder, each step about
+ * 2.5 times the one below it: six seconds to the game-day at the bottom, for
+ * the hour either side of a declaration, and seven game-days to the second at
+ * the top, which puts the twelve-year campaign inside a ten-minute sitting.
+ *
+ * The ladder used to be 1000, 300, 100, 30, 6, which measures out as 30, 7.5,
+ * 2.4, 0.7 and 0.14 seconds per game-day: the bottom two steps were slow
+ * enough that the date looked stuck, and the jumps between steps ran 3.1x,
+ * 3.3x and 5.0x, so only the top one felt like the clock was moving at all.
+ * Every step now differs by a factor a player can feel without any of them
+ * being a chasm, and the top speed is unchanged.
  *
  * The simulation costs roughly 2ms per game-day, so even the top step spends
  * under 2% of a second's compute on the model; the ladder is bounded by what
  * a player can follow, not by what the machine can do.
  */
-export const MS_PER_HOUR: readonly number[] = [Infinity, 1000, 300, 100, 30, 6];
+export const MS_PER_HOUR: readonly number[] = [Infinity, 250, 98, 39, 15, 6];
 
 /**
  * Hard cap on catch-up work in one frame. Without it a stalled tab returns and
