@@ -1,6 +1,6 @@
 import type {
   BattalionType, BuildingType, CountryId, DivisionId, EquipmentType,
-  ProvinceId, StateId, SupportType,
+  ProvinceId, StateId, SupportType, TechId,
 } from './types';
 
 /**
@@ -39,7 +39,12 @@ export type Command =
   | { t: 'joinFaction'; country: CountryId; faction: number }
   | { t: 'leaveFaction'; country: CountryId }
   // --- research -------------------------------------------------------------
-  | { t: 'setResearch'; country: CountryId; branch: 'infantry' | 'armor' | 'air' | 'industry' };
+  /**
+   * Puts a technology into a research slot. Replacing a slot that is already
+   * working abandons its progress, as it does in the real game.
+   */
+  | { t: 'startResearch'; country: CountryId; slot: number; tech: TechId }
+  | { t: 'cancelResearch'; country: CountryId; slot: number };
 
 export type CommandType = Command['t'];
 

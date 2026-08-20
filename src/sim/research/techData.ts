@@ -167,31 +167,31 @@ export const TECHS: readonly TechDef[] = [
     prerequisites: ['inf_weapons1'], effects: { softAttack: 0.05, breakthrough: 0.05 },
   },
   {
-    id: 'inf_engineers', name: '工兵装備', branch: 'infantry', year: 1938, days: 170,
+    id: 'inf_engineers', name: '工兵装備', branch: 'infantry', year: 1938, days: 200,
     prerequisites: ['inf_weapons1'], effects: { defense: 0.06, speedKmh: 0.03 },
   },
   {
-    id: 'inf_weapons2', name: '歩兵装備 II', branch: 'infantry', year: 1939, days: 190,
+    id: 'inf_weapons2', name: '歩兵装備 II', branch: 'infantry', year: 1939, days: 220,
     prerequisites: ['inf_support_weapons'], effects: { softAttack: 0.07, defense: 0.05 },
   },
   {
-    id: 'inf_mountain', name: '山岳装備', branch: 'infantry', year: 1940, days: 180,
+    id: 'inf_mountain', name: '山岳装備', branch: 'infantry', year: 1940, days: 230,
     prerequisites: ['inf_engineers'], effects: { defense: 0.05, speedKmh: 0.05, supplyUse: -0.03 },
   },
   {
-    id: 'inf_squad_tactics', name: '分隊戦術', branch: 'infantry', year: 1941, days: 200,
+    id: 'inf_squad_tactics', name: '分隊戦術', branch: 'infantry', year: 1941, days: 260,
     prerequisites: ['inf_weapons2'], effects: { breakthrough: 0.08, maxOrg: 0.04 },
   },
   {
-    id: 'inf_weapons3', name: '歩兵装備 III', branch: 'infantry', year: 1942, days: 220,
+    id: 'inf_weapons3', name: '歩兵装備 III', branch: 'infantry', year: 1942, days: 320,
     prerequisites: ['inf_squad_tactics'], effects: { softAttack: 0.08, defense: 0.06 },
   },
   {
-    id: 'inf_at_infantry', name: '携行対戦車兵器', branch: 'infantry', year: 1943, days: 230,
+    id: 'inf_at_infantry', name: '携行対戦車兵器', branch: 'infantry', year: 1943, days: 330,
     prerequisites: ['inf_weapons3'], effects: { hardAttack: 0.25, piercing: 0.10 },
   },
   {
-    id: 'inf_assault_rifle', name: '突撃銃', branch: 'infantry', year: 1944, days: 250,
+    id: 'inf_assault_rifle', name: '突撃銃', branch: 'infantry', year: 1944, days: 360,
     prerequisites: ['inf_weapons3'], effects: { softAttack: 0.10, breakthrough: 0.05 },
   },
 
@@ -209,23 +209,23 @@ export const TECHS: readonly TechDef[] = [
     prerequisites: ['art_at1'], effects: { hardAttack: 0.08, defense: 0.04 },
   },
   {
-    id: 'art_gun2', name: '野砲 II', branch: 'artillery', year: 1939, days: 190,
+    id: 'art_gun2', name: '野砲 II', branch: 'artillery', year: 1939, days: 220,
     prerequisites: ['art_gun1'], effects: { softAttack: 0.07, breakthrough: 0.04 },
   },
   {
-    id: 'art_at2', name: '対戦車砲 II', branch: 'artillery', year: 1940, days: 200,
+    id: 'art_at2', name: '対戦車砲 II', branch: 'artillery', year: 1940, days: 260,
     prerequisites: ['art_at1'], effects: { hardAttack: 0.18, piercing: 0.10 },
   },
   {
-    id: 'art_rocket', name: 'ロケット砲', branch: 'artillery', year: 1942, days: 220,
+    id: 'art_rocket', name: 'ロケット砲', branch: 'artillery', year: 1942, days: 320,
     prerequisites: ['art_gun2'], effects: { softAttack: 0.09, breakthrough: 0.06 },
   },
   {
-    id: 'art_gun3', name: '野砲 III', branch: 'artillery', year: 1943, days: 230,
+    id: 'art_gun3', name: '野砲 III', branch: 'artillery', year: 1943, days: 330,
     prerequisites: ['art_gun2'], effects: { softAttack: 0.08, defense: 0.04 },
   },
   {
-    id: 'art_at3', name: '対戦車砲 III', branch: 'artillery', year: 1944, days: 240,
+    id: 'art_at3', name: '対戦車砲 III', branch: 'artillery', year: 1944, days: 350,
     prerequisites: ['art_at2'], effects: { hardAttack: 0.18, piercing: 0.12 },
   },
 
@@ -235,32 +235,32 @@ export const TECHS: readonly TechDef[] = [
     prerequisites: [], effects: { armor: 0.05, breakthrough: 0.05 },
   },
   {
-    id: 'arm_light2', name: '軽戦車 II', branch: 'armor', year: 1938, days: 180,
+    id: 'arm_light2', name: '軽戦車 II', branch: 'armor', year: 1938, days: 210,
     prerequisites: ['arm_light1'], effects: { armor: 0.06, breakthrough: 0.06, speedKmh: 0.03 },
   },
   {
-    id: 'arm_medium1', name: '中戦車 I', branch: 'armor', year: 1939, days: 210,
+    id: 'arm_medium1', name: '中戦車 I', branch: 'armor', year: 1939, days: 240,
     prerequisites: ['arm_light2'],
     effects: { armor: 0.10, piercing: 0.10, hardAttack: 0.10, breakthrough: 0.08 },
   },
   {
-    id: 'arm_mech', name: '装甲擲弾兵', branch: 'armor', year: 1940, days: 190,
+    id: 'arm_mech', name: '装甲擲弾兵', branch: 'armor', year: 1940, days: 250,
     prerequisites: ['arm_light2'], effects: { speedKmh: 0.06, defense: 0.05, maxOrg: 0.03 },
   },
   {
-    id: 'arm_medium2', name: '中戦車 II', branch: 'armor', year: 1941, days: 230,
+    id: 'arm_medium2', name: '中戦車 II', branch: 'armor', year: 1941, days: 300,
     prerequisites: ['arm_medium1'], effects: { armor: 0.10, piercing: 0.10, hardAttack: 0.10 },
   },
   {
-    id: 'arm_td', name: '駆逐戦車', branch: 'armor', year: 1942, days: 210,
+    id: 'arm_td', name: '駆逐戦車', branch: 'armor', year: 1942, days: 300,
     prerequisites: ['arm_medium1'], effects: { hardAttack: 0.20, piercing: 0.12 },
   },
   {
-    id: 'arm_medium3', name: '中戦車 III', branch: 'armor', year: 1943, days: 250,
+    id: 'arm_medium3', name: '中戦車 III', branch: 'armor', year: 1943, days: 360,
     prerequisites: ['arm_medium2'], effects: { armor: 0.12, breakthrough: 0.08, hardAttack: 0.08 },
   },
   {
-    id: 'arm_heavy', name: '重戦車', branch: 'armor', year: 1944, days: 270,
+    id: 'arm_heavy', name: '重戦車', branch: 'armor', year: 1944, days: 390,
     prerequisites: ['arm_medium3'],
     effects: { armor: 0.15, piercing: 0.10, breakthrough: 0.06, speedKmh: -0.03 },
   },
@@ -275,27 +275,27 @@ export const TECHS: readonly TechDef[] = [
     prerequisites: ['air_fighter1'], effects: { softAttack: 0.04, airSupport: 0.05 },
   },
   {
-    id: 'air_bomber1', name: '戦術爆撃機', branch: 'air', year: 1938, days: 200,
+    id: 'air_bomber1', name: '戦術爆撃機', branch: 'air', year: 1938, days: 230,
     prerequisites: ['air_fighter1'], effects: { airSupport: 0.06, hardAttack: 0.04 },
   },
   {
-    id: 'air_fighter2', name: '戦闘機 II', branch: 'air', year: 1940, days: 210,
+    id: 'air_fighter2', name: '戦闘機 II', branch: 'air', year: 1940, days: 270,
     prerequisites: ['air_fighter1'], effects: { airSupport: 0.07 },
   },
   {
-    id: 'air_cas2', name: '近接航空支援 II', branch: 'air', year: 1941, days: 220,
+    id: 'air_cas2', name: '近接航空支援 II', branch: 'air', year: 1941, days: 290,
     prerequisites: ['air_cas1'], effects: { softAttack: 0.05, hardAttack: 0.10, airSupport: 0.05 },
   },
   {
-    id: 'air_naval_bomber', name: '雷撃機', branch: 'air', year: 1942, days: 210,
+    id: 'air_naval_bomber', name: '雷撃機', branch: 'air', year: 1942, days: 300,
     prerequisites: ['air_bomber1'], effects: { airSupport: 0.04, sealift: 0.08 },
   },
   {
-    id: 'air_fighter3', name: '戦闘機 III', branch: 'air', year: 1943, days: 240,
+    id: 'air_fighter3', name: '戦闘機 III', branch: 'air', year: 1943, days: 350,
     prerequisites: ['air_fighter2'], effects: { airSupport: 0.08 },
   },
   {
-    id: 'air_jet', name: 'ジェット機関', branch: 'air', year: 1945, days: 280,
+    id: 'air_jet', name: 'ジェット機関', branch: 'air', year: 1945, days: 410,
     prerequisites: ['air_fighter3'], effects: { airSupport: 0.12 },
   },
 
@@ -309,27 +309,27 @@ export const TECHS: readonly TechDef[] = [
     prerequisites: ['nav_convoy1'], effects: { sealift: 0.08, constructionSpeed: 0.05 },
   },
   {
-    id: 'nav_landing_craft', name: '揚陸艇', branch: 'naval', year: 1938, days: 180,
+    id: 'nav_landing_craft', name: '揚陸艇', branch: 'naval', year: 1938, days: 210,
     prerequisites: ['nav_convoy1'], effects: { landingOrg: 0.15, sealift: 0.05 },
   },
   {
-    id: 'nav_destroyer', name: '駆逐艦', branch: 'naval', year: 1939, days: 190,
+    id: 'nav_destroyer', name: '駆逐艦', branch: 'naval', year: 1939, days: 220,
     prerequisites: ['nav_dockyard'], effects: { sealift: 0.08 },
   },
   {
-    id: 'nav_asw', name: '対潜哨戒', branch: 'naval', year: 1940, days: 190,
+    id: 'nav_asw', name: '対潜哨戒', branch: 'naval', year: 1940, days: 250,
     prerequisites: ['nav_destroyer'], effects: { sealift: 0.10 },
   },
   {
-    id: 'nav_transport_ship', name: '大型輸送船', branch: 'naval', year: 1941, days: 210,
+    id: 'nav_transport_ship', name: '大型輸送船', branch: 'naval', year: 1941, days: 270,
     prerequisites: ['nav_landing_craft'], effects: { sealift: 0.12 },
   },
   {
-    id: 'nav_amphibious', name: '上陸戦術', branch: 'naval', year: 1943, days: 230,
+    id: 'nav_amphibious', name: '上陸戦術', branch: 'naval', year: 1943, days: 330,
     prerequisites: ['nav_transport_ship'], effects: { landingOrg: 0.20, sealift: 0.05 },
   },
   {
-    id: 'nav_escort_carrier', name: '護衛空母', branch: 'naval', year: 1944, days: 250,
+    id: 'nav_escort_carrier', name: '護衛空母', branch: 'naval', year: 1944, days: 360,
     prerequisites: ['nav_asw'], effects: { sealift: 0.10, airSupport: 0.03 },
   },
 
@@ -347,31 +347,31 @@ export const TECHS: readonly TechDef[] = [
     prerequisites: ['ind_tools1'], effects: { researchSlots: 1 },
   },
   {
-    id: 'ind_concentrated1', name: '集中工業', branch: 'industry', year: 1938, days: 190,
+    id: 'ind_concentrated1', name: '集中工業', branch: 'industry', year: 1938, days: 220,
     prerequisites: ['ind_tools1'], effects: { factoryOutput: 0.08 },
   },
   {
-    id: 'ind_construction2', name: '建設技術 II', branch: 'industry', year: 1939, days: 200,
+    id: 'ind_construction2', name: '建設技術 II', branch: 'industry', year: 1939, days: 230,
     prerequisites: ['ind_construction1'], effects: { constructionSpeed: 0.10, buildingSlots: 1 },
   },
   {
-    id: 'ind_excavation', name: '資源採掘', branch: 'industry', year: 1940, days: 190,
+    id: 'ind_excavation', name: '資源採掘', branch: 'industry', year: 1940, days: 250,
     prerequisites: ['ind_construction1'], effects: { resourceOutput: 0.10 },
   },
   {
-    id: 'ind_tools2', name: '工作機械 II', branch: 'industry', year: 1941, days: 220,
+    id: 'ind_tools2', name: '工作機械 II', branch: 'industry', year: 1941, days: 290,
     prerequisites: ['ind_concentrated1'], effects: { factoryOutput: 0.07, efficiencyCap: 0.04 },
   },
   {
-    id: 'ind_synthetic', name: '合成石油', branch: 'industry', year: 1942, days: 230,
+    id: 'ind_synthetic', name: '合成石油', branch: 'industry', year: 1942, days: 330,
     prerequisites: ['ind_excavation'], effects: { resourceOutput: 0.12 },
   },
   {
-    id: 'ind_construction3', name: '建設技術 III', branch: 'industry', year: 1943, days: 240,
+    id: 'ind_construction3', name: '建設技術 III', branch: 'industry', year: 1943, days: 350,
     prerequisites: ['ind_construction2'], effects: { constructionSpeed: 0.10, buildingSlots: 1 },
   },
   {
-    id: 'ind_dispersed', name: '分散工業', branch: 'industry', year: 1944, days: 260,
+    id: 'ind_dispersed', name: '分散工業', branch: 'industry', year: 1944, days: 380,
     prerequisites: ['ind_tools2'], effects: { factoryOutput: 0.05, efficiencyCap: 0.05 },
   },
 
@@ -385,27 +385,27 @@ export const TECHS: readonly TechDef[] = [
     prerequisites: [], effects: { researchSpeed: 0.05 },
   },
   {
-    id: 'ele_radar1', name: '電波探知機 I', branch: 'electronics', year: 1938, days: 190,
+    id: 'ele_radar1', name: '電波探知機 I', branch: 'electronics', year: 1938, days: 220,
     prerequisites: ['ele_radio'], effects: { airSupport: 0.06, defense: 0.03 },
   },
   {
-    id: 'ele_radio2', name: '無線機 II', branch: 'electronics', year: 1939, days: 200,
+    id: 'ele_radio2', name: '無線機 II', branch: 'electronics', year: 1939, days: 230,
     prerequisites: ['ele_radio'], effects: { maxOrg: 0.05, speedKmh: 0.03, supplyUse: -0.04 },
   },
   {
-    id: 'ele_decryption', name: '暗号解読', branch: 'electronics', year: 1940, days: 210,
+    id: 'ele_decryption', name: '暗号解読', branch: 'electronics', year: 1940, days: 270,
     prerequisites: ['ele_computing1'], effects: { researchSpeed: 0.06, defense: 0.03 },
   },
   {
-    id: 'ele_radar2', name: '電波探知機 II', branch: 'electronics', year: 1941, days: 220,
+    id: 'ele_radar2', name: '電波探知機 II', branch: 'electronics', year: 1941, days: 290,
     prerequisites: ['ele_radar1'], effects: { airSupport: 0.06, defense: 0.03 },
   },
   {
-    id: 'ele_computing2', name: '電子計算機', branch: 'electronics', year: 1943, days: 250,
+    id: 'ele_computing2', name: '電子計算機', branch: 'electronics', year: 1943, days: 360,
     prerequisites: ['ele_decryption'], effects: { researchSpeed: 0.08, researchSlots: 1 },
   },
   {
-    id: 'ele_guidance', name: '誘導装置', branch: 'electronics', year: 1944, days: 260,
+    id: 'ele_guidance', name: '誘導装置', branch: 'electronics', year: 1944, days: 380,
     prerequisites: ['ele_computing2'],
     effects: { softAttack: 0.05, hardAttack: 0.05, airSupport: 0.04 },
   },

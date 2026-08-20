@@ -317,6 +317,33 @@ export interface ResearchState {
   progress: { infantry: number; armor: number; air: number; industry: number };
 }
 
+/**
+ * National focus progress; see sim/focus.
+ *
+ * Optional only because the 1936 scenario table predates the focus system --
+ * the focus runtime creates it on first use, exactly as the research runtime
+ * does with its slots.
+ */
+export interface CountryFocus {
+  /** Focus being worked on, or null when the cabinet is idle. */
+  current: string | null;
+  /** Days already spent on `current`. Lost if it is cancelled. */
+  progress: number;
+  /** Focus ids finished, in completion order. */
+  completed: string[];
+  /** Standing modifiers granted by completed focuses, paid out daily. */
+  bonuses: {
+    /** Extra research days per day, by branch. */
+    research: { infantry: number; armor: number; air: number; industry: number };
+    /** Extra construction output, in factory-equivalents. */
+    construction: number;
+    /** Ceiling held on the consumer-goods share; 1 means no ceiling. */
+    consumerGoodsCap: number;
+    /** Extra political power per day. */
+    politicalPower: number;
+  };
+}
+
 export interface Country {
   id: CountryId;
   tag: string;
@@ -331,6 +358,8 @@ export interface Country {
   constructionQueue: ConstructionItem[];
   templates: DivisionTemplate[];
   research: ResearchState;
+  /** National focus state. Created on first use by sim/focus. */
+  focus?: CountryFocus;
   diplomacy: DiplomaticState;
   factionId: FactionId | null;
   atWarWith: CountryId[];
@@ -415,7 +444,7 @@ export type GameEventBody =
 
 export interface GameEvent {
   day: number;
-  kind: 'war' | 'combat' | 'production' | 'construction' | 'research' | 'diplomacy' | 'capitulation' | 'outcome';
+  kind: 'war' | 'combat' | 'production' | 'construction' | 'research' | 'focus' | 'diplomacy' | 'capitulation' | 'outcome';
   body: GameEventBody;
   /** Optional province to focus the camera on when tapped. */
   province?: ProvinceId;

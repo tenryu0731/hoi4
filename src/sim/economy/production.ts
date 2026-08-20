@@ -1,3 +1,4 @@
+import { techModifiers } from '../research';
 import {
   BASE_EFFICIENCY, BASE_EFFICIENCY_CAP, BUILDING_CAP, BUILDING_COST,
   EFFICIENCY_GROWTH, EQUIPMENT, FACTORY_OUTPUT, MAX_SHORTAGE_PENALTY,
@@ -46,13 +47,14 @@ export function computeResourceOutput(
 ): Record<ResourceType, number> {
   const out = {} as Record<ResourceType, number>;
   for (const r of RESOURCE_TYPES) out[r] = 0;
+  const yieldBonus = techModifiers(state, country).resourceOutput;
   const staticStates = index.data.states;
   for (let i = 0; i < staticStates.length; i++) {
     if (state.states[i].controller !== country) continue;
     const res = staticStates[i].resources;
     for (const r of RESOURCE_TYPES) {
       const v = res[r];
-      if (v) out[r] += v;
+      if (v) out[r] += v * yieldBonus;
     }
   }
   return out;
@@ -192,7 +194,7 @@ function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): 
   }
 
   // --- 4. equipment output ------------------------------------------------
-  const outputBonus = 1 + c.research.levels.industry * 0.1;
+  const outputBonus = techModifiers(state, c.id).factoryOutput;
   for (const line of c.productionLines) {
     const factories = line.assignedFactories;
     if (factories <= 0) {
@@ -214,7 +216,8 @@ function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): 
     }
 
     // Efficiency approaches its cap asymptotically, slowed by shortages.
-    const cap = Math.min(line.efficiencyCap, BASE_EFFICIENCY_CAP + c.research.levels.industry * 0.08);
+    const cap = Math.min(line.efficiencyCap,
+      BASE_EFFICIENCY_CAP + techModifiers(state, c.id).efficiencyCap);
     line.efficiencyCap = cap;
     line.efficiency += (cap - line.efficiency) * EFFICIENCY_GROWTH * shortagePenalty;
     if (line.efficiency > cap) line.efficiency = cap;
@@ -261,7 +264,8 @@ export function tickConstruction(state: GameState, c: Country): void {
     const used = Math.min(available, MAX_FACTORIES_PER_ITEM);
     available -= used;
     const infraBonus = 1 + (st.infrastructure - 1) * 0.1;
-    item.progress += used * FACTORY_OUTPUT * infraBonus;
+    item.progress += used * FACTORY_OUTPUT * infraBonus
+      * techModifiers(state, c.id).constructionSpeed;
     if (item.progress >= item.cost) finished.push(item.id);
   }
 
@@ -332,7 +336,10 @@ export function canQueueBuilding(
     const used = st.civilianFactories + st.militaryFactories
       + queuedLevel(c, stateId, 'civilian_factory')
       + queuedLevel(c, stateId, 'military_factory');
-    return used < (slots ?? st.buildingSlots);
+    // Construction technology widens every state, so the ceiling has to read
+    // the modifier rather than the raw figure the map baked in.
+    const cap = slots ?? (st.buildingSlots + techModifiers(state, c.id).buildingSlots);
+    return used < cap;
   }
   const current = buildingLevel(state, stateId, kind) + queuedLevel(c, stateId, kind);
   return current < BUILDING_CAP[kind];

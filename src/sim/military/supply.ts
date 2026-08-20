@@ -1,4 +1,5 @@
 import type { CountryId, GameState, ProvinceId } from '../core/types';
+import { effectiveTemplate } from '../research';
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 
 /**
@@ -249,7 +250,8 @@ function applyThroughput(state: GameState, index: ProvinceIndex): void {
     for (const id of p.divisions) {
       const d = state.divisions[id];
       if (!d || d.dead) continue;
-      const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
+      const base = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
+      const tpl = base ? effectiveTemplate(state, d.owner, base) : null;
       demand += tpl?.supplyUse ?? 1;
     }
     if (demand <= 0) continue;

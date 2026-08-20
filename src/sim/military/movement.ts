@@ -1,3 +1,4 @@
+import { effectiveTemplate, techModifiers } from '../research';
 import { TERRAIN } from '../core/data';
 import type {
   CountryId, Division, DivisionTemplate, GameState, ProvinceId,
@@ -119,7 +120,8 @@ export function sealiftCapacity(state: GameState, owner: CountryId): number {
   const c = state.countries[owner];
   const fromYards = c.economy.dockyards * DIVISIONS_PER_DOCKYARD;
   const fromConvoys = (c.economy.stockpile.convoy ?? 0) / CONVOYS_PER_DIVISION;
-  return Math.min(MAX_SEALIFT, Math.floor(fromYards + fromConvoys));
+  const m = techModifiers(state, owner);
+  return Math.min(MAX_SEALIFT, Math.floor((fromYards + fromConvoys) * m.sealift));
 }
 
 /** Divisions of this country currently mid-crossing. */
@@ -337,7 +339,7 @@ export function captureProvince(
 export function movementSpeed(
   state: GameState, ctx: MilitaryContext, d: Division, into: ProvinceId,
 ): number {
-  const tpl = templateOf(state, d);
+  const tpl = effectiveTemplate(state, d.owner, templateOf(state, d));
   const geo = ctx.index.get(into);
   const terrain = TERRAIN[geo.terrain];
   const infra = state.states[geo.stateId]?.infrastructure ?? 1;
@@ -349,7 +351,7 @@ export function movementSpeed(
 
 function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): void {
   if (d.path.length === 0) return;
-  const tpl = templateOf(state, d);
+  const tpl = effectiveTemplate(state, d.owner, templateOf(state, d));
   if (d.org < tpl.maxOrg * MIN_ORG_TO_MOVE || d.retreatCooldown > 0) return;
 
   const next = d.path[0];
@@ -369,8 +371,9 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
   if (crossing) {
     // Ashore, and disorganised. Without this an amphibious assault is strictly
     // better than a land attack, because it arrives where the enemy is not.
-    const tplNow = templateOf(state, d);
-    d.org = Math.min(d.org, tplNow.maxOrg * LANDING_ORG_KEPT);
+    const tplNow = effectiveTemplate(state, d.owner, templateOf(state, d));
+    const kept = Math.min(0.9, LANDING_ORG_KEPT * techModifiers(state, d.owner).landingOrg);
+    d.org = Math.min(d.org, tplNow.maxOrg * kept);
   }
   const controller = state.provinces[next].controller;
 

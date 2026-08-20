@@ -28,6 +28,7 @@ import {
 } from './military/movement';
 import { tickSupplyDaily } from './military/supply';
 import { tickAIDaily } from './ai/ai';
+import { cancelResearch, startResearch, tickResearchDaily } from './research';
 import { tickVictoryCheck } from './scenario/victory';
 
 /**
@@ -200,9 +201,12 @@ export class Simulation {
       }
 
       // --- research -------------------------------------------------------
-      case 'setResearch': {
-        const c = state.countries[cmd.country];
-        c.research.progress[cmd.branch] += 0;   // selection only; progress ticks daily
+      case 'startResearch': {
+        startResearch(state, cmd.country, cmd.slot, cmd.tech);
+        return;
+      }
+      case 'cancelResearch': {
+        cancelResearch(state, cmd.country, cmd.slot);
         return;
       }
     }
@@ -235,27 +239,6 @@ export class Simulation {
     }
     // The clock reaching the scenario end must resolve even mid-month.
     if (ctx.newDay) tickVictoryCheck(state);
-  }
-}
-
-/** Research is a slow, automatic drip: one level per branch every ~200 days. */
-function tickResearchDaily(state: GameState): void {
-  for (const c of state.countries) {
-    if (c.capitulated) continue;
-    // Industry leads: it is the branch the economy actually reads, and behind
-    // 'air' it sat at index 3 while no country has more than 3 slots -- so it
-    // was never researched by anyone, in any campaign.
-    const branches = ['industry', 'infantry', 'armor', 'air'] as const;
-    // A country researches as many branches at once as it has slots.
-    for (let i = 0; i < Math.min(c.research.slots, branches.length); i++) {
-      const b = branches[i];
-      c.research.progress[b] += 1;
-      const needed = 180 + c.research.levels[b] * 60;
-      if (c.research.progress[b] >= needed) {
-        c.research.progress[b] = 0;
-        c.research.levels[b]++;
-      }
-    }
   }
 }
 

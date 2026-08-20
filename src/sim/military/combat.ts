@@ -1,3 +1,4 @@
+import { effectiveTemplate, techModifiers } from '../research';
 import { TERRAIN } from '../core/data';
 import { jitter } from '../core/rng';
 import type {
@@ -164,7 +165,7 @@ function collectSide(
   let used = 0;
   let hardnessWeight = 0;
   for (const d of candidates) {
-    const tpl = templateOf(state, d);
+    const tpl = effectiveTemplate(state, d.owner, templateOf(state, d));
     if (used + tpl.width > width && out.engaged.length > 0) break;
     used += tpl.width;
     out.engaged.push(d);
@@ -256,8 +257,13 @@ export function resolveCombatRound(
   if (def.engaged.length === 0) return { ended: true, attackerWon: true };
 
   const fort = state.provinces[combat.province].fortLevel;
-  const attackerMod = terrain.attackMod * ATTACKER_PENALTY * (1 - Math.min(0.6, fort * 0.12));
-  const defenderMod = terrain.defenceMod;
+  // Air support is the one technology branch that acts on the battle rather
+  // than on the units in it, so it multiplies the side modifier.
+  const attackerMod = terrain.attackMod * ATTACKER_PENALTY
+    * (1 - Math.min(0.6, fort * 0.12))
+    * techModifiers(state, combat.attackerCountry).airSupport;
+  const defenderMod = terrain.defenceMod
+    * techModifiers(state, combat.defenderCountry).airSupport;
 
   const attRoll = jitter(state.rng, COMBAT_JITTER);
   const defRoll = jitter(state.rng, COMBAT_JITTER);
@@ -294,7 +300,7 @@ export function resolveCombatRound(
 
 /** Hourly out-of-combat recovery and attrition. */
 export function tickDivisionUpkeep(state: GameState, d: Division): void {
-  const tpl = templateOf(state, d);
+  const tpl = effectiveTemplate(state, d.owner, templateOf(state, d));
   if (d.retreatCooldown > 0) d.retreatCooldown--;
 
   if (d.combatId !== null) return;
