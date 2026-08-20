@@ -1,5 +1,6 @@
 import type { CountryId, GameState, ProvinceId } from '../core/types';
 import { effectiveTemplate } from '../research';
+import { commandModifiers } from './command';
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 
 /**
@@ -252,7 +253,10 @@ function applyThroughput(state: GameState, index: ProvinceIndex): void {
       if (!d || d.dead) continue;
       const base = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
       const tpl = base ? effectiveTemplate(state, d.owner, base) : null;
-      demand += tpl?.supplyUse ?? 1;
+      // A logistics-minded general moves the same divisions on less. This is
+      // the one modifier in the chain of command that shows up away from the
+      // battle line, and it is what makes a deep advance survivable.
+      demand += (tpl?.supplyUse ?? 1) * commandModifiers(state, d).supplyUse;
     }
     if (demand <= 0) continue;
 

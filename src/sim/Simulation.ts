@@ -27,6 +27,11 @@ import {
   orderMove, stopDivision, tickMilitaryHourly, tickReinforcementDaily,
 } from './military/movement';
 import { tickSupplyDaily } from './military/supply';
+import {
+  appointCommander, armyById, assignDivisions, createArmy, disbandArmy, setArmyParent,
+  tickCommanderExperienceDaily,
+} from './military/command';
+import { tickBattlePlansDaily } from './military/frontline';
 import { tickAIDaily } from './ai/ai';
 import { cancelResearch, startResearch, tickResearchDaily } from './research';
 import { cancelFocus, startFocus, tickFocusDaily } from './focus';
@@ -147,6 +152,46 @@ export class Simulation {
         }
         return;
       }
+      // --- chain of command -------------------------------------------------
+      case 'createArmy': {
+        createArmy(state, cmd.country, cmd.name, cmd.isArmyGroup ?? false);
+        return;
+      }
+      case 'disbandArmy': {
+        if (armyById(state, cmd.army)?.owner !== cmd.country) return;
+        disbandArmy(state, cmd.army);
+        return;
+      }
+      case 'renameArmy': {
+        const army = armyById(state, cmd.army);
+        if (!army || army.owner !== cmd.country) return;
+        army.name = cmd.name.slice(0, 40);
+        return;
+      }
+      case 'assignDivisions': {
+        if (cmd.army !== null && armyById(state, cmd.army)?.owner !== cmd.country) return;
+        assignDivisions(state, cmd.army, cmd.divisions);
+        return;
+      }
+      case 'appointCommander': {
+        if (armyById(state, cmd.army)?.owner !== cmd.country) return;
+        appointCommander(state, cmd.army, cmd.commander);
+        return;
+      }
+      case 'setArmyParent': {
+        if (armyById(state, cmd.army)?.owner !== cmd.country) return;
+        setArmyParent(state, cmd.army, cmd.group);
+        return;
+      }
+      case 'setArmyOrder': {
+        const army = armyById(state, cmd.army);
+        if (!army || army.owner !== cmd.country) return;
+        // A new order throws the old preparation away. Planning is preparation
+        // for one thing; it does not transfer to another.
+        if (JSON.stringify(army.order) !== JSON.stringify(cmd.order)) army.planning = 0;
+        army.order = cmd.order;
+        return;
+      }
       case 'createTemplate': {
         const c = state.countries[cmd.country];
         if (!c || c.capitulated) return;
@@ -232,6 +277,10 @@ export class Simulation {
     tickMilitaryHourly(state, this.ctx);
 
     if (ctx.newDay) {
+      // Before supply and before the AI: a front that re-forms today should be
+      // fed today, and the AI should see where its armies have been sent.
+      tickBattlePlansDaily(state, this.ctx);
+      tickCommanderExperienceDaily(state);
       tickSupplyDaily(state, this.index);
       tickEconomyDaily(state, this.ctx);
       tickReinforcementDaily(state);

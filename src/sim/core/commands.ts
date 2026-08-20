@@ -1,6 +1,6 @@
 import type {
-  BattalionType, BuildingType, CountryId, DivisionId, EquipmentType,
-  ProvinceId, StateId, SupportType, TechId,
+  ArmyId, ArmyOrder, BattalionType, BuildingType, CommanderId, CountryId, DivisionId,
+  EquipmentType, ProvinceId, StateId, SupportType, TechId,
 } from './types';
 
 /**
@@ -23,6 +23,23 @@ export type Command =
   | { t: 'moveDivisions'; divisions: DivisionId[]; target: ProvinceId }
   | { t: 'stopDivisions'; divisions: DivisionId[] }
   | { t: 'setDivisionOrder'; divisions: DivisionId[]; order: 'defend' | 'attack'; target?: ProvinceId }
+  // --- chain of command -----------------------------------------------------
+  /**
+   * Raises a new army, or an army group when `isArmyGroup` is set. An army
+   * group holds armies rather than divisions, and its field marshal passes
+   * half of his attributes to every general beneath him.
+   */
+  | { t: 'createArmy'; country: CountryId; name: string; isArmyGroup?: boolean }
+  | { t: 'disbandArmy'; country: CountryId; army: ArmyId }
+  | { t: 'renameArmy'; country: CountryId; army: ArmyId; name: string }
+  /** Moves divisions into an army; `army: null` returns them to no command. */
+  | { t: 'assignDivisions'; country: CountryId; army: ArmyId | null; divisions: DivisionId[] }
+  /** Puts an officer in charge; `commander: null` leaves the post vacant. */
+  | { t: 'appointCommander'; country: CountryId; army: ArmyId; commander: CommanderId | null }
+  /** Places an army under an army group, or with null takes it out of one. */
+  | { t: 'setArmyParent'; country: CountryId; army: ArmyId; group: ArmyId | null }
+  /** The standing order the army follows and prepares for. */
+  | { t: 'setArmyOrder'; country: CountryId; army: ArmyId; order: ArmyOrder | null }
   // --- diplomacy ------------------------------------------------------------
   | { t: 'justifyWar'; country: CountryId; target: CountryId }
   /**

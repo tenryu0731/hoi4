@@ -9,6 +9,8 @@ export type DivisionId = number;
 export type CombatId = number;
 export type FactionId = number;
 export type WarId = number;
+export type CommanderId = number;
+export type ArmyId = number;
 
 // ---------------------------------------------------------------------------
 // Resources & equipment
@@ -174,6 +176,15 @@ export interface Division {
   owner: CountryId;
   templateId: number;
   provinceId: ProvinceId;
+  /**
+   * The army this division belongs to, or null while it is unassigned.
+   *
+   * A division outside an army still fights and still takes orders; it simply
+   * has nobody commanding it, so it gets none of a general's bonuses and no
+   * planning. That is the same deal the real game offers, and it is what makes
+   * putting an army together worth doing rather than a chore.
+   */
+  armyId: ArmyId | null;
   org: number;
   hp: number;
   experience: number;
@@ -201,6 +212,100 @@ export interface Combat {
   /** Accumulated progress toward the attacker winning, purely for the UI. */
   attackerProgress: number;
   ended: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Chain of command
+// ---------------------------------------------------------------------------
+
+export type CommanderRank = 'general' | 'field_marshal';
+
+export type CommanderTrait =
+  | 'organiser'
+  | 'logistics_wizard'
+  | 'defensive_doctrine'
+  | 'fast_planner'
+  | 'thorough_planner'
+  | 'panzer_leader'
+  | 'infantry_leader'
+  | 'trickster'
+  | 'winter_specialist'
+  | 'naval_invader';
+
+/**
+ * A general or a field marshal.
+ *
+ * Skill is the overall rating and drives how fast the officer learns; the four
+ * attributes are what the divisions under him actually feel. The real game's
+ * rates, which this follows: attack and defence are +5% each per level,
+ * logistics is -2.5% supply use per level, and planning is +5% planning speed
+ * and +2% to the ceiling the planning bonus may reach.
+ */
+export interface Commander {
+  id: CommanderId;
+  owner: CountryId;
+  /** Stable definition id from commanderData, for saves and for tests. */
+  defId: string;
+  name: string;
+  latin: string;
+  rank: CommanderRank;
+  /** 1..9. */
+  skill: number;
+  /** 1..6 each. */
+  attack: number;
+  defence: number;
+  planning: number;
+  logistics: number;
+  traits: CommanderTrait[];
+  /**
+   * Progress toward the next skill level. Earned by commanding divisions that
+   * are in combat, so an officer parked behind the lines never improves.
+   */
+  experience: number;
+  /** The army he leads, or the army group if he is a field marshal. */
+  assignment: ArmyId | null;
+}
+
+export type ArmyOrder =
+  /**
+   * Hold the border with a particular enemy. The divisions spread themselves
+   * along whichever provinces of ours actually touch theirs, and re-spread as
+   * that border moves, which is the whole point: a front is a standing
+   * instruction, not a list of destinations.
+   */
+  | { kind: 'front'; against: CountryId }
+  /** Push through the front toward these provinces, using the plan bonus. */
+  | { kind: 'offensive'; targets: ProvinceId[] }
+  /** Sit on these provinces and keep them. */
+  | { kind: 'garrison'; provinces: ProvinceId[] };
+
+/**
+ * An army, or -- when its commander is a field marshal -- an army group.
+ *
+ * An army group holds no divisions of its own. It holds armies, and its field
+ * marshal passes half of his attributes down to every general beneath him,
+ * which is what makes a good field marshal worth more than a good general.
+ */
+export interface Army {
+  id: ArmyId;
+  owner: CountryId;
+  name: string;
+  commander: CommanderId | null;
+  divisions: DivisionId[];
+  /** Set when this army sits under an army group. */
+  parent: ArmyId | null;
+  /** Armies under this one; only ever populated for an army group. */
+  children: ArmyId[];
+  isArmyGroup: boolean;
+  order: ArmyOrder | null;
+  /**
+   * Accumulated preparation, 0..1 of the ceiling. Grows while the army holds
+   * still under an order and drains once it starts moving, so a planned
+   * offensive beats an improvised one.
+   */
+  planning: number;
+  /** Provinces the current order has assigned, recomputed as the front moves. */
+  frontProvinces: ProvinceId[];
 }
 
 // ---------------------------------------------------------------------------
@@ -412,12 +517,23 @@ export interface GameState {
   states: StateRuntime[];
   divisions: Division[];
   combats: Combat[];
+  /**
+   * Every officer in the world, alive or retired, indexed by id.
+   *
+   * Optional because the 1936 scenario table predates the chain of command;
+   * the command runtime fills it on first use, the way research and focus do.
+   */
+  commanders?: Commander[];
+  /** Armies and army groups, indexed by id. Optional for the same reason. */
+  armies?: Army[];
   factions: Faction[];
   wars: War[];
   worldTension: number;
   nextIds: {
     division: number; combat: number; line: number; construction: number;
     war: number; template: number;
+    /** Optional for the same reason the arrays above are. */
+    commander?: number; army?: number;
   };
   outcome: Outcome;
   /** Ring buffer of player-facing events, newest last. */

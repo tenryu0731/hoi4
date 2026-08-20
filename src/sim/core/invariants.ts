@@ -16,6 +16,49 @@ export function checkInvariants(state: GameState, provinceCount: number): string
     push(`province array length ${state.provinces.length} != ${provinceCount}`);
   }
 
+  // The chain of command has to stay a tree, both ways round: an army's
+  // division list and each division's armyId are two views of one fact, and a
+  // disagreement between them makes a division fight under a general who does
+  // not know he has it.
+  for (const army of state.armies ?? []) {
+    if (army.isArmyGroup && army.divisions.length > 0) {
+      push(`army group ${army.id} holds ${army.divisions.length} divisions directly`);
+    }
+    for (const divId of army.divisions) {
+      const div = state.divisions.find((d) => d.id === divId);
+      if (!div) { push(`army ${army.id} lists missing division ${divId}`); continue; }
+      if (div.armyId !== army.id) {
+        push(`division ${divId} is in army ${army.id} but points at ${div.armyId}`);
+      }
+      if (div.owner !== army.owner) {
+        push(`division ${divId} of country ${div.owner} is in army ${army.id} of ${army.owner}`);
+      }
+    }
+    if (army.parent !== null) {
+      const parent = state.armies?.find((a) => a.id === army.parent);
+      if (!parent) push(`army ${army.id} points at missing group ${army.parent}`);
+      else if (!parent.children.includes(army.id)) {
+        push(`army ${army.id} claims group ${parent.id}, which does not list it`);
+      }
+    }
+  }
+  for (const div of state.divisions) {
+    if (div.dead || div.armyId === null) continue;
+    const army = state.armies?.find((a) => a.id === div.armyId);
+    if (!army) { push(`division ${div.id} points at missing army ${div.armyId}`); continue; }
+    if (!army.divisions.includes(div.id)) {
+      push(`division ${div.id} claims army ${army.id}, which does not list it`);
+    }
+  }
+  // One officer, one post.
+  const posts = new Map<number, number>();
+  for (const army of state.armies ?? []) {
+    if (army.commander === null) continue;
+    const held = posts.get(army.commander);
+    if (held !== undefined) push(`commander ${army.commander} leads both ${held} and ${army.id}`);
+    posts.set(army.commander, army.id);
+  }
+
   const liveCombats = new Set<number>();
   for (const c of state.combats) if (!c.ended) liveCombats.add(c.id);
 

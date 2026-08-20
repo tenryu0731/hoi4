@@ -1,4 +1,5 @@
 import { effectiveTemplate, techModifiers } from '../research';
+import { armyById, commandModifiers } from './command';
 import { TERRAIN } from '../core/data';
 import { jitter } from '../core/rng';
 import type {
@@ -142,6 +143,11 @@ interface SideStats {
   engaged: Division[];
 }
 
+/** The preparation bonus this division's army has banked, if it has one. */
+function planningBonus(state: GameState, d: Division): number {
+  return armyById(state, d.armyId)?.planning ?? 0;
+}
+
 /**
  * Commits divisions up to the province's combat width. Units are committed
  * best-first, so a stack of broken formations does not crowd out fresh ones.
@@ -171,10 +177,17 @@ function collectSide(
     out.engaged.push(d);
 
     const eff = effectiveness(state, d);
-    out.softAttack += tpl.softAttack * eff;
-    out.hardAttack += tpl.hardAttack * eff;
-    out.defence += (attacking ? tpl.breakthrough : tpl.defense) * eff;
-    out.breakthrough += tpl.breakthrough * eff;
+    // What the officers above this division are worth. A division in no army
+    // gets NO_COMMAND, every field of which is neutral, so an unorganised
+    // force fights exactly as it did before the chain of command existed.
+    const cmd = commandModifiers(state, d);
+    // Preparation only helps the side going forward; a defender's advantage is
+    // entrenchment, which is a different bonus entirely.
+    const plan = attacking ? 1 + planningBonus(state, d) : 1;
+    out.softAttack += tpl.softAttack * eff * cmd.attack * plan;
+    out.hardAttack += tpl.hardAttack * eff * cmd.attack * plan;
+    out.defence += (attacking ? tpl.breakthrough * cmd.attack : tpl.defense * cmd.defence) * eff;
+    out.breakthrough += tpl.breakthrough * eff * cmd.attack;
     out.hardness += tpl.hardness * tpl.width;
     out.armor = Math.max(out.armor, tpl.armor);
     out.piercing = Math.max(out.piercing, tpl.piercing);

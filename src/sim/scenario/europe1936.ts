@@ -3,12 +3,16 @@ import { createRng, randRange } from '../core/rng';
 import { BATTALIONS, EQUIPMENT, SUPPORTS, BASE_EFFICIENCY, BASE_EFFICIENCY_CAP } from '../core/data';
 import {
   EQUIPMENT_TYPES, RESOURCE_TYPES,
-  type BattalionType, type Country, type CountryId, type Division,
+  type Army, type BattalionType, type Country, type CountryId, type Division,
   type DivisionTemplate, type EquipmentType, type Economy, type GameState,
   type ProvinceState, type ResourceType, type StateRuntime, type SupportType,
 } from '../core/types';
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 import { NATIONS, NATION_BY_TAG, type NationDef } from './nations';
+import { commandersFor } from '../military/commanderData';
+import {
+  appointCommander, ARMY_GROUP_LIMIT, assignDivisions, COMMAND_LIMIT, createArmy, setArmyParent,
+} from '../military/command';
 
 /**
  * Builds the opening position of the Europe 1936 scenario from the baked map
@@ -269,7 +273,12 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
     worldTension: 0,
     // Templates start past the four the scenario deals so a player-designed
     // division can never collide with one every country already has.
-    nextIds: { division: 0, combat: 0, line: 0, construction: 0, war: 0, template: 100 },
+    nextIds: {
+      division: 0, combat: 0, line: 0, construction: 0, war: 0, template: 100,
+      commander: 0, army: 0,
+    },
+    commanders: [],
+    armies: [],
     outcome: { status: 'playing' },
     log: [],
   };
@@ -342,6 +351,7 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
     c.economy.stockpile.artillery = Math.round(n_equipmentStock(c) * 0.08);
   }
 
+  raiseArmies(state);
   recomputeCountryStats(state);
   return state;
 }
@@ -370,6 +380,76 @@ function joinFactionAtStart(
 // Division helpers shared with the military subsystem
 // ---------------------------------------------------------------------------
 
+/**
+ * Puts every country's officers on the books and its divisions into armies.
+ *
+ * Starting with the whole force unassigned would be technically correct and
+ * practically hostile: the player would open the army panel to twenty-four
+ * loose divisions and a blank organisation chart, and the AI would have
+ * nothing to give orders to. Everyone begins organised, the way they did.
+ */
+function raiseArmies(state: GameState): void {
+  for (const country of state.countries) {
+    const roster = commandersFor(country.tag);
+    for (const def of roster) {
+      state.commanders!.push({
+        id: state.nextIds.commander!++,
+        owner: country.id,
+        defId: def.id,
+        name: def.name,
+        latin: def.latin,
+        rank: def.rank,
+        skill: def.skill,
+        attack: def.attack,
+        defence: def.defence,
+        planning: def.planning,
+        logistics: def.logistics,
+        traits: [...def.traits],
+        experience: 0,
+        assignment: null,
+      });
+    }
+
+    const mine = state.divisions.filter((d) => d.owner === country.id && !d.dead);
+    if (mine.length === 0) continue;
+
+    // One army per command limit's worth, so nobody starts overloaded.
+    const armyCount = Math.max(1, Math.ceil(mine.length / COMMAND_LIMIT));
+    const generals = state.commanders!
+      .filter((c) => c.owner === country.id && c.rank === 'general')
+      .sort((a, b) => b.skill - a.skill);
+    const armies: Army[] = [];
+    for (let i = 0; i < armyCount; i++) {
+      const army = createArmy(state, country.id, `${ORDINAL[i] ?? String(i + 1)}${ARMY_SUFFIX}`);
+      armies.push(army);
+      const general = generals[i];
+      if (general) appointCommander(state, army.id, general.id);
+      assignDivisions(
+        state, army.id,
+        mine.slice(i * COMMAND_LIMIT, (i + 1) * COMMAND_LIMIT).map((d) => d.id),
+      );
+    }
+
+    // A field marshal on the books gets an army group to run, which is the
+    // only way his attributes reach anybody.
+    const marshal = state.commanders!
+      .filter((c) => c.owner === country.id && c.rank === 'field_marshal')
+      .sort((a, b) => b.skill - a.skill)[0];
+    if (marshal && armies.length > 0) {
+      const group = createArmy(state, country.id, ARMY_GROUP_NAME, true);
+      appointCommander(state, group.id, marshal.id);
+      for (const army of armies.slice(0, ARMY_GROUP_LIMIT)) {
+        setArmyParent(state, army.id, group.id);
+      }
+    }
+  }
+}
+
+/** Army names read as they do on a Japanese map: 第一軍, 第二軍, and so on. */
+const ORDINAL = ['第一', '第二', '第三', '第四', '第五', '第六', '第七', '第八'];
+const ARMY_SUFFIX = '軍';
+const ARMY_GROUP_NAME = '軍集団';
+
 export function spawnDivision(
   state: GameState,
   owner: CountryId,
@@ -387,6 +467,7 @@ export function spawnDivision(
     owner,
     templateId,
     provinceId,
+    armyId: null,
     org: tpl.maxOrg,
     hp: tpl.maxHp * equipmentRatio,
     experience: 0,
