@@ -28,6 +28,14 @@ export const HUD_CSS = `
   pointer-events: auto;
 }
 .hud-top-row { display: flex; align-items: center; gap: 8px; }
+/* The flag and the country name are one control: it opens politics. */
+.hud-identity {
+  display: flex; align-items: center; gap: 8px; min-height: 44px;
+  padding: 0; background: none; border: none; color: inherit;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.hud-identity:active { transform: none; }
+.hud-identity:active .hud-flag { box-shadow: 0 0 0 1px var(--accent), 0 1px 3px rgba(0,0,0,0.7); }
 .hud-spacer { flex: 1 1 auto; }
 .hud-flag {
   width: 34px; height: 23px; flex: 0 0 auto;

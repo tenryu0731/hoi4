@@ -1,4 +1,5 @@
 import { techModifiers } from '../research';
+import { lawEffects, politicalPowerPerDay } from '../politics/politics';
 import {
   BASE_EFFICIENCY, BASE_EFFICIENCY_CAP, BUILDING_CAP, BUILDING_COST,
   EFFICIENCY_GROWTH, EQUIPMENT, FACTORY_OUTPUT, MAX_SHORTAGE_PENALTY,
@@ -26,12 +27,15 @@ import type { ProvinceIndex } from '../map/ProvinceIndex';
  * never depends on where it sits in the array beyond its declared priority.
  */
 
-/** Political power accrued per day. */
-const POLITICAL_POWER_PER_DAY = 1;
-/** Fraction of a state's population that becomes recruitable each year. */
-const CONSCRIPTION_RATE = 0.025;
-/** Manpower is stored in thousands; this converts the annual rate to daily. */
-const DAILY_CONSCRIPTION = CONSCRIPTION_RATE / 365;
+/**
+ * How fast the recruitable share a conscription law grants is actually drawn.
+ *
+ * The law says what fraction of the population may be called up; this says how
+ * quickly the call-up happens. Two and a half years to reach the ceiling, so
+ * raising a law is a decision whose benefit arrives over seasons rather than
+ * on the next tick.
+ */
+const CONSCRIPTION_YEARS = 2.5;
 
 export interface EconomyContext {
   index: ProvinceIndex;
@@ -126,20 +130,18 @@ export function tickEconomyDaily(state: GameState, ctx: EconomyContext): void {
   }
 }
 
-/** Consumer-goods share a country settles at, by whether it is fighting. */
-const CONSUMER_GOODS_TARGET = { peace: 0.32, war: 0.15 };
 /** How fast the economy is allowed to shift, per day. */
 const CONSUMER_GOODS_DRIFT = 0.002;
 
 function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): void {
   const eco = c.economy;
 
-  // A country at war converts its economy over months, not overnight. The
-  // freed civilian factories are what let a wartime power out-build a
-  // peacetime one, and the drift is what makes mobilising cost time.
-  const target = c.atWarWith.length > 0
-    ? CONSUMER_GOODS_TARGET.war
-    : CONSUMER_GOODS_TARGET.peace;
+  // The consumer-goods share is the country's economy law, not a function of
+  // whether it happens to be shooting at anyone. It used to drift from 32% to
+  // 15% by itself the moment war broke out, which made the single largest
+  // economic decision in the genre something the player watched happen.
+  const effects = lawEffects(c);
+  const target = effects.consumerGoods;
   if (eco.consumerGoodsRatio > target) {
     eco.consumerGoodsRatio = Math.max(target, eco.consumerGoodsRatio - CONSUMER_GOODS_DRIFT);
   } else if (eco.consumerGoodsRatio < target) {
@@ -194,7 +196,10 @@ function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): 
   }
 
   // --- 4. equipment output ------------------------------------------------
-  const outputBonus = techModifiers(state, c.id).factoryOutput;
+  // A mobilised economy gets more out of the same plant, and a conscripted one
+  // has fewer hands to run it.
+  const outputBonus = techModifiers(state, c.id).factoryOutput
+    * effects.output * effects.factoryStaffing;
   for (const line of c.productionLines) {
     const factories = line.assignedFactories;
     if (factories <= 0) {
@@ -235,8 +240,10 @@ function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): 
     const factor = s.owner === c.id ? 1 : 0.2;
     pool += s.manpowerPool * factor;
   }
-  eco.manpower += pool * DAILY_CONSCRIPTION;
-  eco.politicalPower = Math.min(999, eco.politicalPower + POLITICAL_POWER_PER_DAY);
+  eco.manpower += (pool * effects.conscriptionFraction) / (CONSCRIPTION_YEARS * 365);
+  // Political power is bought with stability: a government that is not fighting
+  // its own people has attention to spend on everything else.
+  eco.politicalPower = Math.min(999, eco.politicalPower + politicalPowerPerDay(c));
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +272,8 @@ export function tickConstruction(state: GameState, c: Country): void {
     available -= used;
     const infraBonus = 1 + (st.infrastructure - 1) * 0.1;
     item.progress += used * FACTORY_OUTPUT * infraBonus
-      * techModifiers(state, c.id).constructionSpeed;
+      * techModifiers(state, c.id).constructionSpeed
+      * lawEffects(c).construction;
     if (item.progress >= item.cost) finished.push(item.id);
   }
 

@@ -9,6 +9,7 @@ import {
   BASE_EFFICIENCY, BUILDING_CAP, BUILDING_COST, EQUIPMENT, FACTORY_OUTPUT,
 } from '../../src/sim/core/data';
 import { RESOURCE_TYPES, type EquipmentType } from '../../src/sim/core/types';
+import { lawEffects } from '../../src/sim/politics/politics';
 import { makeFixture } from './helpers/fixture';
 
 function runDays(f: ReturnType<typeof makeFixture>, days: number): void {
@@ -119,7 +120,10 @@ describe('equipment production', () => {
     const days = 50;
     runDays(f, days);
 
-    const perDay = 10 * FACTORY_OUTPUT * 0.4;
+    // The economy law is part of the closed form now: a mobilised economy gets
+    // more out of the same plant, and conscription takes hands off the floor.
+    const laws = lawEffects(ger);
+    const perDay = 10 * FACTORY_OUTPUT * 0.4 * laws.output * laws.factoryStaffing;
     const expected = Math.floor((perDay * days) / EQUIPMENT.infantry_equipment.cost);
     expect(ger.economy.stockpile.infantry_equipment).toBeGreaterThanOrEqual(expected - 1);
     expect(ger.economy.stockpile.infantry_equipment).toBeLessThanOrEqual(expected + 1);
@@ -228,7 +232,7 @@ describe('construction', () => {
 
     const infra = f.state.states[stateId].infrastructure;
     const perDay = Math.min(15, freeCivilianFactories(ger)) * FACTORY_OUTPUT
-      * (1 + (infra - 1) * 0.1);
+      * (1 + (infra - 1) * 0.1) * lawEffects(ger).construction;
     const expectedDays = Math.ceil(BUILDING_COST.military_factory / perDay);
 
     runDays(f, expectedDays - 1);
@@ -254,22 +258,30 @@ describe('construction', () => {
     expect(ger.constructionQueue[0].progress).toBe(0);
   });
 
-  it('shifts to a war economy when fighting, and back again in peace', () => {
+  it('follows the economy law rather than the war, and takes months to do it', () => {
+    // This used to assert that the consumer-goods share fell on its own the
+    // moment a war started and rose again when it ended. That behaviour is
+    // gone on purpose: mobilising the economy is the player's decision now,
+    // and a country that never passes a law never mobilises however long it
+    // fights.
     const f = makeFixture();
     const ger = f.country('GER');
     const pol = f.country('POL');
-    const peacetime = ger.economy.consumerGoodsRatio;
 
     ger.atWarWith.push(pol.id);
     runDays(f, 400);
-    const wartime = ger.economy.consumerGoodsRatio;
-    expect(wartime).toBeLessThan(peacetime);
-    expect(freeCivilianFactories(ger)).toBeGreaterThan(0);
+    expect(ger.economy.consumerGoodsRatio)
+      .toBeCloseTo(lawEffects(ger).consumerGoods, 2);
 
-    ger.atWarWith.length = 0;
-    runDays(f, 800);
-    // Demobilisation is slower than mobilisation, but it does happen.
-    expect(ger.economy.consumerGoodsRatio).toBeGreaterThan(wartime);
+    // Passing one moves it, over months rather than overnight.
+    ger.economy.politicalPower = 999;
+    ger.laws.economy = 'war_economy';
+    const target = lawEffects(ger).consumerGoods;
+    runDays(f, 5);
+    expect(ger.economy.consumerGoodsRatio).toBeGreaterThan(target);
+    runDays(f, 200);
+    expect(ger.economy.consumerGoodsRatio).toBeCloseTo(target, 2);
+    expect(freeCivilianFactories(ger)).toBeGreaterThan(0);
   });
 
   it('shares one slot pool between civilian and military factories', () => {

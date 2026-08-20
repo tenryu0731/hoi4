@@ -167,6 +167,24 @@ export const UI_ICONS: Record<string, string> = {
     '<path d="M16 3.2L29 13.4l-3.4 2.6L16 8.6 6.4 16 3 13.4z"/>' +
     '<path d="M16 12.4L29 22.6l-3.4 2.6L16 17.8l-9.6 7.4L3 22.6z"/>',
   ),
+  // Scales. Stability is the government's balance, and borrowing the
+  // victory-point star for it said "this province is worth something".
+  stability: solid(
+    '<path d="M14.6 3.4h2.8v24.2h-2.8z"/>' +
+    '<path d="M7.4 26h17.2v2.8H7.4z"/>' +
+    '<path d="M5.4 8.4h21.2v2.6H5.4z"/>' +
+    '<path d="M2 20.4l4.4-9.6 4.4 9.6z' +
+    'M6.4 15.2l-1.5 3.2h3z"/>' +
+    '<path d="M21.2 20.4l4.4-9.6 4.4 9.6z' +
+    'M25.6 15.2l-1.5 3.2h3z"/>',
+  ),
+  // A rifle held up. War support is the nation's willingness to fight, and the
+  // warning triangle it borrowed meant "something is wrong".
+  war_support: solid(
+    '<path d="M20.6 2.4l3 1.9-14.4 22.6-3-1.9z"/>' +
+    '<path d="M8.2 20.6l6.4 4.1-2 3.1-6.4-4.1z"/>' +
+    '<path d="M17.4 9.2l5.2 3.3-1.5 2.4-5.2-3.3z"/>',
+  ),
   warning: solid(
     '<path d="M16 2.8l14 25.4H2z' +
     'M14.6 11.4h2.8v8.4h-2.8z' +

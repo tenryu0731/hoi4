@@ -1,4 +1,5 @@
 import type { GameClock } from '../time/calendar';
+import type { ConscriptionLaw, EconomyLaw } from '../politics/lawData';
 import type { RngState } from './rng';
 
 export type CountryId = number;
@@ -472,6 +473,25 @@ export interface Country {
   color: [number, number, number];
   capital: ProvinceId;
   ideology: Ideology;
+  /**
+   * How firmly the government is in the saddle, 0..1.
+   *
+   * Spent by conscription laws and by being at war; buys political power and
+   * keeps industry off consumer goods.
+   */
+  stability: number;
+  /**
+   * How far the nation will follow the government into a war, 0..1.
+   *
+   * Gates the conscription ladder and sets how much of itself the country
+   * will lose before it capitulates.
+   */
+  warSupport: number;
+  /** The two ladders every campaign is built around; see sim/politics. */
+  laws: {
+    conscription: ConscriptionLaw;
+    economy: EconomyLaw;
+  };
   isAI: boolean;
   major: boolean;
   economy: Economy;

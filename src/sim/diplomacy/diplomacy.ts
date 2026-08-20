@@ -1,4 +1,5 @@
 import { randRange } from '../core/rng';
+import { surrenderTolerance } from '../politics/politics';
 import type {
   CountryId, GameState, ProvinceId, War,
 } from '../core/types';
@@ -543,7 +544,12 @@ export function tickCapitulationDaily(state: GameState, ctx: DiplomacyContext): 
     if (c.capitulated || c.atWarWith.length === 0) continue;
     const ratio = occupationRatio(state, c.id);
     const capitalLost = state.provinces[c.capital]?.controller !== c.id;
-    const beaten = (ratio >= c.surrenderLimit && capitalLost) || ratio >= TOTAL_OCCUPATION;
+    // War support moves the line. A nation that believes in the war holds on
+    // past the point where one that does not has already asked for terms, so
+    // the same map position surrenders a demoralised country and not a
+    // determined one.
+    const limit = c.surrenderLimit * surrenderTolerance(c);
+    const beaten = (ratio >= limit && capitalLost) || ratio >= TOTAL_OCCUPATION;
     if (beaten) capitulate(state, ctx, c.id);
   }
   closeSettledWars(state);

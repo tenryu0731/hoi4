@@ -139,6 +139,10 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     statNodes[key] = v;
   };
   addStat('pp', UI.politicalPower, 'ui-political_power');
+  // Stability and war support sit next to political power in the real game's
+  // top bar, because all three are the same decision seen from three sides.
+  addStat('stab', UI.stability, 'ui-stability');
+  addStat('ws', UI.warSupport, 'ui-war_support');
   addStat('mp', UI.manpower, 'ui-manpower');
   addStat('civ', UI.civFactories, 'ui-factory');
   addStat('mil', UI.milFactories, 'ui-military_factory');
@@ -164,8 +168,16 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // Two rows: identity and clock above, the figures below. One row cannot hold
   // a flag, a name, five figures and a clock on a 412px screen without one of
   // them being pushed off, which is what was happening.
+  // Tapping your own flag opens politics, which is where the real game puts
+  // it: there is no room for a seventh tab on a 412px screen, and the flag is
+  // already the thing that means "my country".
+  const identity = el('button', 'hud-identity');
+  identity.setAttribute('aria-label', UI.navPolitics);
+  identity.append(flag, nameBox);
+  identity.addEventListener('click', () => togglePanel('politics'));
+
   const topRow = el('div', 'hud-top-row');
-  topRow.append(flag, nameBox, el('div', 'hud-spacer'), clock);
+  topRow.append(identity, el('div', 'hud-spacer'), clock);
 
   // --- resource strip ------------------------------------------------------
   // Its own row under the figures, not absolutely positioned 48px down: that
@@ -407,6 +419,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     civ: new NumberTween(statNodes.civ, (v) => String(Math.round(v))),
     mil: new NumberTween(statNodes.mil, (v) => String(Math.round(v))),
     div: new NumberTween(statNodes.div, (v) => String(Math.round(v))),
+    stab: new NumberTween(statNodes.stab, (v) => `${Math.round(v)}%`),
+    ws: new NumberTween(statNodes.ws, (v) => `${Math.round(v)}%`),
   };
 
   // --- per-frame refresh ---------------------------------------------------
@@ -433,6 +447,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     tweens.civ.set(me.economy.civilianFactories, dt);
     tweens.mil.set(me.economy.militaryFactories, dt);
     tweens.div.set(me.stats.divisionCount, dt);
+    tweens.stab.set(me.stability * 100, dt);
+    tweens.ws.set(me.warSupport * 100, dt);
 
     for (const r of RESOURCE_TYPES) {
       const flow = me.economy.resources[r];

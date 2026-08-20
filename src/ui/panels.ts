@@ -10,6 +10,13 @@ import {
 } from '../sim/core/types';
 import { deriveTemplate } from '../sim/scenario/europe1936';
 import { canQueueBuilding } from '../sim/economy/production';
+import {
+  CONSCRIPTION_LAWS, ECONOMY_LAWS, LAW_COST,
+} from '../sim/politics/lawData';
+import {
+  canChangeLaw, lawEffects, lawIndex, type LawCheck, type LawKind,
+} from '../sim/politics/politics';
+import { CONSCRIPTION_NAME, ECONOMY_NAME } from './lawNames';
 import { ENTRENCHMENT_PER_LEVEL } from '../sim/military/movement';
 import { winterSeverity } from '../sim/military/weather';
 import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
@@ -37,7 +44,7 @@ import {
 
 export type PanelId =
   | 'focus' | 'research' | 'production' | 'construction' | 'army' | 'command'
-  | 'diplomacy' | 'province' | 'designer';
+  | 'diplomacy' | 'province' | 'designer' | 'politics';
 
 export interface Panel {
   id: PanelId;
@@ -960,6 +967,7 @@ export const PANELS: Record<PanelId, Panel> = {
   diplomacy: diplomacyPanel,
   province: provincePanel,
   designer: designerPanel,
+  get politics() { return politicsPanel; },
 } as Record<PanelId, Panel>;
 
 export { RESOURCE_LABEL, EQUIPMENT_LABEL, RESOURCE_TYPES };
@@ -1524,3 +1532,103 @@ function cheapestResearchable(game: Game, owner: number): string | null {
 function list_append(root: HTMLElement, row: HTMLElement): void {
   root.append(row);
 }
+
+
+// ---------------------------------------------------------------------------
+// Politics
+// ---------------------------------------------------------------------------
+
+/** One rung of a law ladder, with the two buttons that move it. */
+function lawRow(
+  game: Game, kind: LawKind, label: string, current: string, rebuild: () => void,
+): HTMLElement {
+  const me = game.state.countries[game.state.meta.playerCountry];
+  const card = el('div', 'panel-focus');
+  card.append(el('div', 'panel-label', label));
+  card.append(el('div', 'panel-focus-name', current));
+
+  const rung = lawIndex(me, kind);
+  const total = kind === 'conscription' ? CONSCRIPTION_LAWS.length : ECONOMY_LAWS.length;
+  const bar = el('div', 'panel-bar');
+  const fill = el('i', 'panel-bar-fill');
+  fill.style.width = `${((rung + 1) / total * 100).toFixed(1)}%`;
+  bar.append(fill);
+  card.append(bar);
+
+  const row = el('div', 'panel-chips');
+  for (const [step, text] of [[-1, UI.lawRelax], [1, UI.lawMobilise]] as const) {
+    const check = canChangeLaw(game.state, me, kind, step);
+    const btn = el('button', 'panel-btn wide', `${text}（${LAW_COST} ${UI.lawCost}）`);
+    btn.disabled = !check.allowed;
+    if (step === 1 && check.allowed) btn.classList.add('primary');
+    btn.addEventListener('click', () => {
+      game.issue({ t: 'changeLaw', country: me.id, kind, step });
+      rebuild();
+    });
+    row.append(btn);
+    if (!check.allowed && check.reason !== '' && step === 1) {
+      card.append(el('div', 'panel-focus-block', lawBlockReason(check.reason)));
+    }
+  }
+  card.append(row);
+  return card;
+}
+
+function lawBlockReason(reason: LawCheck['reason']): string {
+  switch (reason) {
+    case 'cost': return UI.lawBlockedCost;
+    case 'war_support': return UI.lawBlockedWarSupport;
+    case 'tension': return UI.lawBlockedTension;
+    case 'needs_war': return UI.lawBlockedNeedsWar;
+    case 'democracy': return UI.lawBlockedDemocracy;
+    default: return UI.lawBlockedEnd;
+  }
+}
+
+/**
+ * The politics screen, reached by tapping your own flag, which is where the
+ * real game keeps it.
+ */
+export const politicsPanel: Panel = {
+  id: 'politics',
+  title: UI.navPolitics,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const effects = lawEffects(me);
+    const rebuild = () => politicsPanel.build(game, root);
+
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.politicalPower, String(Math.round(me.economy.politicalPower))),
+      stat(UI.stability, `${Math.round(me.stability * 100)}%`),
+      stat(UI.warSupport, `${Math.round(me.warSupport * 100)}%`),
+      stat(UI.worldTension, `${Math.round(state.worldTension)}%`),
+    );
+    root.append(head);
+
+    root.append(lawRow(
+      game, 'economy', UI.economyLaw, ECONOMY_NAME[me.laws.economy], rebuild,
+    ));
+    root.append(lawRow(
+      game, 'conscription', UI.conscriptionLaw,
+      CONSCRIPTION_NAME[me.laws.conscription], rebuild,
+    ));
+
+    // What the two ladders are currently worth, so the cost of a step is
+    // legible before it is paid rather than after.
+    root.append(el('div', 'panel-label', UI.effects));
+    const kvs = el('div', 'panel-kvs');
+    const kv = (k: string, v: string) => {
+      const box = el('div', 'panel-kv');
+      box.append(el('span', 'panel-k', k), el('span', 'panel-v', v));
+      kvs.append(box);
+    };
+    kv(UI.recruitable, `${(effects.conscriptionFraction * 100).toFixed(1)}%`);
+    kv(UI.consumerGoodsShare, `${Math.round(effects.consumerGoods * 100)}%`);
+    kv(UI.constructionSpeed, `${Math.round(effects.construction * 100)}%`);
+    kv(UI.factoryOutputLabel, `${Math.round(effects.output * effects.factoryStaffing * 100)}%`);
+    root.append(kvs);
+  },
+};

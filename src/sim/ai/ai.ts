@@ -13,6 +13,8 @@ import {
   occupationRatio, opinionOf, startJustification,
 } from '../diplomacy/diplomacy';
 import { orderMove } from '../military/movement';
+import { canChangeLaw, changeLaw } from '../politics/politics';
+import { LAW_COST } from '../politics/lawData';
 import { spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY } from '../scenario/europe1936';
 import {
   dateReached, doctrineFor, monthIndexOf, monthsSince, nowIndex,
@@ -986,6 +988,7 @@ export function tickAIDaily(state: GameState, ctx: AIContext): void {
   for (const c of state.countries) {
     if (c.capitulated || !c.isAI) continue;
 
+    aiMobilise(state, c);
     runEconomyAI(state, ctx, c);
     runRecruitmentAI(state, ctx, c);
 
@@ -996,5 +999,48 @@ export function tickAIDaily(state: GameState, ctx: AIContext): void {
     if (c.id % 7 === dayOfWeek) {
       runDiplomacyAI(state, ctx, c);
     }
+  }
+}
+
+/**
+ * Mobilisation.
+ *
+ * Without this the laws would be a mechanic only the human player has, and a
+ * player who moves to a war economy in 1937 would out-build an AI frozen on
+ * civilian economy for the whole campaign. The AI does not plan: it takes the
+ * next step whenever it can afford one and the gates allow it, which is what
+ * a country under pressure actually does.
+ *
+ * Political power is kept for laws only above a floor, so passing them never
+ * starves the diplomacy the AI also needs power for.
+ */
+const AI_LAW_RESERVE = 60;
+
+/**
+ * Manpower in the bank, in thousands, below which a country starts reaching
+ * for a harder conscription law.
+ *
+ * Conscription is not free industry: the top of that ladder takes 35% of the
+ * workforce off the factory floor and a third of the country's stability with
+ * it. A country with men to spare that keeps climbing anyway ends up with a
+ * large army it cannot equip, which is what an AI taking every step it could
+ * afford actually produced -- by 1940 every nation in Europe sat on identical
+ * maximum laws at minimum stability.
+ */
+const MANPOWER_COMFORT = 250;
+
+export function aiMobilise(state: GameState, c: Country): void {
+  if (c.capitulated) return;
+  if (c.economy.politicalPower < LAW_COST + AI_LAW_RESERVE) return;
+
+  // Industry first and always: factories compound, and the penalties are small.
+  if (canChangeLaw(state, c, 'economy', 1).allowed) {
+    changeLaw(state, c.id, 'economy', 1);
+    return;
+  }
+  // Men only when short of them. Running out is what justifies the cost.
+  if (c.economy.manpower < MANPOWER_COMFORT
+    && canChangeLaw(state, c, 'conscription', 1).allowed) {
+    changeLaw(state, c.id, 'conscription', 1);
   }
 }

@@ -10,6 +10,7 @@ import {
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 import { NATIONS, NATION_BY_TAG, type NationDef } from './nations';
 import { commandersFor } from '../military/commanderData';
+import { ECONOMY, startingLaws } from '../politics/lawData';
 import {
   appointCommander, ARMY_GROUP_LIMIT, ARMY_GROUP_NAME, assignDivisions, COMMAND_LIMIT,
   createArmy, nextArmyName, setArmyParent,
@@ -160,9 +161,9 @@ function emptyEconomy(n: NationDef): Economy {
     civilianFactories: n.civilianFactories,
     militaryFactories: n.militaryFactories,
     dockyards: n.dockyards,
-    // A peacetime economy sinks most of its civilian industry into consumer
-    // goods; war economy laws claw that back later.
-    consumerGoodsRatio: n.major ? 0.3 : 0.35,
+    // Set from the country's economy law on the first economic tick; this is
+    // only the value it shows before that runs.
+    consumerGoodsRatio: ECONOMY[startingLaws(n.ideology, n.major).economy].consumerGoods,
     stockpile,
     resources,
     manpower: Math.round(n.population * 1000 * 1.5),
@@ -194,6 +195,11 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       ideology: n.ideology,
       isAI: tag !== playerTag,
       major: n.major,
+      // The 1936 start is a race because the dictatorships begin further up
+      // both ladders than the democracies do; see politics/lawData.
+      stability: n.ideology === 'democratic' ? 0.75 : 0.6,
+      warSupport: n.ideology === 'democratic' ? 0.1 : 0.25,
+      laws: startingLaws(n.ideology, n.major),
       economy: emptyEconomy(n),
       productionLines: [],
       constructionQueue: [],
