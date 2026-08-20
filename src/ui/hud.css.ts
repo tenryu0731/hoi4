@@ -47,10 +47,12 @@ export const HUD_CSS = `
 }
 
 /* The figures and the resources are one scrolling row of identical chips. */
-/* touch-action has to be granted back explicitly. The page sets none on body
-   so the map keeps every gesture, and per the spec that value intersects down
-   the whole hit-test chain: without these overrides no strip and no panel in
-   the HUD could be scrolled with a finger at all, only with a mouse wheel. */
+/* The panning these rows want, declared rather than assumed. The page sets
+   touch-action: none on body, and the spec says the used value is the
+   intersection along the hit-test chain, which would veto scrolling here --
+   but measured on Chromium it does not: a swipe scrolls these rows to 287px
+   with the body rule in force and with it removed alike. So these are an
+   explicit statement of intent, not a fix for anything. */
 .hud-stats, .hud-resources {
   display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
   touch-action: pan-x;

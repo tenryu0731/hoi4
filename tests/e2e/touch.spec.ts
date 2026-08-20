@@ -267,18 +267,22 @@ test.describe('touch input', () => {
 
   test('a finger can scroll a panel that is taller than the sheet', async ({ page }) => {
     await bootGame(page);
+    // The sheet's open transition never advances in this headless browser --
+    // the document timeline only ticks when something forces a composite, and
+    // nothing here does -- so the panel would still be below the fold when the
+    // swipe was dispatched, and the gesture would land outside the viewport.
+    // Removing the transition puts it where a player would see it; the
+    // animation is not what this test is about.
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
     await page.evaluate(() => window.__game!.openPanel!('research'));
-    await page.waitForTimeout(400);
     const box = (await page.locator('.hud-sheet-body').boundingBox())!;
+    expect(box.y).toBeLessThan(page.viewportSize()!.height - 100);
     const overflows = await page.evaluate(() => {
       const b = document.querySelector('.hud-sheet-body')!;
       return b.scrollHeight - b.clientHeight;
     });
     expect(overflows).toBeGreaterThan(80);
 
-    // The page sets touch-action: none on body so the map owns every gesture.
-    // That value intersects down the hit-test chain, so unless the sheet grants
-    // pan-y back, a finger cannot move this list at all.
     await swipe(
       page,
       { x: box.x + box.width / 2, y: box.y + box.height - 30 },
