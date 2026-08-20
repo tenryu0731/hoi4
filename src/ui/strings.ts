@@ -34,6 +34,8 @@ export const UI = {
   modeVictory: '勝利点',
 
   // Bottom navigation
+  navFocus: '国家方針',
+  navResearch: '研究',
   navProduction: '生産',
   navConstruction: '建設',
   navArmy: '徴兵',
@@ -42,6 +44,26 @@ export const UI = {
   deployHint: '新しい師団が現れる州',
   navDiplomacy: '外交',
   closePanel: 'パネルを閉じる',
+
+  // National focus
+  focusTree: '方針ツリー',
+  currentFocus: '進行中の方針',
+  startFocus: '開始',
+  cancelFocus: '中止',
+  focusDone: '完了',
+  inProgress: '残り',
+  days: '日',
+  locked: '選択できません',
+
+  // Research
+  researchSlots: '研究スロット',
+  researched: '研究済み',
+  slot: 'スロット',
+  chooseTech: '技術を選択',
+  changeTech: '変更',
+  remaining: '残り',
+  aheadPenalty: '先行研究',
+  autoResearch: 'おまかせ',
 
   // Production panel
   militaryFactories: '軍需工場',

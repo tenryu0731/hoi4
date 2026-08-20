@@ -27,9 +27,16 @@ const MAP_MODES: [MapMode, string][] = [
   ['victory', UI.modeVictory],
 ];
 
+/**
+ * The button row, in the order the real game's is: what the nation intends,
+ * what it is learning, what it is building, what it is manufacturing, what it
+ * is raising, and who it is talking to.
+ */
 const NAV: [PanelId, string, string][] = [
-  ['production', UI.navProduction, 'ui-production'],
+  ['focus', UI.navFocus, 'ui-political_power'],
+  ['research', UI.navResearch, 'ui-research'],
   ['construction', UI.navConstruction, 'ui-construction'],
+  ['production', UI.navProduction, 'ui-production'],
   ['army', UI.navArmy, 'ui-army'],
   ['diplomacy', UI.navDiplomacy, 'ui-diplomacy'],
 ];

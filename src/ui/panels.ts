@@ -10,6 +10,10 @@ import {
 import { deriveTemplate } from '../sim/scenario/europe1936';
 import { canQueueBuilding } from '../sim/economy/production';
 import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
+import { availableFocuses } from '../sim/focus';
+import {
+  BRANCH_LIST, researchSummary, researchView, techTree, type TechBranch,
+} from '../sim/research';
 import {
   BATTALION, BUILDING, EQUIPMENT as EQUIPMENT_NAME, IDEOLOGY, RESOURCE,
   SUPPORT, TERRAIN, UI, country,
@@ -24,7 +28,8 @@ import {
  */
 
 export type PanelId =
-  | 'production' | 'construction' | 'army' | 'diplomacy' | 'province' | 'designer';
+  | 'focus' | 'research' | 'production' | 'construction' | 'army'
+  | 'diplomacy' | 'province' | 'designer';
 
 export interface Panel {
   id: PanelId;
@@ -863,13 +868,253 @@ export const designerPanel: Panel = {
   },
 };
 
+/**
+ * Built lazily: the focus and research panels are declared below this point,
+ * and a `const` table would capture them before they are assigned.
+ */
 export const PANELS: Record<PanelId, Panel> = {
+  get focus() { return focusPanel; },
+  get research() { return researchPanel; },
   production: productionPanel,
   construction: constructionPanel,
   army: armyPanel,
   diplomacy: diplomacyPanel,
   province: provincePanel,
   designer: designerPanel,
-};
+} as Record<PanelId, Panel>;
 
 export { RESOURCE_LABEL, EQUIPMENT_LABEL, RESOURCE_TYPES };
+
+// ---------------------------------------------------------------------------
+// National focus
+// ---------------------------------------------------------------------------
+
+/**
+ * The focus tree, as a vertical timeline rather than the desktop game's grid.
+ *
+ * A 412px phone cannot show a branching lattice legibly, and pinch-zooming a
+ * second surface inside a bottom sheet is miserable. The tree is already in
+ * historical order, so a column reads as a chronology: what is running, what
+ * can be started now, and what is waiting and on what.
+ */
+export const focusPanel: Panel = {
+  id: 'focus',
+  title: UI.navFocus,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const views = availableFocuses(state, me.id);
+    const current = views.find((v) => v.current) ?? null;
+
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.politicalPower, String(Math.round(me.economy.politicalPower))),
+      stat(UI.focusDone, `${views.filter((v) => v.completed).length}/${views.length}`),
+      stat(UI.inProgress, current ? `${current.daysRemaining}${UI.days}` : '—'),
+    );
+    root.append(head);
+
+    if (current) {
+      root.append(el('div', 'panel-label', UI.currentFocus));
+      const row = el('div', 'panel-focus is-current');
+      row.append(
+        el('div', 'panel-focus-name', current.name),
+        el('div', 'panel-focus-desc', current.desc),
+      );
+      const bar = el('div', 'panel-bar');
+      const fill = el('i', 'panel-bar-fill');
+      fill.style.width = `${(current.fraction * 100).toFixed(1)}%`;
+      bar.append(fill);
+      row.append(bar);
+      row.append(el('div', 'panel-focus-meta',
+        `${Math.round(current.progress)} / ${current.days}${UI.days}`));
+      const stop = el('button', 'panel-btn wide', UI.cancelFocus);
+      stop.addEventListener('click', () => {
+        game.issue({ t: 'cancelFocus', country: me.id });
+        focusPanel.build(game, root);
+      });
+      row.append(stop);
+      root.append(row);
+    }
+
+    root.append(el('div', 'panel-label', UI.focusTree));
+    const list = el('div', 'panel-list');
+    for (const v of views) {
+      if (v.current) continue;
+      const row = el('div', 'panel-focus');
+      row.classList.toggle('is-done', v.completed);
+      row.classList.toggle('is-locked', !v.selectable && !v.completed);
+      row.append(
+        el('div', 'panel-focus-name', `${v.completed ? '✔ ' : ''}${v.name}`),
+        el('div', 'panel-focus-desc', v.desc),
+      );
+      if (v.effectText.length > 0) {
+        row.append(el('div', 'panel-focus-effect', v.effectText.join(' · ')));
+      }
+      if (v.completed) {
+        // Nothing more to say; the tick and the effect line are the record.
+      } else if (v.selectable) {
+        const go = el('button', 'panel-btn wide', `${UI.startFocus}（${v.days}${UI.days}）`);
+        go.addEventListener('click', () => {
+          game.issue({ t: 'startFocus', country: me.id, focus: v.id });
+          focusPanel.build(game, root);
+        });
+        row.append(go);
+      } else {
+        row.append(el('div', 'panel-focus-block', v.blockText ?? UI.locked));
+      }
+      list.append(row);
+    }
+    root.append(list);
+  },
+  refresh(game, root) {
+    // The tree only changes on a completion or a command, both of which rebuild.
+    const bar = root.querySelector<HTMLElement>('.panel-focus.is-current .panel-bar-fill');
+    if (!bar) return;
+    const me = game.state.countries[game.state.meta.playerCountry];
+    const cur = availableFocuses(game.state, me.id).find((v) => v.current);
+    if (!cur) { focusPanel.build(game, root); return; }
+    bar.style.width = `${(cur.fraction * 100).toFixed(1)}%`;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Research
+// ---------------------------------------------------------------------------
+
+let researchBranch: TechBranch = 'industry';
+let researchSlot = 0;
+
+export const researchPanel: Panel = {
+  id: 'research',
+  title: UI.navResearch,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const slots = researchView(state, me.id);
+    if (researchSlot >= slots.length) researchSlot = 0;
+
+    const done = researchSummary(state, me.id);
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.researchSlots, String(slots.length)),
+      stat(UI.researched, String(done.completed)),
+    );
+    root.append(head);
+
+    // --- the slots themselves ---
+    root.append(el('div', 'panel-label', UI.researchSlots));
+    for (const s of slots) {
+      const row = el('div', 'panel-focus');
+      row.classList.toggle('is-current', s.slot === researchSlot);
+      row.append(el('div', 'panel-focus-name',
+        `${UI.slot}${s.slot + 1}: ${s.name}${s.idle ? '' : ` · ${s.branchName}`}`));
+      if (!s.idle) {
+        const bar = el('div', 'panel-bar');
+        const fill = el('i', 'panel-bar-fill');
+        fill.style.width = `${(s.percent * 100).toFixed(1)}%`;
+        bar.append(fill);
+        row.append(bar);
+        row.append(el('div', 'panel-focus-meta',
+          `${UI.remaining} ${s.daysRemaining}${UI.days}` +
+          (s.aheadPenaltyDays > 0 ? ` · ${UI.aheadPenalty} +${s.aheadPenaltyDays}${UI.days}` : '')));
+        if (s.effects.length > 0) {
+          row.append(el('div', 'panel-focus-effect',
+            s.effects.map((e) => `${e.label} ${e.value}`).join(' · ')));
+        }
+      }
+      const pick = el('button', 'panel-btn wide', s.idle ? UI.chooseTech : UI.changeTech);
+      pick.addEventListener('click', () => {
+        researchSlot = s.slot;
+        researchPanel.build(game, root);
+      });
+      row.append(pick);
+      if (s.idle) {
+        // An empty slot researches nothing, and a player who never opens this
+        // panel would spend the war a decade behind without ever being told.
+        const auto = el('button', 'panel-btn wide', UI.autoResearch);
+        auto.addEventListener('click', () => {
+          const best = cheapestResearchable(game, me.id);
+          if (best) {
+            game.issue({
+              t: 'startResearch', country: me.id, slot: s.slot, tech: best,
+            });
+          }
+          researchPanel.build(game, root);
+        });
+        row.append(auto);
+      }
+      list_append(root, row);
+    }
+
+    // --- the tree for the selected slot ---
+    root.append(el('div', 'panel-label', `${UI.slot}${researchSlot + 1} — ${UI.chooseTech}`));
+    const chips = el('div', 'panel-chips');
+    for (const b of BRANCH_LIST) {
+      const chip = el('button', 'panel-chip', b.name);
+      chip.classList.toggle('is-on', b.id === researchBranch);
+      chip.addEventListener('click', () => {
+        researchBranch = b.id;
+        researchPanel.build(game, root);
+      });
+      chips.append(chip);
+    }
+    root.append(chips);
+
+    const list = el('div', 'panel-list');
+    for (const t of techTree(state, me.id, researchBranch)) {
+      const row = el('button', 'panel-row wide-row');
+      row.disabled = !t.researchable;
+      row.classList.toggle('is-blocked', !t.researchable);
+      const main = el('div', 'panel-row-main');
+      main.append(
+        el('div', 'panel-row-title', `${t.completed ? '✔ ' : ''}${t.name}`),
+        el('div', 'panel-row-sub',
+          `${t.year}年 · ${t.requiredDays}${UI.days}` +
+          (t.researchable ? '' : ` · ${t.reasonText}`)),
+      );
+      row.append(main, el('span', 'panel-row-tag', t.researchable ? '▶' : ''));
+      row.addEventListener('click', () => {
+        game.issue({
+          t: 'startResearch', country: me.id, slot: researchSlot, tech: t.id,
+        });
+        researchPanel.build(game, root);
+      });
+      list.append(row);
+    }
+    root.append(list);
+  },
+  refresh(game, root) {
+    const bars = root.querySelectorAll<HTMLElement>('.panel-bar-fill');
+    if (bars.length === 0) return;
+    const me = game.state.countries[game.state.meta.playerCountry];
+    const slots = researchView(game.state, me.id).filter((s) => !s.idle);
+    slots.forEach((s, i) => {
+      if (bars[i]) bars[i].style.width = `${(s.percent * 100).toFixed(1)}%`;
+    });
+  },
+};
+
+/**
+ * The shortest researchable technology across every branch.
+ *
+ * Deliberately cheapest-first rather than cleverest: it exists so a slot is
+ * never idle by accident, not to play the research game for the player.
+ */
+function cheapestResearchable(game: Game, owner: number): string | null {
+  let best: { id: string; days: number } | null = null;
+  for (const b of BRANCH_LIST) {
+    for (const t of techTree(game.state, owner, b.id)) {
+      if (!t.researchable) continue;
+      if (!best || t.requiredDays < best.days) best = { id: t.id, days: t.requiredDays };
+    }
+  }
+  return best?.id ?? null;
+}
+
+/** Appends into the panel body; kept separate so the slot loop reads cleanly. */
+function list_append(root: HTMLElement, row: HTMLElement): void {
+  root.append(row);
+}

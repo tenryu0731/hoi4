@@ -29,6 +29,7 @@ import {
 import { tickSupplyDaily } from './military/supply';
 import { tickAIDaily } from './ai/ai';
 import { cancelResearch, startResearch, tickResearchDaily } from './research';
+import { cancelFocus, startFocus, tickFocusDaily } from './focus';
 import { tickVictoryCheck } from './scenario/victory';
 
 /**
@@ -209,6 +210,16 @@ export class Simulation {
         cancelResearch(state, cmd.country, cmd.slot);
         return;
       }
+
+      // --- national focus ---------------------------------------------------
+      case 'startFocus': {
+        startFocus(state, this.ctx, cmd.country, cmd.focus);
+        return;
+      }
+      case 'cancelFocus': {
+        cancelFocus(state, cmd.country);
+        return;
+      }
     }
   }
 
@@ -225,6 +236,10 @@ export class Simulation {
       tickEconomyDaily(state, this.ctx);
       tickReinforcementDaily(state);
       tickResearchDaily(state);
+      // After the economy so the consumer-goods ceiling clamps the drift rather
+      // than being overwritten by it, and before the AI so a war goal granted
+      // today is visible to the power that was granted it.
+      tickFocusDaily(state, this.ctx);
       tickJustificationsDaily(state);
       recomputeCountryStats(state);
       tickAIDaily(state, this.ctx);

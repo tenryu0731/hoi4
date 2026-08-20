@@ -340,4 +340,24 @@ button:active { transform: scale(0.96); }
 .panel-row.wide-row.is-blocked { opacity: 0.45; }
 .panel-row-tag { font-size: 12px; color: var(--accent); flex: none; }
 .panel-row.wide-row.is-blocked .panel-row-tag { color: var(--ink-dim); }
+
+/* A focus or a research slot is a card, not a row: it carries a name, a
+   sentence, a bar and an action, and squeezing that into a list row makes all
+   four illegible. */
+.panel-focus {
+  padding: 10px 11px; margin-bottom: 7px;
+  background: rgba(26,29,36,0.85); border: 1px solid var(--line); border-radius: 3px;
+}
+.panel-focus.is-current { border-color: var(--accent); background: rgba(216,176,74,0.08); }
+.panel-focus.is-done { opacity: 0.62; }
+.panel-focus.is-locked { opacity: 0.5; }
+.panel-focus-name { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.panel-focus-desc { font-size: 11px; line-height: 1.65; color: var(--ink-dim); }
+.panel-focus-effect {
+  margin-top: 5px; font-size: 11px; line-height: 1.6; color: #9fc08a;
+}
+.panel-focus-block { margin-top: 6px; font-size: 11px; color: var(--danger); }
+.panel-focus-meta { margin-top: 4px; font-size: 11px; color: var(--ink-dim); }
+.panel-focus .panel-btn.wide { margin-top: 8px; width: 100%; min-height: 38px; }
+.panel-focus .panel-bar { margin-top: 7px; }
 `;

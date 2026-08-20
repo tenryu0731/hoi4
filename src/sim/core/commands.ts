@@ -44,7 +44,12 @@ export type Command =
    * working abandons its progress, as it does in the real game.
    */
   | { t: 'startResearch'; country: CountryId; slot: number; tech: TechId }
-  | { t: 'cancelResearch'; country: CountryId; slot: number };
+  | { t: 'cancelResearch'; country: CountryId; slot: number }
+
+  // --- national focus -------------------------------------------------------
+  /** Cannot be changed once started; cancelling throws the progress away. */
+  | { t: 'startFocus'; country: CountryId; focus: string }
+  | { t: 'cancelFocus'; country: CountryId };
 
 export type CommandType = Command['t'];
 
