@@ -295,6 +295,36 @@ test.describe('touch input', () => {
     expect(scrolled).toBeGreaterThan(40);
   });
 
+  test('the alert row names a real problem and opens where it is fixed', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+    // A fresh 1936 Germany has idle factories, idle research slots and no
+    // national focus running. Before the row existed, nothing on screen said
+    // so, and a player who touched nothing sat at 26 factories until 1942.
+    const alerts = page.locator('.hud-alert');
+    expect(await alerts.count()).toBeGreaterThanOrEqual(3);
+
+    const small = await alerts.evaluateAll((ns) => ns
+      .map((n) => n.getBoundingClientRect())
+      .filter((r) => r.width < 44 || r.height < 36)
+      .map((r) => `${Math.round(r.width)}x${Math.round(r.height)}`));
+    expect(small, small.join(',')).toEqual([]);
+
+    await alerts.first().click();
+    await expect(page.locator('.hud-sheet')).toHaveClass(/is-open/);
+
+    // Fixing the condition clears the chip.
+    const before = await alerts.count();
+    await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.countries[g.state.meta.playerCountry];
+      const st = g.index.get(me.capital).stateId;
+      g.issue({ t: 'queueConstruction', country: me.id, state: st, kind: 'civilian_factory' });
+      g.tickFrame(16.667);
+    });
+    await expect(alerts).toHaveCount(before - 1);
+  });
+
   test('the panel zoom changes the size of what is in the sheet', async ({ page }) => {
     await bootGame(page);
     await page.evaluate(() => window.__game!.openPanel!('research'));

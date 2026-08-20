@@ -102,6 +102,35 @@ export const HUD_CSS = `
   100% { color: inherit; }
 }
 
+/* The alert row. Amber for something idle, red for something being lost. */
+.hud-alerts {
+  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
+  touch-action: pan-x;
+}
+.hud-alerts.is-empty { display: none; }
+.hud-alerts::-webkit-scrollbar { display: none; }
+.hud-alert {
+  display: flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  /* 44px on the long axis and 36 on the short, which is the rule this file
+     opens with. They are buttons, not chips: each one opens the panel where
+     the problem is fixed. */
+  min-width: 44px; min-height: 36px; padding: 3px 9px; justify-content: center;
+  background: linear-gradient(180deg, #3a3222 0%, #2a2417 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--accent); font: inherit; font-size: 12px; cursor: pointer;
+}
+.hud-alert.is-urgent {
+  background: linear-gradient(180deg, #3f2620 0%, #2c1a16 100%);
+  color: #e8a094;
+}
+/* A slow pulse, so a warning is noticed without being a strobe. */
+.hud-alert.is-urgent { animation: hud-alert-pulse 2.4s ease-in-out infinite; }
+@keyframes hud-alert-pulse {
+  0%, 100% { border-color: #100f0d; }
+  50% { border-color: #8a4034; }
+}
+.hud-alert-v { font-weight: 700; font-variant-numeric: tabular-nums; }
+
 .hud-clock { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .hud-date {
   font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;

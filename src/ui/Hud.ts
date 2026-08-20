@@ -4,6 +4,7 @@ import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
 import { PANELS, formatNumber, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
+import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
 import { RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
 
@@ -276,7 +277,30 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // -- was parked behind the fade with nothing to say it was there. Split by
   // kind, each row fits, and the whole national position is visible at once
   // the way it is in the real game.
-  top.append(topRow, stats, resStrip);
+  // --- alerts --------------------------------------------------------------
+  const alertRow = el('div', 'hud-alerts');
+  let lastAlertKey = '';
+
+  function syncAlerts(): void {
+    const alerts = collectAlerts(game);
+    const key = alerts.map((a) => `${a.id}:${a.text}`).join('|');
+    if (key === lastAlertKey) return;
+    lastAlertKey = key;
+    alertRow.innerHTML = '';
+    alertRow.classList.toggle('is-empty', alerts.length === 0);
+    for (const a of alerts) {
+      const chip = el('button', 'hud-alert');
+      chip.classList.toggle('is-urgent', a.urgent);
+      chip.title = a.title;
+      chip.setAttribute('aria-label', a.title);
+      chip.append(iconNode('hud-res-icon', `icons/${a.icon}.svg`));
+      if (a.text !== '') chip.append(el('span', 'hud-alert-v', a.text));
+      chip.addEventListener('click', () => togglePanel(a.panel));
+      alertRow.append(chip);
+    }
+  }
+
+  top.append(topRow, stats, resStrip, alertRow);
 
   root.append(top, modeBar, toasts, sheet, nav, outcome);
 
@@ -447,6 +471,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     tweens.civ.set(me.economy.civilianFactories, dt);
     tweens.mil.set(me.economy.militaryFactories, dt);
     tweens.div.set(me.stats.divisionCount, dt);
+    syncAlerts();
     tweens.stab.set(me.stability * 100, dt);
     tweens.ws.set(me.warSupport * 100, dt);
 
