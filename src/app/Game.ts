@@ -47,13 +47,26 @@ export class Game {
   state: GameState;
   selection: SelectionState = { province: null, divisions: [] };
 
+  /** Milliseconds the last frame took, for display-only easing in the HUD. */
+  lastFrameMs = 16.667;
   private rafId = 0;
   private lastFrameTime = 0;
   private running = false;
   private listeners: (() => void)[] = [];
 
+  /**
+   * Opens a HUD panel. Installed by the HUD; the simulation never calls it.
+   * Panels that are not nav destinations -- the designer, the province sheet --
+   * are reached from inside another panel, which needs a way to say so.
+   */
+  openPanel?: (id: string | null) => void;
+
   /** Set by the order-drag gesture so the HUD can draw a preview arrow. */
-  dragOrder: { fromX: number; fromY: number; toX: number; toY: number } | null = null;
+  dragOrder: {
+    fromX: number; fromY: number; toX: number; toY: number;
+    /** Province under the finger, or null where the drop would do nothing. */
+    target: ProvinceId | null;
+  } | null = null;
 
   private constructor(index: ProvinceIndex, renderer: MapRenderer, state: GameState) {
     this.index = index;
@@ -71,12 +84,7 @@ export class Game {
     });
     this.input.attach(renderer.canvas);
 
-    // Commands are drained at the top of the hour, before any subsystem runs,
-    // so an order issued mid-frame always takes effect at a defined point.
-    this.time.on((ctx) => {
-      this.drainCommands();
-      this.sim.tick(ctx);
-    });
+    this.time.on((ctx) => this.sim.tick(ctx));
   }
 
   static async create(opts: GameOptions): Promise<Game> {
@@ -135,7 +143,13 @@ export class Game {
     this.lastFrameTime = performance.now();
     const frame = (now: number) => {
       if (!this.running) return;
-      const dt = Math.min(100, now - this.lastFrameTime);
+      // Clamped generously, not tightly. At 100ms this was a second clock:
+      // any frame slower than 10fps handed the simulation less time than had
+      // actually passed, so on a phone that dipped the date crawled and the
+      // speed control appeared to do nothing. TimeEngine already caps a single
+      // step at a second and caps catch-up ticks, which is where that job
+      // belongs; this only needs to stop `now` jumping after a backgrounded tab.
+      const dt = Math.min(500, now - this.lastFrameTime);
       this.lastFrameTime = now;
       this.tickFrame(dt);
       this.rafId = requestAnimationFrame(frame);
@@ -151,8 +165,10 @@ export class Game {
 
   /** One frame of work. Exposed so tests can drive the loop deterministically. */
   tickFrame(dtMs: number): void {
+    this.lastFrameMs = dtMs;
     this.time.advance(dtMs);
     this.input.update(dtMs);
+    this.renderer.setDragOrder(this.dragOrder);
     this.renderer.update(dtMs, this.state);
     for (const fn of this.listeners) fn();
   }
@@ -176,6 +192,13 @@ export class Game {
 
   issue(cmd: Command): void {
     this.commands.push(cmd);
+    // Applied at once, not on the next simulation hour. Deferring looks
+    // identical while the clock runs and is fatal while paused: no hour ever
+    // elapses, so the queue is never read and the order is silently swallowed
+    // -- and pausing to give orders is how this genre is played. Every
+    // mutation still reaches the simulation only through `execute`, and the
+    // same seed with the same order sequence still reproduces the same game.
+    this.drainCommands();
   }
 
   private drainCommands(): void {
@@ -260,12 +283,12 @@ export class Game {
       this.dragOrder = null;
       return;
     }
-    this.dragOrder = { fromX, fromY, toX, toY };
+    const slackWorld = 22 / Math.max(1e-4, this.renderer.camera.zoom);
+    const target = this.index.pickNearest(toX, toY, slackWorld);
+    this.dragOrder = { fromX, fromY, toX, toY, target };
     if (phase !== 'end') return;
     this.dragOrder = null;
 
-    const slackWorld = 22 / Math.max(1e-4, this.renderer.camera.zoom);
-    const target = this.index.pickNearest(toX, toY, slackWorld);
     if (target === null || this.selection.divisions.length === 0) return;
     this.issue({ t: 'moveDivisions', divisions: [...this.selection.divisions], target });
   }

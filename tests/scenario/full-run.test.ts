@@ -7,6 +7,7 @@ import { formatDate } from '../../src/sim/time/calendar';
 import { SCENARIO_END_HOURS } from '../../src/sim/scenario/victory';
 import type { GameState } from '../../src/sim/core/types';
 import { makeFixture } from '../unit/helpers/fixture';
+import { eventText } from '../../src/ui/strings';
 
 /**
  * Headless full-scenario runs.
@@ -24,6 +25,7 @@ interface RunResult {
   monthsChecked: number;
   wallMs: number;
   maxDivisions: number;
+  provinceName: (id: number) => string;
 }
 
 function runScenario(opts: {
@@ -75,13 +77,16 @@ function runScenario(opts: {
     monthsChecked,
     wallMs: Date.now() - t0,
     maxDivisions,
+    provinceName: (id: number) => f.index.get(id).name,
   };
 }
 
 describe('full scenario', () => {
   it('plays Europe 1936 to a decided outcome without breaking its invariants', () => {
     const r = runScenario({ seed: 20250101, playerTag: 'GER' });
-    const wars = r.state.log.filter((e) => e.kind === 'war').map((e) => `${e.day}: ${e.text}`);
+    const wars = r.state.log
+      .filter((e) => e.kind === 'war')
+      .map((e) => `${e.day}: ${eventText(e.body, r.provinceName)}`);
     console.log(`wars:\n  ${wars.slice(0, 14).join('\n  ')}`);
 
     console.log(

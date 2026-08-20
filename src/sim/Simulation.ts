@@ -1,6 +1,17 @@
 import type { Command } from './core/commands';
-import { recomputeCountryStats, spawnDivision } from './scenario/europe1936';
+import { deriveTemplate, recomputeCountryStats, spawnDivision } from './scenario/europe1936';
 import type { EquipmentType, GameState } from './core/types';
+
+/**
+ * Division size limits.
+ *
+ * The cap exists because combat width is what makes composition a decision: an
+ * unbounded division is always better than a bounded one, and the designer
+ * stops being a choice. Twenty-four line battalions is a little above the
+ * largest historical division, which leaves room to be wrong on purpose.
+ */
+const MAX_BATTALIONS = 24;
+const MAX_SUPPORTS = 4;
 import type { ProvinceIndex } from './map/ProvinceIndex';
 import type { TickContext } from './time/TimeEngine';
 import {
@@ -8,15 +19,17 @@ import {
   tickEconomyDaily,
 } from './economy/production';
 import {
-  declareWar, guarantee, improveRelations, joinFaction, leaveFaction,
-  startJustification, tickCapitulationDaily, tickJustificationsDaily,
-  tickTensionMonthly,
+  declareWar, demandSubmission, guarantee, improveRelations,
+  joinFaction, leaveFaction, startJustification, tickCapitulationDaily,
+  tickJustificationsDaily, tickTensionMonthly,
 } from './diplomacy/diplomacy';
 import {
   orderMove, stopDivision, tickMilitaryHourly, tickReinforcementDaily,
 } from './military/movement';
 import { tickSupplyDaily } from './military/supply';
 import { tickAIDaily } from './ai/ai';
+import { cancelResearch, startResearch, tickResearchDaily } from './research';
+import { cancelFocus, startFocus, tickFocusDaily } from './focus';
 import { tickVictoryCheck } from './scenario/victory';
 
 /**
@@ -135,14 +148,30 @@ export class Simulation {
         return;
       }
       case 'createTemplate': {
-        // Templates are fixed for this scenario; accepted and ignored so the
-        // command surface stays stable for the UI.
+        const c = state.countries[cmd.country];
+        if (!c || c.capitulated) return;
+        const battalions = cmd.battalions.slice(0, MAX_BATTALIONS);
+        if (battalions.length === 0) return;
+        // Support companies are one of each at most: they are a modifier on the
+        // division, not a way to stack the same bonus.
+        const supports = [...new Set(cmd.supports)].slice(0, MAX_SUPPORTS);
+        const name = cmd.name.trim().slice(0, 24) || '新編師団';
+
+        const existing = c.templates.findIndex((t) => t.name === name);
+        const id = existing >= 0 ? c.templates[existing].id : state.nextIds.template++;
+        const tpl = deriveTemplate(id, name, battalions, supports);
+        if (existing >= 0) c.templates[existing] = tpl;
+        else c.templates.push(tpl);
         return;
       }
 
       // --- diplomacy ------------------------------------------------------
       case 'justifyWar': {
         startJustification(state, cmd.country, cmd.target);
+        return;
+      }
+      case 'demandSubmission': {
+        demandSubmission(state, this.ctx, cmd.country, cmd.target);
         return;
       }
       case 'declareWar': {
@@ -173,9 +202,22 @@ export class Simulation {
       }
 
       // --- research -------------------------------------------------------
-      case 'setResearch': {
-        const c = state.countries[cmd.country];
-        c.research.progress[cmd.branch] += 0;   // selection only; progress ticks daily
+      case 'startResearch': {
+        startResearch(state, cmd.country, cmd.slot, cmd.tech);
+        return;
+      }
+      case 'cancelResearch': {
+        cancelResearch(state, cmd.country, cmd.slot);
+        return;
+      }
+
+      // --- national focus ---------------------------------------------------
+      case 'startFocus': {
+        startFocus(state, this.ctx, cmd.country, cmd.focus);
+        return;
+      }
+      case 'cancelFocus': {
+        cancelFocus(state, cmd.country);
         return;
       }
     }
@@ -194,6 +236,10 @@ export class Simulation {
       tickEconomyDaily(state, this.ctx);
       tickReinforcementDaily(state);
       tickResearchDaily(state);
+      // After the economy so the consumer-goods ceiling clamps the drift rather
+      // than being overwritten by it, and before the AI so a war goal granted
+      // today is visible to the power that was granted it.
+      tickFocusDaily(state, this.ctx);
       tickJustificationsDaily(state);
       recomputeCountryStats(state);
       tickAIDaily(state, this.ctx);
@@ -208,24 +254,6 @@ export class Simulation {
     }
     // The clock reaching the scenario end must resolve even mid-month.
     if (ctx.newDay) tickVictoryCheck(state);
-  }
-}
-
-/** Research is a slow, automatic drip: one level per branch every ~200 days. */
-function tickResearchDaily(state: GameState): void {
-  for (const c of state.countries) {
-    if (c.capitulated) continue;
-    const branches = ['infantry', 'armor', 'air', 'industry'] as const;
-    // A country researches as many branches at once as it has slots.
-    for (let i = 0; i < Math.min(c.research.slots, branches.length); i++) {
-      const b = branches[i];
-      c.research.progress[b] += 1;
-      const needed = 180 + c.research.levels[b] * 60;
-      if (c.research.progress[b] >= needed) {
-        c.research.progress[b] = 0;
-        c.research.levels[b]++;
-      }
-    }
   }
 }
 

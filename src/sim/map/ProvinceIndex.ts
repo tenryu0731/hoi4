@@ -44,6 +44,29 @@ export interface PathOptions {
 
 const DEFAULT_SEA_MULTIPLIER = 4;
 
+/**
+ * How close a vertex has to be to the other province's edge to count as on the
+ * shared boundary, in kilometres. Provinces average around 160 km across, so
+ * this is far below the scale at which two distinct boundaries could be
+ * confused, and well above the error two independent simplification passes
+ * introduce along the same line.
+ */
+const SHARED_EPS = 1.5;
+
+/** Squared distance from a point to a segment. */
+function pointSegmentDistanceSq(
+  px: number, py: number, ax: number, ay: number, bx: number, by: number,
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq > 0 ? ((px - ax) * dx + (py - ay) * dy) / lenSq : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const qx = ax + t * dx - px;
+  const qy = ay + t * dy - py;
+  return qx * qx + qy * qy;
+}
+
 export class ProvinceIndex {
   readonly provinces: Province[];
   readonly bounds: [number, number, number, number];
@@ -269,6 +292,64 @@ export class ProvinceIndex {
   // -------------------------------------------------------------------------
   // Adjacency + distance
   // -------------------------------------------------------------------------
+
+  /**
+   * The polyline runs two provinces actually share.
+   *
+   * Membership is decided by distance from a vertex of `a` to the nearest edge
+   * of `b`, not by vertex equality. The two rings are simplified independently,
+   * so along a boundary they agree on the line but not on where they put their
+   * points -- testing for coincident vertices finds only the handful that
+   * happen to survive both passes, which is enough to look like no shared
+   * boundary at all. The tolerance is two orders of magnitude below the width
+   * of a province, so it cannot join boundaries that are not really the same.
+   *
+   * This is what lets the front line follow the ground it runs along instead of
+   * being a stick drawn between two centroids. Callers cache: the result only
+   * changes when the map does, which is never.
+   */
+  sharedBorder(a: ProvinceId, b: ProvinceId): number[][] {
+    const pa = this.get(a);
+    const pb = this.get(b);
+    // Whole-province reject before touching any geometry.
+    if (pa.bbox[0] > pb.bbox[2] + SHARED_EPS || pb.bbox[0] > pa.bbox[2] + SHARED_EPS) return [];
+    if (pa.bbox[1] > pb.bbox[3] + SHARED_EPS || pb.bbox[1] > pa.bbox[3] + SHARED_EPS) return [];
+
+    const runs: number[][] = [];
+    for (const ring of pa.rings) {
+      const n = ring.length / 2;
+      if (n < 2) continue;
+      let run: number[] = [];
+      // One extra step so a run crossing the ring seam is not cut in two.
+      for (let i = 0; i <= n; i++) {
+        const j = (i % n) * 2;
+        if (i < n && this.nearRings(ring[j], ring[j + 1], pb.rings)) {
+          run.push(ring[j], ring[j + 1]);
+          continue;
+        }
+        if (run.length >= 4) runs.push(run);
+        run = [];
+      }
+      if (run.length >= 4) runs.push(run);
+    }
+    return runs;
+  }
+
+  /** True when (x, y) lies within SHARED_EPS of any edge in `rings`. */
+  private nearRings(x: number, y: number, rings: readonly Float32Array[]): boolean {
+    for (const r of rings) {
+      const n = r.length / 2;
+      for (let i = 0; i < n; i++) {
+        const j = i * 2;
+        const k = ((i + 1) % n) * 2;
+        if (pointSegmentDistanceSq(x, y, r[j], r[j + 1], r[k], r[k + 1])
+            <= SHARED_EPS * SHARED_EPS) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
   areAdjacent(a: ProvinceId, b: ProvinceId): boolean {
     return this.provinces[a].neighbors.includes(b) || this.provinces[a].seaNeighbors.includes(b);

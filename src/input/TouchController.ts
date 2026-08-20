@@ -9,7 +9,7 @@ import type { Camera } from '../render/Camera';
  *
  *   IDLE ──down(1)──▶ PENDING ──moved >SLOP──▶ PAN ──up──▶ IDLE (with inertia)
  *                       │  └─held >HOLD_MS──▶ HOLD (context action)
- *                       └──up <TAP_MS────────▶ tap
+ *                       └──up, still──────────▶ tap
  *   PENDING/PAN ──down(2)──▶ PINCH ──one up──▶ PAN
  *   PENDING over a unit stack ──moved──▶ DRAG_ORDER ──up──▶ issue move order
  */
@@ -33,7 +33,6 @@ export interface TouchCallbacks {
 
 /** Movement past this many CSS pixels turns a press into a drag. */
 const SLOP_PX = 10;
-const TAP_MS = 280;
 const HOLD_MS = 480;
 /** Velocity is averaged over this window so a flick is not judged on one frame. */
 const VELOCITY_WINDOW_MS = 90;
@@ -264,12 +263,16 @@ export class TouchController {
     this.clearHold();
 
     const { x, y } = this.localPoint(e);
-    const heldMs = performance.now() - rec.startTime;
     const moved = Math.hypot(x - rec.startX, y - rec.startY);
 
     switch (this.state) {
       case 'pending':
-        if (heldMs <= TAP_MS && moved <= SLOP_PX) {
+        // Any release from `pending` without movement is a tap. Requiring it to
+        // also be under TAP_MS left a dead window between that and the hold
+        // timer at HOLD_MS: a finger down for a third of a second and lifted
+        // cleanly produced neither a tap nor a long press, and a tap that
+        // slightly overstays is the most ordinary thing a thumb does.
+        if (moved <= SLOP_PX) {
           this.cb.onTap?.(
             this.camera.screenToWorldX(x), this.camera.screenToWorldY(y), x, y,
           );

@@ -3,11 +3,21 @@ import {
   BUILDING_COST, EQUIPMENT, FACTORY_OUTPUT,
 } from '../sim/core/data';
 import {
-  EQUIPMENT_TYPES, RESOURCE_TYPES,
-  type BuildingType, type EquipmentType, type ResourceType,
+  BATTALION_TYPES, EQUIPMENT_TYPES, RESOURCE_TYPES, SUPPORT_TYPES,
+  type BattalionType, type BuildingType, type DivisionTemplate,
+  type EquipmentType, type ResourceType, type StateRuntime, type SupportType,
 } from '../sim/core/types';
+import { deriveTemplate } from '../sim/scenario/europe1936';
 import { canQueueBuilding } from '../sim/economy/production';
-import { occupationRatio } from '../sim/diplomacy/diplomacy';
+import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
+import { availableFocuses } from '../sim/focus';
+import {
+  BRANCH_LIST, researchSummary, researchView, techTree, type TechBranch,
+} from '../sim/research';
+import {
+  BATTALION, BUILDING, EQUIPMENT as EQUIPMENT_NAME, IDEOLOGY, RESOURCE,
+  SUPPORT, TERRAIN, UI, country,
+} from './strings';
 
 /**
  * The bottom-sheet panels.
@@ -17,7 +27,9 @@ import { occupationRatio } from '../sim/diplomacy/diplomacy';
  * sluggish next to a canvas that is already using most of the budget.
  */
 
-export type PanelId = 'production' | 'construction' | 'army' | 'diplomacy' | 'province';
+export type PanelId =
+  | 'focus' | 'research' | 'production' | 'construction' | 'army'
+  | 'diplomacy' | 'province' | 'designer';
 
 export interface Panel {
   id: PanelId;
@@ -37,6 +49,18 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/**
+ * Collapses repeats into counts.
+ *
+ * A motorised division listing its six identical battalions in full wrapped to
+ * four lines and broke mid-compound, which is not a thing anyone ships.
+ */
+function tally(names: string[]): string {
+  const counts = new Map<string, number>();
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
+  return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join('・');
+}
+
 function setText(node: HTMLElement, value: string): void {
   if (node.textContent !== value) node.textContent = value;
 }
@@ -49,28 +73,11 @@ export function formatNumber(n: number): string {
   return String(v);
 }
 
-const EQUIPMENT_LABEL: Record<EquipmentType, string> = {
-  infantry_equipment: 'Infantry Equipment',
-  support_equipment: 'Support Equipment',
-  artillery: 'Artillery',
-  motorized: 'Motorised',
-  light_armor: 'Light Tanks',
-  medium_armor: 'Medium Tanks',
-  fighter: 'Fighters',
-  cas: 'Close Air Support',
-  convoy: 'Convoys',
-};
+const EQUIPMENT_LABEL = EQUIPMENT_NAME;
+const RESOURCE_LABEL = RESOURCE;
 
-const RESOURCE_LABEL: Record<ResourceType, string> = {
-  oil: 'Oil', steel: 'Steel', aluminium: 'Aluminium',
-  tungsten: 'Tungsten', rubber: 'Rubber', chromium: 'Chromium',
-};
-
-const BUILDABLE: [BuildingType, string][] = [
-  ['civilian_factory', 'Civilian Factory'],
-  ['military_factory', 'Military Factory'],
-  ['dockyard', 'Dockyard'],
-  ['infrastructure', 'Infrastructure'],
+const BUILDABLE: BuildingType[] = [
+  'civilian_factory', 'military_factory', 'dockyard', 'infrastructure',
 ];
 
 // ---------------------------------------------------------------------------
@@ -79,15 +86,15 @@ const BUILDABLE: [BuildingType, string][] = [
 
 export const productionPanel: Panel = {
   id: 'production',
-  title: 'Production',
+  title: UI.navProduction,
   build(game, root) {
     root.innerHTML = '';
     const me = game.state.countries[game.state.meta.playerCountry];
 
     const head = el('div', 'panel-head');
     head.append(
-      stat('Military factories', String(me.economy.militaryFactories)),
-      stat('Assigned', String(me.productionLines.reduce((s, l) => s + l.assignedFactories, 0))),
+      stat(UI.militaryFactories, String(me.economy.militaryFactories)),
+      stat(UI.assigned, String(me.productionLines.reduce((s, l) => s + l.assignedFactories, 0))),
     );
     root.append(head);
 
@@ -109,8 +116,8 @@ export const productionPanel: Panel = {
       const minus = el('button', 'panel-btn', '−');
       const count = el('span', 'panel-count', String(line.assignedFactories));
       const plus = el('button', 'panel-btn', '+');
-      minus.setAttribute('aria-label', `Fewer factories on ${EQUIPMENT_LABEL[line.equipment]}`);
-      plus.setAttribute('aria-label', `More factories on ${EQUIPMENT_LABEL[line.equipment]}`);
+      minus.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.removeFactory}`);
+      plus.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.addFactory}`);
       minus.addEventListener('click', () => {
         game.issue({
           t: 'setLineFactories', country: me.id, line: line.id,
@@ -130,8 +137,25 @@ export const productionPanel: Panel = {
     }
 
     if (me.productionLines.length === 0) {
-      list.append(el('div', 'panel-empty', 'No production lines.'));
+      list.append(el('div', 'panel-empty', UI.noProductionLines));
     }
+
+    // Without this the player is stuck with whatever lines the scenario dealt
+    // them: a template needing equipment nobody is building can never be
+    // recruited, and there was no way to start building it.
+    root.append(el('div', 'panel-label', UI.addLine));
+    const add = el('div', 'panel-grid');
+    for (const eq of EQUIPMENT_TYPES) {
+      if (me.productionLines.some((l) => l.equipment === eq)) continue;
+      const b = el('button', 'panel-build');
+      b.append(el('span', 'panel-build-title', EQUIPMENT_LABEL[eq]));
+      b.addEventListener('click', () => {
+        game.issue({ t: 'addProductionLine', country: me.id, equipment: eq });
+      });
+      add.append(b);
+    }
+    if (add.children.length === 0) add.append(el('div', 'panel-empty', UI.allLinesOpen));
+    root.append(add);
   },
   refresh(game, root) {
     const me = game.state.countries[game.state.meta.playerCountry];
@@ -148,8 +172,9 @@ export const productionPanel: Panel = {
         / EQUIPMENT[line.equipment].cost;
       setText(
         sub,
-        `${Math.round(line.efficiency * 100)}% efficiency · ` +
-        `${perDay.toFixed(1)}/day · ${formatNumber(me.economy.stockpile[line.equipment])} in stock`,
+        `${UI.efficiency} ${Math.round(line.efficiency * 100)}% · ` +
+        `${perDay.toFixed(1)}${UI.perDay} · ${UI.stockpile} ` +
+        `${formatNumber(me.economy.stockpile[line.equipment])}`,
       );
     }
   },
@@ -159,9 +184,20 @@ export const productionPanel: Panel = {
 // Construction
 // ---------------------------------------------------------------------------
 
+/**
+ * Construction, in the order the real game does it: choose what to build, then
+ * choose where.
+ *
+ * This used to run the other way round -- select a province on the map, and the
+ * panel offered whatever that province's state could take. That put a map
+ * hunt in front of every build order and hid the decision that actually
+ * matters, which is where the empire has slots free.
+ */
+let buildKind: BuildingType = 'civilian_factory';
+
 export const constructionPanel: Panel = {
   id: 'construction',
-  title: 'Construction',
+  title: UI.navConstruction,
   build(game, root) {
     root.innerHTML = '';
     const state = game.state;
@@ -169,46 +205,69 @@ export const constructionPanel: Panel = {
 
     const head = el('div', 'panel-head');
     head.append(
-      stat('Civilian factories', String(me.economy.civilianFactories)),
-      stat('Free', String(me.economy.freeCivilianFactories)),
-      stat('Consumer goods', `${Math.round(me.economy.consumerGoodsRatio * 100)}%`),
+      stat(UI.civilianFactories, String(me.economy.civilianFactories)),
+      stat(UI.free, String(me.economy.freeCivilianFactories)),
+      stat(UI.consumerGoods, `${Math.round(me.economy.consumerGoodsRatio * 100)}%`),
     );
     root.append(head);
 
-    // Queue.
+    // --- what to build ---
+    root.append(el('div', 'panel-label', UI.chooseBuilding));
+    const kinds = el('div', 'panel-chips');
+    for (const kind of BUILDABLE) {
+      const b = el('button', 'panel-chip', BUILDING[kind]);
+      b.dataset.kind = kind;
+      b.classList.toggle('is-on', kind === buildKind);
+      b.addEventListener('click', () => {
+        buildKind = kind;
+        constructionPanel.build(game, root);
+      });
+      kinds.append(b);
+    }
+    root.append(kinds);
+    root.append(el('div', 'panel-note',
+      `${BUILDING[buildKind]} · ${UI.cost} ${formatNumber(BUILDING_COST[buildKind])}`));
+
+    // --- where ---
+    root.append(el('div', 'panel-label', UI.chooseState));
+    const list = el('div', 'panel-list');
+    const owned = state.states
+      .map((st, id) => ({ st, id }))
+      .filter((x) => x.st && x.st.controller === me.id)
+      .sort((a, b) => slotsFree(b.st) - slotsFree(a.st));
+
+    if (owned.length === 0) {
+      list.append(el('div', 'panel-empty', UI.noStates));
+    }
+    for (const { st, id } of owned) {
+      const row = el('button', 'panel-row wide-row');
+      const allowed = canQueueBuilding(state, me, id, buildKind);
+      row.disabled = !allowed;
+      row.classList.toggle('is-blocked', !allowed);
+
+      const main = el('div', 'panel-row-main');
+      const name = game.index.data.states[id]?.name ?? `#${id}`;
+      main.append(
+        el('div', 'panel-row-title', name),
+        el('div', 'panel-row-sub',
+          `${UI.buildSlots} ${slotsUsed(st)}/${st.buildingSlots}` +
+          ` · ${UI.infrastructure} ${st.infrastructure}` +
+          ` · ${BUILDING[buildKind]} ${levelOf(st, buildKind)}`),
+      );
+      row.append(main, el('span', 'panel-row-tag', allowed ? '＋' : UI.noSlots));
+      row.addEventListener('click', () => {
+        game.issue({ t: 'queueConstruction', country: me.id, kind: buildKind, state: id });
+        constructionPanel.build(game, root);
+      });
+      list.append(row);
+    }
+    root.append(list);
+
+    // --- what is already under way ---
     const queue = el('div', 'panel-list');
     queue.dataset.role = 'queue';
-    root.append(el('div', 'panel-label', 'Queue'), queue);
+    root.append(el('div', 'panel-label', UI.queue), queue);
     renderQueue(game, queue);
-
-    // What can be started, in the state the player has selected.
-    const selected = game.selection.province;
-    const stateId = selected !== null ? game.index.get(selected).stateId : -1;
-    const stateName = stateId >= 0 ? game.index.data.states[stateId].name : null;
-    root.append(el(
-      'div', 'panel-label',
-      stateName ? `Build in ${stateName}` : 'Select a province to build',
-    ));
-
-    if (stateId >= 0) {
-      const grid = el('div', 'panel-grid');
-      for (const [kind, label] of BUILDABLE) {
-        const b = el('button', 'panel-build');
-        const allowed = canQueueBuilding(state, me, stateId, kind);
-        b.disabled = !allowed;
-        b.append(
-          el('span', 'panel-build-title', label),
-          el('span', 'panel-build-sub', `${formatNumber(BUILDING_COST[kind])} pts`),
-        );
-        b.addEventListener('click', () => {
-          game.issue({ t: 'queueConstruction', country: me.id, kind, state: stateId });
-          // Rebuild after the command lands on the next tick.
-          setTimeout(() => constructionPanel.build(game, root), 60);
-        });
-        grid.append(b);
-      }
-      root.append(grid);
-    }
   },
   refresh(game, root) {
     const queue = root.querySelector<HTMLElement>('[data-role="queue"]');
@@ -216,13 +275,32 @@ export const constructionPanel: Panel = {
   },
 };
 
+function levelOf(st: StateRuntime, kind: BuildingType): number {
+  switch (kind) {
+    case 'civilian_factory': return st.civilianFactories;
+    case 'military_factory': return st.militaryFactories;
+    case 'dockyard': return st.dockyards;
+    case 'infrastructure': return st.infrastructure;
+    default: return 0;
+  }
+}
+
+/** Factory slots a state has spent; infrastructure and forts do not use them. */
+function slotsUsed(st: StateRuntime): number {
+  return st.civilianFactories + st.militaryFactories + st.dockyards;
+}
+
+function slotsFree(st: StateRuntime): number {
+  return st.buildingSlots - slotsUsed(st);
+}
+
 function renderQueue(game: Game, host: HTMLElement): void {
   const me = game.state.countries[game.state.meta.playerCountry];
   const items = me.constructionQueue;
   if (host.childElementCount !== items.length || items.length === 0) {
     host.innerHTML = '';
     if (items.length === 0) {
-      host.append(el('div', 'panel-empty', 'Nothing under construction.'));
+      host.append(el('div', 'panel-empty', UI.nothingUnderConstruction));
       return;
     }
     for (const item of items) {
@@ -231,7 +309,7 @@ function renderQueue(game: Game, host: HTMLElement): void {
       const main = el('div', 'panel-row-main');
       const stateName = game.index.data.states[item.stateId]?.name ?? '';
       main.append(
-        el('div', 'panel-row-title', `${item.kind.replace('_', ' ')} — ${stateName}`),
+        el('div', 'panel-row-title', `${BUILDING[item.kind]} — ${stateName}`),
         el('div', 'panel-row-sub', ''),
       );
       const bar = el('div', 'panel-bar');
@@ -239,7 +317,7 @@ function renderQueue(game: Game, host: HTMLElement): void {
       main.append(bar);
 
       const cancel = el('button', 'panel-btn', '×');
-      cancel.setAttribute('aria-label', 'Cancel construction');
+      cancel.setAttribute('aria-label', '建設を中止');
       cancel.addEventListener('click', () => {
         game.issue({ t: 'cancelConstruction', country: me.id, item: item.id });
       });
@@ -254,17 +332,29 @@ function renderQueue(game: Game, host: HTMLElement): void {
     const fill = row.querySelector<HTMLElement>('.panel-bar-fill');
     if (fill) fill.style.width = `${(pct * 100).toFixed(1)}%`;
     const sub = row.querySelector<HTMLElement>('.panel-row-sub');
-    if (sub) setText(sub, `${Math.round(pct * 100)}% complete`);
+    if (sub) setText(sub, `${Math.round(pct * 100)}% ${UI.complete}`);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Army
+// Recruit and deploy
 // ---------------------------------------------------------------------------
+
+/** State new divisions are sent to; -1 until the panel picks the capital. */
+let deployState = -1;
+
+/** A province inside the chosen deployment state that the player controls. */
+function deployProvince(game: Game, owner: number): number {
+  const inState = game.index.data.states[deployState]?.provinces ?? [];
+  for (const id of inState) {
+    if (game.state.provinces[id]?.controller === owner) return id;
+  }
+  return game.state.countries[owner].capital;
+}
 
 export const armyPanel: Panel = {
   id: 'army',
-  title: 'Army',
+  title: UI.recruitAndDeploy,
   build(game, root) {
     root.innerHTML = '';
     const state = game.state;
@@ -274,25 +364,74 @@ export const armyPanel: Panel = {
     head.dataset.role = 'army-head';
     root.append(head);
 
-    root.append(el('div', 'panel-label', 'Recruit'));
+    // Where new divisions appear. The real game lets you pick; sending every
+    // formation to the capital and marching it out is the thing this replaces.
+    root.append(el('div', 'panel-label', UI.deployTo));
+    const deploy = el('div', 'panel-chips');
+    const homeStates = state.states
+      .map((st, id) => ({ st, id }))
+      .filter((x) => x.st && x.st.controller === me.id)
+      .slice(0, 8);
+    if (deployState === -1 || state.states[deployState]?.controller !== me.id) {
+      deployState = game.index.get(me.capital).stateId;
+    }
+    for (const { id } of homeStates) {
+      const chip = el('button', 'panel-chip', game.index.data.states[id]?.name ?? `#${id}`);
+      chip.classList.toggle('is-on', id === deployState);
+      chip.addEventListener('click', () => {
+        deployState = id;
+        armyPanel.build(game, root);
+      });
+      deploy.append(chip);
+    }
+    root.append(deploy);
+    root.append(el('div', 'panel-note', UI.deployHint));
+
+    root.append(el('div', 'panel-label', UI.recruit));
     const grid = el('div', 'panel-grid');
+    grid.dataset.role = 'templates';
     for (const tpl of me.templates) {
       const b = el('button', 'panel-build');
+      b.dataset.tpl = String(tpl.id);
       b.append(
         el('span', 'panel-build-title', tpl.name),
         el('span', 'panel-build-sub',
-          `${tpl.battalions.length} bn · ${formatNumber(tpl.manpowerNeed)} men`),
+          `${tally(tpl.battalions.map((x) => BATTALION[x]))}` +
+          (tpl.supports.length > 0
+            ? `\n${tpl.supports.map((x) => SUPPORT[x]).join('・')}`
+            : '') +
+          `\n${formatNumber(tpl.manpowerNeed)}名`),
+        // Refreshed every tick with the equipment that is holding this template
+        // back. A recruit button that silently does nothing is the worst
+        // possible answer to "why can I not build an army".
+        el('span', 'panel-build-note', ''),
       );
       b.addEventListener('click', () => {
         game.issue({
-          t: 'recruitDivision', country: me.id, template: tpl.id, province: me.capital,
+          t: 'recruitDivision', country: me.id, template: tpl.id,
+          province: deployProvince(game, me.id),
         });
       });
+      const edit = el('button', 'panel-edit', UI.edit);
+      edit.setAttribute('aria-label', `${tpl.name}: ${UI.designer}`);
+      edit.addEventListener('click', (e) => {
+        // The recruit button fills the tile, so the edit affordance sits on top
+        // of it and has to stop the tile firing underneath.
+        e.stopPropagation();
+        editTemplate(tpl);
+        game.openPanel?.('designer');
+      });
+      b.append(edit);
       grid.append(b);
     }
-    root.append(grid);
+    const fresh = el('button', 'panel-btn wide', `+ ${UI.newTemplate}`);
+    fresh.addEventListener('click', () => {
+      editTemplate(deriveTemplate(-1, '', ['infantry', 'infantry', 'infantry'], ['engineer']));
+      game.openPanel?.('designer');
+    });
+    root.append(grid, fresh);
 
-    root.append(el('div', 'panel-label', 'Equipment stockpile'));
+    root.append(el('div', 'panel-label', UI.stockpile));
     const stock = el('div', 'panel-list');
     stock.dataset.role = 'stock';
     root.append(stock);
@@ -306,6 +445,33 @@ export const armyPanel: Panel = {
   refresh(game, root) {
     const state = game.state;
     const me = state.countries[state.meta.playerCountry];
+
+    const templates = root.querySelector<HTMLElement>('[data-role="templates"]');
+    if (templates) {
+      for (const tpl of me.templates) {
+        const b = templates.querySelector<HTMLButtonElement>(`[data-tpl="${tpl.id}"]`);
+        const note = b?.querySelector<HTMLElement>('.panel-build-note');
+        if (!b || !note) continue;
+        // Mirrors the gate in the simulation: half the equipment, and the
+        // manpower, or the order is refused.
+        let worst = 1;
+        let worstEq: EquipmentType | null = null;
+        for (const [eq, need] of Object.entries(tpl.equipmentNeed) as [EquipmentType, number][]) {
+          const r = (me.economy.stockpile[eq] ?? 0) / Math.max(1, need);
+          if (r < worst) { worst = r; worstEq = eq; }
+        }
+        const noManpower = me.economy.manpower < tpl.manpowerNeed / 1000;
+        const blocked = noManpower || worst < 0.5;
+        b.disabled = blocked;
+        b.classList.toggle('is-blocked', blocked);
+        setText(note, noManpower
+          ? `${UI.manpower}${UI.shortage}`
+          : worst < 0.5 && worstEq
+            ? `${EQUIPMENT_LABEL[worstEq]} ${Math.round(worst * 100)}%`
+            : UI.ready);
+      }
+    }
+
     const head = root.querySelector<HTMLElement>('[data-role="army-head"]');
     if (head) {
       let inCombat = 0;
@@ -317,8 +483,8 @@ export const armyPanel: Panel = {
       }
       if (head.childElementCount !== 4) {
         head.innerHTML = '';
-        head.append(stat('Divisions', '0'), stat('In combat', '0'),
-          stat('Low supply', '0'), stat('Manpower', '0'));
+        head.append(stat(UI.totalDivisions, '0'), stat(UI.inCombat, '0'),
+          stat(UI.outOfSupply, '0'), stat(UI.manpower, '0'));
       }
       const values = head.querySelectorAll<HTMLElement>('.hud-stat-v');
       setText(values[0], String(me.stats.divisionCount));
@@ -341,7 +507,7 @@ export const armyPanel: Panel = {
 
 export const diplomacyPanel: Panel = {
   id: 'diplomacy',
-  title: 'Diplomacy',
+  title: UI.navDiplomacy,
   build(game, root) {
     root.innerHTML = '';
     const state = game.state;
@@ -350,13 +516,13 @@ export const diplomacyPanel: Panel = {
     const head = el('div', 'panel-head');
     head.dataset.role = 'dip-head';
     head.append(
-      stat('World tension', '0%'),
-      stat('Political power', '0'),
-      stat('Faction', me.factionId !== null ? state.factions[me.factionId].name : 'None'),
+      stat(UI.worldTension, '0%'),
+      stat(UI.politicalPower, '0'),
+      stat(UI.faction, me.factionId !== null ? state.factions[me.factionId].name : UI.atPeace),
     );
     root.append(head);
 
-    root.append(el('div', 'panel-label', 'Nations'));
+    root.append(el('div', 'panel-label', '国家'));
     const list = el('div', 'panel-list');
     list.dataset.role = 'nations';
     root.append(list);
@@ -376,20 +542,30 @@ export const diplomacyPanel: Panel = {
 
       const main = el('div', 'panel-row-main');
       main.append(
-        el('div', 'panel-row-title', c.name),
+        el('div', 'panel-row-title', `${country(c.tag)}　${IDEOLOGY[c.ideology]}`),
         el('div', 'panel-row-sub', ''),
       );
 
       const controls = el('div', 'panel-row-controls');
-      const justify = el('button', 'panel-btn wide', 'Justify');
+      const justify = el('button', 'panel-btn wide', UI.justifyWar);
       justify.addEventListener('click', () => {
         game.issue({ t: 'justifyWar', country: me.id, target: c.id });
       });
-      const declare = el('button', 'panel-btn wide danger', 'War');
+      const declare = el('button', 'panel-btn wide danger', UI.declareWar);
       declare.addEventListener('click', () => {
         game.issue({ t: 'declareWar', country: me.id, target: c.id });
       });
-      controls.append(justify, declare);
+      // Only offered where it could actually be accepted, so the button is not
+      // a lottery ticket the player buys with political power every turn.
+      const controlsList = [justify, declare];
+      if (canDemand(game.state, me.id, c.id)) {
+        const demand = el('button', 'panel-btn wide', UI.demand);
+        demand.addEventListener('click', () => {
+          game.issue({ t: 'demandSubmission', country: me.id, target: c.id });
+        });
+        controlsList.unshift(demand);
+      }
+      controls.append(...controlsList);
 
       row.append(swatch, main, controls);
       list.append(row);
@@ -403,7 +579,7 @@ export const diplomacyPanel: Panel = {
       const values = head.querySelectorAll<HTMLElement>('.hud-stat-v');
       setText(values[0], `${Math.round(state.worldTension)}%`);
       setText(values[1], String(Math.round(me.economy.politicalPower)));
-      setText(values[2], me.factionId !== null ? state.factions[me.factionId].name : 'None');
+      setText(values[2], me.factionId !== null ? state.factions[me.factionId].name : UI.atPeace);
     }
     const list = root.querySelector<HTMLElement>('[data-role="nations"]');
     if (!list) return;
@@ -413,17 +589,17 @@ export const diplomacyPanel: Panel = {
       const sub = row.querySelector<HTMLElement>('.panel-row-sub');
       if (!sub) continue;
       const parts: string[] = [];
-      if (c.capitulated) parts.push('capitulated');
-      else if (me.atWarWith.includes(c.id)) parts.push('AT WAR');
-      else if (c.factionId !== null && c.factionId === me.factionId) parts.push('ally');
+      if (c.capitulated) parts.push('降伏');
+      else if (me.atWarWith.includes(c.id)) parts.push('交戦中');
+      else if (c.factionId !== null && c.factionId === me.factionId) parts.push('同盟');
       const just = me.diplomacy.justifications.find((j) => j.target === c.id);
       if (just) {
         parts.push(just.progress >= just.required
-          ? 'war goal ready'
-          : `justifying ${Math.round((just.progress / just.required) * 100)}%`);
+          ? '開戦事由 準備完了'
+          : `${UI.justifying} ${Math.round((just.progress / just.required) * 100)}%`);
       }
-      parts.push(`${c.stats.divisionCount} div`);
-      parts.push(`${c.stats.victoryPointsHeld} VP`);
+      parts.push(`${c.stats.divisionCount}個師団`);
+      parts.push(`勝利点 ${c.stats.victoryPointsHeld}`);
       setText(sub, parts.join(' · '));
       row.classList.toggle('is-hostile', me.atWarWith.includes(c.id));
       row.classList.toggle('is-dead', c.capitulated);
@@ -437,12 +613,12 @@ export const diplomacyPanel: Panel = {
 
 export const provincePanel: Panel = {
   id: 'province',
-  title: 'Province',
+  title: '州',
   build(game, root) {
     root.innerHTML = '';
     const id = game.selection.province;
     if (id === null) {
-      root.append(el('div', 'panel-empty', 'No province selected.'));
+      root.append(el('div', 'panel-empty', '州が選択されていません。'));
       return;
     }
     const state = game.state;
@@ -454,28 +630,28 @@ export const provincePanel: Panel = {
 
     const head = el('div', 'panel-head');
     head.dataset.role = 'prov-head';
-    head.append(stat('Victory points', String(geo.vp)), stat('Supply', '—'),
-      stat('Divisions', '0'));
+    head.append(stat(UI.victoryPoints, String(geo.vp)), stat(UI.supplyLevel, '—'),
+      stat(UI.totalDivisions, '0'));
     root.append(head);
 
     const sub = el('div', 'panel-sub');
     sub.textContent = p.owner === p.controller
-      ? `${owner.name} · ${capitalise(geo.terrain)} · ${stateData.name}`
-      : `${owner.name}, occupied by ${controller.name} · ${capitalise(geo.terrain)}`;
+      ? `${country(owner.tag)} · ${TERRAIN[geo.terrain]} · ${stateData.name}`
+      : `${country(owner.tag)}領 / ${country(controller.tag)}が占領中 · ${TERRAIN[geo.terrain]}`;
     root.append(sub);
 
     const grid = el('div', 'panel-kvs');
     const resources = Object.entries(stateData.resources)
       .filter(([, v]) => (v ?? 0) > 0)
       .map(([k, v]) => `${RESOURCE_LABEL[k as ResourceType]} ${v}`)
-      .join(', ') || 'None';
+      .join('、') || 'なし';
     const rows: [string, string][] = [
-      ['State', stateData.name],
-      ['Infrastructure', String(stateData.infrastructure)],
-      ['Population', formatNumber(stateData.manpower * 1000)],
-      ['Factories', `${stateData.civilianFactories} civ / ${stateData.militaryFactories} mil`],
-      ['Resources', resources],
-      ['Occupied', `${Math.round(occupationRatio(state, p.owner) * 100)}% of ${owner.tag}`],
+      ['州', stateData.name],
+      [UI.infrastructure, String(stateData.infrastructure)],
+      ['人口', formatNumber(stateData.manpower * 1000)],
+      ['工場', `民需 ${stateData.civilianFactories} / 軍需 ${stateData.militaryFactories}`],
+      [UI.resources, resources],
+      ['占領率', `${country(owner.tag)}の${Math.round(occupationRatio(state, p.owner) * 100)}%`],
     ];
     for (const [k, v] of rows) {
       const row = el('div', 'panel-kv');
@@ -488,7 +664,7 @@ export const provincePanel: Panel = {
       .map((d) => state.divisions[d])
       .filter((d) => d && !d.dead);
     if (divisions.length > 0) {
-      root.append(el('div', 'panel-label', 'Garrison'));
+      root.append(el('div', 'panel-label', UI.garrison));
       const list = el('div', 'panel-list');
       list.dataset.role = 'garrison';
       for (const d of divisions) {
@@ -497,7 +673,7 @@ export const provincePanel: Panel = {
         row.dataset.div = String(d.id);
         const main = el('div', 'panel-row-main');
         main.append(
-          el('div', 'panel-row-title', `${state.countries[d.owner].tag} ${tpl?.name ?? 'Division'}`),
+          el('div', 'panel-row-title', `${country(state.countries[d.owner].tag)} ${tpl?.name ?? '師団'}`),
           el('div', 'panel-row-sub', ''),
         );
         row.append(main);
@@ -528,7 +704,7 @@ export const provincePanel: Panel = {
       const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
       const org = tpl ? Math.round((d.org / tpl.maxOrg) * 100) : 0;
       const str = tpl ? Math.round((d.hp / tpl.maxHp) * 100) : 0;
-      setText(row, `org ${org}% · strength ${str}% · supply ${Math.round(d.supplyLevel * 100)}%`);
+      setText(row, `${UI.organisation} ${org}% · ${UI.strength} ${str}% · ${UI.supplyLevel} ${Math.round(d.supplyLevel * 100)}%`);
     }
   },
 };
@@ -539,16 +715,406 @@ function stat(label: string, value: string): HTMLElement {
   return box;
 }
 
-function capitalise(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+
+
+// ---------------------------------------------------------------------------
+// Division designer
+// ---------------------------------------------------------------------------
+
+/**
+ * Composition of the division being edited.
+ *
+ * Held outside the panel because `build` runs again on every change: the panel
+ * is rebuilt from this, not the other way round, so there is one source of
+ * truth for what the player is looking at.
+ */
+let draft: { name: string; battalions: BattalionType[]; supports: SupportType[] } = {
+  name: '', battalions: [], supports: [],
+};
+
+/** Loads a template into the draft. Called when the designer is opened. */
+export function editTemplate(tpl: DivisionTemplate): void {
+  draft = {
+    name: tpl.name,
+    battalions: [...tpl.battalions],
+    supports: [...tpl.supports],
+  };
 }
 
+const MAX_BATTALIONS = 24;
+
+export const designerPanel: Panel = {
+  id: 'designer',
+  title: UI.designer,
+  build(game, root) {
+    root.innerHTML = '';
+    const me = game.state.countries[game.state.meta.playerCountry];
+    // Stats come from the same function the scenario uses, so what the panel
+    // previews is exactly what the simulation will fight with.
+    const preview = deriveTemplate(-1, draft.name || UI.newTemplate,
+      draft.battalions.length > 0 ? draft.battalions : ['infantry'], draft.supports);
+
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.softAttack, preview.softAttack.toFixed(0)),
+      stat(UI.defence, preview.defense.toFixed(0)),
+      stat(UI.breakthrough, preview.breakthrough.toFixed(0)),
+      stat(UI.combatWidth, String(preview.width)),
+    );
+    root.append(head);
+
+    const head2 = el('div', 'panel-head');
+    head2.append(
+      stat(UI.organisation, preview.maxOrg.toFixed(0)),
+      stat(UI.strength, preview.maxHp.toFixed(0)),
+      stat(UI.speed, `${preview.speedKmh.toFixed(0)}`),
+      stat(UI.manpower, formatNumber(preview.manpowerNeed)),
+    );
+    root.append(head2);
+
+    const rebuild = (): void => {
+      designerPanel.build(game, root);
+      designerPanel.refresh?.(game, root);
+    };
+
+    // --- name ---------------------------------------------------------------
+    const nameRow = el('div', 'panel-row');
+    const nameInput = el('input', 'panel-input') as HTMLInputElement;
+    nameInput.value = draft.name;
+    nameInput.placeholder = UI.newTemplate;
+    nameInput.maxLength = 24;
+    nameInput.addEventListener('input', () => { draft.name = nameInput.value; });
+    nameRow.append(nameInput);
+    root.append(nameRow);
+
+    // --- line battalions ----------------------------------------------------
+    root.append(el('div', 'panel-label',
+      `${UI.battalions} ${draft.battalions.length}/${MAX_BATTALIONS}`));
+    const bnCounts = el('div', 'panel-list');
+    for (const b of BATTALION_TYPES) {
+      const n = draft.battalions.filter((x) => x === b).length;
+      const row = el('div', 'panel-row');
+      const main = el('div', 'panel-row-main');
+      main.append(el('div', 'panel-row-title', BATTALION[b]));
+      const controls = el('div', 'panel-row-controls');
+      const minus = el('button', 'panel-btn', '−');
+      const count = el('span', 'panel-count', String(n));
+      const plus = el('button', 'panel-btn', '+');
+      minus.disabled = n === 0;
+      plus.disabled = draft.battalions.length >= MAX_BATTALIONS;
+      minus.addEventListener('click', () => {
+        const i = draft.battalions.lastIndexOf(b);
+        if (i >= 0) draft.battalions.splice(i, 1);
+        rebuild();
+      });
+      plus.addEventListener('click', () => {
+        if (draft.battalions.length < MAX_BATTALIONS) draft.battalions.push(b);
+        rebuild();
+      });
+      controls.append(minus, count, plus);
+      row.append(main, controls);
+      bnCounts.append(row);
+    }
+    root.append(bnCounts);
+
+    // --- support companies --------------------------------------------------
+    root.append(el('div', 'panel-label', UI.supportCompanies));
+    const sup = el('div', 'panel-grid');
+    for (const sc of SUPPORT_TYPES) {
+      const on = draft.supports.includes(sc);
+      const b = el('button', `panel-build${on ? ' is-on' : ''}`);
+      b.append(el('span', 'panel-build-title', SUPPORT[sc]));
+      b.addEventListener('click', () => {
+        draft.supports = on
+          ? draft.supports.filter((x) => x !== sc)
+          : [...draft.supports, sc];
+        rebuild();
+      });
+      sup.append(b);
+    }
+    root.append(sup);
+
+    // --- equipment bill -----------------------------------------------------
+    root.append(el('div', 'panel-label', UI.equipmentPerDivision));
+    const bill = el('div', 'panel-kvs');
+    for (const [eq, need] of Object.entries(preview.equipmentNeed) as [EquipmentType, number][]) {
+      const row = el('div', 'panel-kv');
+      const have = me.economy.stockpile[eq] ?? 0;
+      row.append(
+        el('span', 'panel-k', EQUIPMENT_LABEL[eq]),
+        el('span', `panel-v${have < need ? ' is-short' : ''}`,
+          `${Math.round(need)} / ${formatNumber(have)}`),
+      );
+      bill.append(row);
+    }
+    root.append(bill);
+
+    // --- actions ------------------------------------------------------------
+    const actions = el('div', 'panel-row');
+    const save = el('button', 'panel-btn wide primary', UI.saveTemplate);
+    save.disabled = draft.battalions.length === 0;
+    save.addEventListener('click', () => {
+      game.issue({
+        t: 'createTemplate', country: me.id,
+        name: draft.name || UI.newTemplate,
+        battalions: draft.battalions, supports: draft.supports,
+      });
+      game.openPanel?.('army');
+    });
+    const back = el('button', 'panel-btn wide', UI.back);
+    back.addEventListener('click', () => game.openPanel?.('army'));
+    actions.append(back, save);
+    root.append(actions);
+  },
+};
+
+/**
+ * Built lazily: the focus and research panels are declared below this point,
+ * and a `const` table would capture them before they are assigned.
+ */
 export const PANELS: Record<PanelId, Panel> = {
+  get focus() { return focusPanel; },
+  get research() { return researchPanel; },
   production: productionPanel,
   construction: constructionPanel,
   army: armyPanel,
   diplomacy: diplomacyPanel,
   province: provincePanel,
-};
+  designer: designerPanel,
+} as Record<PanelId, Panel>;
 
 export { RESOURCE_LABEL, EQUIPMENT_LABEL, RESOURCE_TYPES };
+
+// ---------------------------------------------------------------------------
+// National focus
+// ---------------------------------------------------------------------------
+
+/**
+ * The focus tree, as a vertical timeline rather than the desktop game's grid.
+ *
+ * A 412px phone cannot show a branching lattice legibly, and pinch-zooming a
+ * second surface inside a bottom sheet is miserable. The tree is already in
+ * historical order, so a column reads as a chronology: what is running, what
+ * can be started now, and what is waiting and on what.
+ */
+export const focusPanel: Panel = {
+  id: 'focus',
+  title: UI.navFocus,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const views = availableFocuses(state, me.id);
+    const current = views.find((v) => v.current) ?? null;
+
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.politicalPower, String(Math.round(me.economy.politicalPower))),
+      stat(UI.focusDone, `${views.filter((v) => v.completed).length}/${views.length}`),
+      stat(UI.inProgress, current ? `${current.daysRemaining}${UI.days}` : '—'),
+    );
+    root.append(head);
+
+    if (current) {
+      root.append(el('div', 'panel-label', UI.currentFocus));
+      const row = el('div', 'panel-focus is-current');
+      row.append(
+        el('div', 'panel-focus-name', current.name),
+        el('div', 'panel-focus-desc', current.desc),
+      );
+      const bar = el('div', 'panel-bar');
+      const fill = el('i', 'panel-bar-fill');
+      fill.style.width = `${(current.fraction * 100).toFixed(1)}%`;
+      bar.append(fill);
+      row.append(bar);
+      row.append(el('div', 'panel-focus-meta',
+        `${Math.round(current.progress)} / ${current.days}${UI.days}`));
+      const stop = el('button', 'panel-btn wide', UI.cancelFocus);
+      stop.addEventListener('click', () => {
+        game.issue({ t: 'cancelFocus', country: me.id });
+        focusPanel.build(game, root);
+      });
+      row.append(stop);
+      root.append(row);
+    }
+
+    root.append(el('div', 'panel-label', UI.focusTree));
+    const list = el('div', 'panel-list');
+    for (const v of views) {
+      if (v.current) continue;
+      const row = el('div', 'panel-focus');
+      row.classList.toggle('is-done', v.completed);
+      row.classList.toggle('is-locked', !v.selectable && !v.completed);
+      row.append(
+        el('div', 'panel-focus-name', `${v.completed ? '✔ ' : ''}${v.name}`),
+        el('div', 'panel-focus-desc', v.desc),
+      );
+      if (v.effectText.length > 0) {
+        row.append(el('div', 'panel-focus-effect', v.effectText.join(' · ')));
+      }
+      if (v.completed) {
+        // Nothing more to say; the tick and the effect line are the record.
+      } else if (v.selectable) {
+        const go = el('button', 'panel-btn wide', `${UI.startFocus}（${v.days}${UI.days}）`);
+        go.addEventListener('click', () => {
+          game.issue({ t: 'startFocus', country: me.id, focus: v.id });
+          focusPanel.build(game, root);
+        });
+        row.append(go);
+      } else {
+        row.append(el('div', 'panel-focus-block', v.blockText ?? UI.locked));
+      }
+      list.append(row);
+    }
+    root.append(list);
+  },
+  refresh(game, root) {
+    // The tree only changes on a completion or a command, both of which rebuild.
+    const bar = root.querySelector<HTMLElement>('.panel-focus.is-current .panel-bar-fill');
+    if (!bar) return;
+    const me = game.state.countries[game.state.meta.playerCountry];
+    const cur = availableFocuses(game.state, me.id).find((v) => v.current);
+    if (!cur) { focusPanel.build(game, root); return; }
+    bar.style.width = `${(cur.fraction * 100).toFixed(1)}%`;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Research
+// ---------------------------------------------------------------------------
+
+let researchBranch: TechBranch = 'industry';
+let researchSlot = 0;
+
+export const researchPanel: Panel = {
+  id: 'research',
+  title: UI.navResearch,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const slots = researchView(state, me.id);
+    if (researchSlot >= slots.length) researchSlot = 0;
+
+    const done = researchSummary(state, me.id);
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.researchSlots, String(slots.length)),
+      stat(UI.researched, String(done.completed)),
+    );
+    root.append(head);
+
+    // --- the slots themselves ---
+    root.append(el('div', 'panel-label', UI.researchSlots));
+    for (const s of slots) {
+      const row = el('div', 'panel-focus');
+      row.classList.toggle('is-current', s.slot === researchSlot);
+      row.append(el('div', 'panel-focus-name',
+        `${UI.slot}${s.slot + 1}: ${s.name}${s.idle ? '' : ` · ${s.branchName}`}`));
+      if (!s.idle) {
+        const bar = el('div', 'panel-bar');
+        const fill = el('i', 'panel-bar-fill');
+        fill.style.width = `${(s.percent * 100).toFixed(1)}%`;
+        bar.append(fill);
+        row.append(bar);
+        row.append(el('div', 'panel-focus-meta',
+          `${UI.remaining} ${s.daysRemaining}${UI.days}` +
+          (s.aheadPenaltyDays > 0 ? ` · ${UI.aheadPenalty} +${s.aheadPenaltyDays}${UI.days}` : '')));
+        if (s.effects.length > 0) {
+          row.append(el('div', 'panel-focus-effect',
+            s.effects.map((e) => `${e.label} ${e.value}`).join(' · ')));
+        }
+      }
+      const pick = el('button', 'panel-btn wide', s.idle ? UI.chooseTech : UI.changeTech);
+      pick.addEventListener('click', () => {
+        researchSlot = s.slot;
+        researchPanel.build(game, root);
+      });
+      row.append(pick);
+      if (s.idle) {
+        // An empty slot researches nothing, and a player who never opens this
+        // panel would spend the war a decade behind without ever being told.
+        const auto = el('button', 'panel-btn wide', UI.autoResearch);
+        auto.addEventListener('click', () => {
+          const best = cheapestResearchable(game, me.id);
+          if (best) {
+            game.issue({
+              t: 'startResearch', country: me.id, slot: s.slot, tech: best,
+            });
+          }
+          researchPanel.build(game, root);
+        });
+        row.append(auto);
+      }
+      list_append(root, row);
+    }
+
+    // --- the tree for the selected slot ---
+    root.append(el('div', 'panel-label', `${UI.slot}${researchSlot + 1} — ${UI.chooseTech}`));
+    const chips = el('div', 'panel-chips');
+    for (const b of BRANCH_LIST) {
+      const chip = el('button', 'panel-chip', b.name);
+      chip.classList.toggle('is-on', b.id === researchBranch);
+      chip.addEventListener('click', () => {
+        researchBranch = b.id;
+        researchPanel.build(game, root);
+      });
+      chips.append(chip);
+    }
+    root.append(chips);
+
+    const list = el('div', 'panel-list');
+    for (const t of techTree(state, me.id, researchBranch)) {
+      const row = el('button', 'panel-row wide-row');
+      row.disabled = !t.researchable;
+      row.classList.toggle('is-blocked', !t.researchable);
+      const main = el('div', 'panel-row-main');
+      main.append(
+        el('div', 'panel-row-title', `${t.completed ? '✔ ' : ''}${t.name}`),
+        el('div', 'panel-row-sub',
+          `${t.year}年 · ${t.requiredDays}${UI.days}` +
+          (t.researchable ? '' : ` · ${t.reasonText}`)),
+      );
+      row.append(main, el('span', 'panel-row-tag', t.researchable ? '▶' : ''));
+      row.addEventListener('click', () => {
+        game.issue({
+          t: 'startResearch', country: me.id, slot: researchSlot, tech: t.id,
+        });
+        researchPanel.build(game, root);
+      });
+      list.append(row);
+    }
+    root.append(list);
+  },
+  refresh(game, root) {
+    const bars = root.querySelectorAll<HTMLElement>('.panel-bar-fill');
+    if (bars.length === 0) return;
+    const me = game.state.countries[game.state.meta.playerCountry];
+    const slots = researchView(game.state, me.id).filter((s) => !s.idle);
+    slots.forEach((s, i) => {
+      if (bars[i]) bars[i].style.width = `${(s.percent * 100).toFixed(1)}%`;
+    });
+  },
+};
+
+/**
+ * The shortest researchable technology across every branch.
+ *
+ * Deliberately cheapest-first rather than cleverest: it exists so a slot is
+ * never idle by accident, not to play the research game for the player.
+ */
+function cheapestResearchable(game: Game, owner: number): string | null {
+  let best: { id: string; days: number } | null = null;
+  for (const b of BRANCH_LIST) {
+    for (const t of techTree(game.state, owner, b.id)) {
+      if (!t.researchable) continue;
+      if (!best || t.requiredDays < best.days) best = { id: t.id, days: t.requiredDays };
+    }
+  }
+  return best?.id ?? null;
+}
+
+/** Appends into the panel body; kept separate so the slot loop reads cleanly. */
+function list_append(root: HTMLElement, row: HTMLElement): void {
+  root.append(row);
+}

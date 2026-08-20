@@ -1,4 +1,5 @@
 import type { GameState } from './types';
+import { effectiveTemplate } from '../research';
 
 /**
  * Structural checks asserted during headless scenario runs. A violation means
@@ -24,11 +25,15 @@ export function checkInvariants(state: GameState, provinceCount: number): string
       push(`division ${d.id} on invalid province ${d.provinceId}`);
       continue;
     }
-    const tpl = state.countries[d.owner]?.templates.find((t) => t.id === d.templateId);
-    if (!tpl) {
+    const base = state.countries[d.owner]?.templates.find((t) => t.id === d.templateId);
+    if (!base) {
       push(`division ${d.id} references missing template ${d.templateId}`);
       continue;
     }
+    // Against the effective template, not the base one: technology raises the
+    // organisation and strength ceilings, and a division sitting at its real
+    // maximum is not a violation just because the printed template is older.
+    const tpl = effectiveTemplate(state, d.owner, base);
     if (!(d.org >= -1e-6) || d.org > tpl.maxOrg + 1e-6) {
       push(`division ${d.id} org ${d.org} out of [0, ${tpl.maxOrg}]`);
     }

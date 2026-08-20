@@ -1,3 +1,4 @@
+import { effectiveTemplate, techModifiers } from '../research';
 import { TERRAIN } from '../core/data';
 import { jitter } from '../core/rng';
 import type {
@@ -33,7 +34,7 @@ import type { ProvinceIndex } from '../map/ProvinceIndex';
  */
 export const ORG_DAMAGE_K = 0.010;
 /** Strength removed per point of penetrating damage. */
-export const STR_DAMAGE_K = 0.06;
+export const STR_DAMAGE_K = 0.02;
 /**
  * Flat penalty on the attacker's output.
  *
@@ -46,7 +47,7 @@ export const ATTACKER_PENALTY = 0.9;
 /** Random spread applied to each side's damage each round. */
 export const COMBAT_JITTER = 0.10;
 /** Organisation recovered per hour, as a fraction of the maximum. */
-export const ORG_RECOVERY_PER_HOUR = 0.010;
+export const ORG_RECOVERY_PER_HOUR = 0.0075;
 /** Strength recovered per hour when in supply and out of combat. */
 export const STR_RECOVERY_PER_HOUR = 0.0015;
 /** Hours a division must recover after being forced to retreat. */
@@ -164,7 +165,7 @@ function collectSide(
   let used = 0;
   let hardnessWeight = 0;
   for (const d of candidates) {
-    const tpl = templateOf(state, d);
+    const tpl = effectiveTemplate(state, d.owner, templateOf(state, d));
     if (used + tpl.width > width && out.engaged.length > 0) break;
     used += tpl.width;
     out.engaged.push(d);
@@ -197,11 +198,17 @@ export function sideDamage(
 
   const hits = raw * modifier * pierced * roll;
   // Fire the defence absorbs still costs cohesion; only what gets through
-  // costs men and equipment. Organisation therefore falls at the same rate for
-  // both sides in an even fight, and the side that is bleeding strength loses
-  // the grind -- because lost strength means lost equipment, which feeds back
-  // into how hard it can hit next round.
-  const through = Math.max(0, hits - defender.defence);
+  // costs men and equipment.
+  //
+  // Proportional, not `hits - defence`. A flat subtraction is a step function:
+  // below the threshold an attack costs the defender literally nothing, above
+  // it the defender routs at full strength, and there is no ratio in between
+  // where a battle grinds. Measured, that made every even fight a hundred-day
+  // no-op and every 2:1 a bloodless walk-in -- so equipment was never consumed
+  // and the war never touched the economy. This form keeps defence meaningful
+  // (it always cuts the share getting through) while leaving no odds at which
+  // fire simply stops landing.
+  const through = hits * (hits / (hits + Math.max(1, defender.defence)));
 
   return {
     org: hits * ORG_DAMAGE_K,
@@ -250,8 +257,13 @@ export function resolveCombatRound(
   if (def.engaged.length === 0) return { ended: true, attackerWon: true };
 
   const fort = state.provinces[combat.province].fortLevel;
-  const attackerMod = terrain.attackMod * ATTACKER_PENALTY * (1 - Math.min(0.6, fort * 0.12));
-  const defenderMod = terrain.defenceMod;
+  // Air support is the one technology branch that acts on the battle rather
+  // than on the units in it, so it multiplies the side modifier.
+  const attackerMod = terrain.attackMod * ATTACKER_PENALTY
+    * (1 - Math.min(0.6, fort * 0.12))
+    * techModifiers(state, combat.attackerCountry).airSupport;
+  const defenderMod = terrain.defenceMod
+    * techModifiers(state, combat.defenderCountry).airSupport;
 
   const attRoll = jitter(state.rng, COMBAT_JITTER);
   const defRoll = jitter(state.rng, COMBAT_JITTER);
@@ -288,7 +300,7 @@ export function resolveCombatRound(
 
 /** Hourly out-of-combat recovery and attrition. */
 export function tickDivisionUpkeep(state: GameState, d: Division): void {
-  const tpl = templateOf(state, d);
+  const tpl = effectiveTemplate(state, d.owner, templateOf(state, d));
   if (d.retreatCooldown > 0) d.retreatCooldown--;
 
   if (d.combatId !== null) return;

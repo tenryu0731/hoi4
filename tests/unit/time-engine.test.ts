@@ -129,9 +129,12 @@ describe('TimeEngine', () => {
     expect(ticks).toBe(0);
     te.speed = 2;          // discards the partial hour
     expect(te.alpha).toBe(0);
-    te.advance(300);
-    expect(ticks).toBe(0); // 300ms < 333ms, so still no tick
-    te.advance(300);
+    // Derived from the ladder rather than written out, so retuning a speed
+    // cannot silently turn this into a test of nothing.
+    const per = MS_PER_HOUR[2];
+    te.advance(per * 0.9);
+    expect(ticks).toBe(0); // still short of a whole hour
+    te.advance(per * 0.9);
     expect(ticks).toBe(1);
   });
 

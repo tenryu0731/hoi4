@@ -39,14 +39,25 @@ export const PALETTE = {
 /** Map modes recolour the province fills without touching geometry. */
 export type MapMode = 'political' | 'terrain' | 'resource' | 'supply' | 'victory';
 
+/**
+ * Terrain map mode.
+ *
+ * Chosen for separation, not for naturalism: a wargame's terrain view is a
+ * legend, and seven muted naturalistic earth tones are not seven categories.
+ * The set they replace had eleven of its twenty-one pairs inside CIE dE76 25 --
+ * mountain and urban were 7.9 apart, which is the same colour in a small patch
+ * on a phone. Every pair here clears 25, with the closest at 29.5. Keep it that
+ * way: changing one entry without re-measuring the whole matrix is how the
+ * previous set drifted into mud.
+ */
 export const TERRAIN_COLOR: Record<string, number> = {
-  plains: 0x9fae72,
-  forest: 0x5f7d4e,
-  hills: 0xa8955f,
-  mountain: 0x8b7f70,
-  urban: 0x9a8f88,
-  marsh: 0x74886a,
-  desert: 0xd6c08a,
+  plains: 0x9dbb5e,
+  forest: 0x30632c,
+  hills: 0xcc9440,
+  mountain: 0x6b5f56,
+  urban: 0xa1596c,
+  marsh: 0x3a7d8e,
+  desert: 0xf2e4bc,
 };
 
 /** Multiplies a packed RGB by a scalar, clamped per channel. */

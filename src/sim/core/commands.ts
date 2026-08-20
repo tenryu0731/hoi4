@@ -1,6 +1,6 @@
 import type {
   BattalionType, BuildingType, CountryId, DivisionId, EquipmentType,
-  ProvinceId, StateId, SupportType,
+  ProvinceId, StateId, SupportType, TechId,
 } from './types';
 
 /**
@@ -25,6 +25,13 @@ export type Command =
   | { t: 'setDivisionOrder'; divisions: DivisionId[]; order: 'defend' | 'attack'; target?: ProvinceId }
   // --- diplomacy ------------------------------------------------------------
   | { t: 'justifyWar'; country: CountryId; target: CountryId }
+  /**
+   * An ultimatum: submit or be invaded. Succeeds or fails on the spot against
+   * the strength ratio, so it is a gamble on the target's nerve rather than a
+   * negotiation. The AI has always been able to do this; the player must be
+   * able to as well, or the two are not playing the same game.
+   */
+  | { t: 'demandSubmission'; country: CountryId; target: CountryId }
   | { t: 'declareWar'; country: CountryId; target: CountryId }
   | { t: 'guarantee'; country: CountryId; target: CountryId }
   | { t: 'improveRelations'; country: CountryId; target: CountryId }
@@ -32,7 +39,17 @@ export type Command =
   | { t: 'joinFaction'; country: CountryId; faction: number }
   | { t: 'leaveFaction'; country: CountryId }
   // --- research -------------------------------------------------------------
-  | { t: 'setResearch'; country: CountryId; branch: 'infantry' | 'armor' | 'air' | 'industry' };
+  /**
+   * Puts a technology into a research slot. Replacing a slot that is already
+   * working abandons its progress, as it does in the real game.
+   */
+  | { t: 'startResearch'; country: CountryId; slot: number; tech: TechId }
+  | { t: 'cancelResearch'; country: CountryId; slot: number }
+
+  // --- national focus -------------------------------------------------------
+  /** Cannot be changed once started; cancelling throws the progress away. */
+  | { t: 'startFocus'; country: CountryId; focus: string }
+  | { t: 'cancelFocus'; country: CountryId };
 
 export type CommandType = Command['t'];
 

@@ -253,6 +253,17 @@ export interface ProvinceState {
   divisions: DivisionId[];
   /** Hours the current attacker has held the province, gates re-capture churn. */
   lastChangeHour: number;
+  /**
+   * Part of the original owner's metropolitan territory rather than an
+   * overseas possession. Fixed at scenario creation and never reassigned:
+   * conquering Alsace does not make it German heartland.
+   *
+   * Surrender is measured over core territory only. Britain's victory points
+   * include Egypt and Iraq and France's include Algeria and Syria, so counting
+   * everything meant the whole metropole could fall without either reaching
+   * its surrender threshold -- they were unconquerable by construction.
+   */
+  core: boolean;
 }
 
 export interface StateRuntime {
@@ -272,11 +283,65 @@ export interface StateRuntime {
 // Country
 // ---------------------------------------------------------------------------
 
+/** Identifier of a technology in the trees; see sim/research/techData.ts. */
+export type TechId = string;
+
+/** One research slot: what it is working on, and how far along it is. */
+export interface ResearchSlot {
+  /** Technology being researched, or null when the slot is idle. */
+  tech: TechId | null;
+  /** Research days accumulated toward `required`. */
+  progress: number;
+  /**
+   * Days this technology needs, fixed at the moment research started so the
+   * ahead-of-time penalty is locked in rather than shrinking as time passes.
+   */
+  required: number;
+}
+
 export interface ResearchState {
+  /** Base slots. Technologies may grant more; see effectiveSlotCount(). */
   slots: number;
-  /** Simplified tech: a single research level per branch, raising modifiers. */
+  /**
+   * Per-slot state. Optional only because the 1936 scenario table predates it:
+   * the research runtime creates it on first use.
+   */
+  active?: ResearchSlot[];
+  /** Technologies finished, in completion order. */
+  completed?: TechId[];
+  /**
+   * The pre-tree drip, kept because production.ts still reads
+   * `levels.industry`. Nothing in sim/research writes either field.
+   */
   levels: { infantry: number; armor: number; air: number; industry: number };
   progress: { infantry: number; armor: number; air: number; industry: number };
+}
+
+/**
+ * National focus progress; see sim/focus.
+ *
+ * Optional only because the 1936 scenario table predates the focus system --
+ * the focus runtime creates it on first use, exactly as the research runtime
+ * does with its slots.
+ */
+export interface CountryFocus {
+  /** Focus being worked on, or null when the cabinet is idle. */
+  current: string | null;
+  /** Days already spent on `current`. Lost if it is cancelled. */
+  progress: number;
+  /** Focus ids finished, in completion order. */
+  completed: string[];
+  /** Standing modifiers granted by completed focuses, paid out daily. */
+  bonuses: {
+    /** Extra research days per day, by branch. */
+    research: { infantry: number; armor: number; air: number; industry: number };
+    /** Extra construction output, in factory-equivalents. */
+    construction: number;
+    /** Ceiling held on the consumer-goods share; 1 means no ceiling. */
+    consumerGoodsCap: number;
+    /** Extra political power per day. */
+    politicalPower: number;
+  };
 }
 
 export interface Country {
@@ -293,6 +358,8 @@ export interface Country {
   constructionQueue: ConstructionItem[];
   templates: DivisionTemplate[];
   research: ResearchState;
+  /** National focus state. Created on first use by sim/focus. */
+  focus?: CountryFocus;
   diplomacy: DiplomaticState;
   factionId: FactionId | null;
   atWarWith: CountryId[];
@@ -319,10 +386,17 @@ export interface Country {
 // Root state
 // ---------------------------------------------------------------------------
 
+/** Why the campaign ended. A code, not prose: the UI writes the sentence. */
+export type OutcomeReason =
+  | 'capitulated'
+  | 'allEnemiesCapitulated'
+  | 'aheadOnPoints'
+  | 'behindOnPoints';
+
 export type Outcome =
   | { status: 'playing' }
-  | { status: 'victory'; reason: string; day: number }
-  | { status: 'defeat'; reason: string; day: number };
+  | { status: 'victory'; reason: OutcomeReason; day: number }
+  | { status: 'defeat'; reason: OutcomeReason; day: number };
 
 export interface GameState {
   meta: {
@@ -341,16 +415,37 @@ export interface GameState {
   factions: Faction[];
   wars: War[];
   worldTension: number;
-  nextIds: { division: number; combat: number; line: number; construction: number; war: number };
+  nextIds: {
+    division: number; combat: number; line: number; construction: number;
+    war: number; template: number;
+  };
   outcome: Outcome;
   /** Ring buffer of player-facing events, newest last. */
   log: GameEvent[];
 }
 
+/**
+ * What happened, as data rather than as a sentence.
+ *
+ * The simulation must not know what language the player reads, so it records
+ * the facts and the UI writes the prose. Country references are tags because
+ * those are stable across the whole program; province references are ids so the
+ * UI can look up whatever name it wants to show.
+ */
+export type GameEventBody =
+  | { k: 'warDeclared'; attacker: string; defender: string }
+  | { k: 'joinedFaction'; country: string; faction: string }
+  | { k: 'capitulated'; country: string; occupation: number }
+  | { k: 'annexed'; country: string; by: string }
+  | { k: 'itemCompleted'; country: string; item: string }
+  | { k: 'divisionLost'; country: string }
+  | { k: 'attack'; attacker: string; defender: string; province: ProvinceId }
+  | { k: 'outcome'; status: Outcome['status']; reason: OutcomeReason };
+
 export interface GameEvent {
   day: number;
-  kind: 'war' | 'combat' | 'production' | 'construction' | 'diplomacy' | 'capitulation' | 'outcome';
-  text: string;
+  kind: 'war' | 'combat' | 'production' | 'construction' | 'research' | 'focus' | 'diplomacy' | 'capitulation' | 'outcome';
+  body: GameEventBody;
   /** Optional province to focus the camera on when tapped. */
   province?: ProvinceId;
   country?: CountryId;

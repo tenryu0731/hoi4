@@ -126,16 +126,16 @@ export const TEMPLATE_MOUNTAIN = 3;
 
 function defaultTemplates(): DivisionTemplate[] {
   return [
-    deriveTemplate(TEMPLATE_INFANTRY, 'Infantry Division',
+    deriveTemplate(TEMPLATE_INFANTRY, '歩兵師団',
       ['infantry', 'infantry', 'infantry', 'infantry', 'infantry', 'infantry', 'artillery'],
       ['engineer', 'recon']),
-    deriveTemplate(TEMPLATE_MOTORISED, 'Motorised Division',
+    deriveTemplate(TEMPLATE_MOTORISED, '自動車化師団',
       ['motorized', 'motorized', 'motorized', 'motorized', 'motorized', 'motorized', 'artillery'],
       ['engineer', 'recon', 'logistics']),
-    deriveTemplate(TEMPLATE_ARMOUR, 'Armoured Division',
+    deriveTemplate(TEMPLATE_ARMOUR, '機甲師団',
       ['medium_armor', 'medium_armor', 'medium_armor', 'motorized', 'motorized', 'motorized'],
       ['engineer', 'recon', 'logistics']),
-    deriveTemplate(TEMPLATE_MOUNTAIN, 'Mountain Division',
+    deriveTemplate(TEMPLATE_MOUNTAIN, '山岳師団',
       ['mountaineers', 'mountaineers', 'mountaineers', 'mountaineers', 'mountaineers', 'artillery'],
       ['engineer', 'recon']),
   ];
@@ -212,8 +212,19 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
     };
   });
 
+  // Anything within this of its owner's capital is metropolitan territory. It
+  // is a blunt instrument, but it separates Normandy from Algeria and Kent from
+  // Egypt, which is the distinction that matters.
+  const HOME_RADIUS_KM = 1600;
+  const capitalOf = new Map<string, { x: number; y: number }>();
+  for (const c of countries) {
+    const cap = index.provinces[c.capital];
+    if (cap) capitalOf.set(c.tag, { x: cap.centerX, y: cap.centerY });
+  }
+
   const provinces: ProvinceState[] = index.provinces.map((p) => {
     const owner = idOf.get(p.ownerTag)!;
+    const home = capitalOf.get(p.ownerTag);
     return {
       owner, controller: owner,
       vp: p.vp,
@@ -221,6 +232,8 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       fortLevel: 0,
       divisions: [],
       lastChangeHour: 0,
+      core: home === undefined
+        || Math.hypot(p.centerX - home.x, p.centerY - home.y) <= HOME_RADIUS_KM,
     };
   });
 
@@ -254,7 +267,9 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
     ],
     wars: [],
     worldTension: 0,
-    nextIds: { division: 0, combat: 0, line: 0, construction: 0, war: 0 },
+    // Templates start past the four the scenario deals so a player-designed
+    // division can never collide with one every country already has.
+    nextIds: { division: 0, combat: 0, line: 0, construction: 0, war: 0, template: 100 },
     outcome: { status: 'playing' },
     log: [],
   };
@@ -297,11 +312,17 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
   for (const c of countries) {
     const mil = c.economy.militaryFactories;
     if (mil <= 0) continue;
+    // Every default template carries a recon company, and recon needs
+    // motorised transport, so a country without a motorised line can never
+    // raise a single division however many rifles it stockpiles.
+    const rifles = Math.max(1, Math.round(mil * 0.5));
+    const support = Math.max(1, Math.round(mil * 0.15));
+    const guns = Math.max(1, Math.round(mil * 0.2));
     const split: [EquipmentType, number][] = [
-      ['infantry_equipment', Math.max(1, Math.round(mil * 0.55))],
-      ['support_equipment', Math.max(0, Math.round(mil * 0.15))],
-      ['artillery', Math.max(0, Math.round(mil * 0.2))],
-      ['fighter', Math.max(0, mil - Math.round(mil * 0.55) - Math.round(mil * 0.15) - Math.round(mil * 0.2))],
+      ['infantry_equipment', rifles],
+      ['support_equipment', support],
+      ['artillery', guns],
+      ['motorized', Math.max(1, mil - rifles - support - guns)],
     ];
     for (const [eq, factories] of split) {
       if (factories <= 0) continue;

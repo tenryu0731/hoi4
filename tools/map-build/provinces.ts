@@ -709,10 +709,16 @@ function distributeNationalAssets(
       for (const pid of st.provinces) biggestCity = Math.max(biggestCity, raw[pid].seed.pop);
       st.infrastructure = Math.max(1, Math.min(5,
         nation.infrastructure - 1 + (biggestCity > 400 ? 2 : biggestCity > 120 ? 1 : 0)));
+      // The ceiling is deliberately well above what any state's population
+      // reaches on its own. It used to be 24, which bound only the dense
+      // industrial states -- Germany's two states and Britain's five hit it
+      // while the Soviet Union's eight, spread thin, never did. The result was
+      // Germany starting with one free slot and Britain with none, so their
+      // economic game was over before it began, while the USSR built freely.
       st.buildingSlots = Math.max(
-        4,
-        st.civilianFactories + st.militaryFactories + 3,
-        Math.min(24, Math.round(st.manpower / 900)),
+        6,
+        st.civilianFactories + st.militaryFactories + st.dockyards + 6,
+        Math.min(40, Math.round(st.manpower / 900)),
       );
     });
   }

@@ -4,6 +4,7 @@ import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
 import { PANELS, formatNumber, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
+import { RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
 
 /**
  * The heads-up display.
@@ -19,24 +20,25 @@ import { HUD_CSS } from './hud.css';
  */
 
 const MAP_MODES: [MapMode, string][] = [
-  ['political', 'Political'],
-  ['terrain', 'Terrain'],
-  ['resource', 'Resources'],
-  ['supply', 'Supply'],
-  ['victory', 'Victory'],
+  ['political', UI.modePolitical],
+  ['terrain', UI.modeTerrain],
+  ['resource', UI.modeResource],
+  ['supply', UI.modeSupply],
+  ['victory', UI.modeVictory],
 ];
 
-/** Abbreviations that fit the resource strip on a 360px screen. */
-const RESOURCE_SHORT: Record<ResourceType, string> = {
-  oil: 'Oil', steel: 'Steel', aluminium: 'Alu',
-  tungsten: 'Tung', rubber: 'Rub', chromium: 'Chr',
-};
-
+/**
+ * The button row, in the order the real game's is: what the nation intends,
+ * what it is learning, what it is building, what it is manufacturing, what it
+ * is raising, and who it is talking to.
+ */
 const NAV: [PanelId, string, string][] = [
-  ['production', 'Production', 'ui-production'],
-  ['construction', 'Build', 'ui-construction'],
-  ['army', 'Army', 'ui-army'],
-  ['diplomacy', 'Diplomacy', 'ui-diplomacy'],
+  ['focus', UI.navFocus, 'ui-political_power'],
+  ['research', UI.navResearch, 'ui-research'],
+  ['construction', UI.navConstruction, 'ui-construction'],
+  ['production', UI.navProduction, 'ui-production'],
+  ['army', UI.navArmy, 'ui-army'],
+  ['diplomacy', UI.navDiplomacy, 'ui-diplomacy'],
 ];
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -48,12 +50,61 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/**
+ * Eases a displayed number toward its true value and flashes it on change.
+ *
+ * Resources and factory counts used to rewrite instantly, which reads as a
+ * spreadsheet recalculating rather than as a country running. The tween is
+ * display-only -- the simulation value is never what is shown mid-flight -- and
+ * it snaps rather than creeping once it is within a whole unit, so a settled
+ * figure always matches the state exactly.
+ */
+class NumberTween {
+  private shown = NaN;
+
+  constructor(private node: HTMLElement, private format: (v: number) => string) {}
+
+  set(target: number, dtMs: number): void {
+    if (!Number.isFinite(this.shown)) {
+      this.shown = target;
+      setText(this.node, this.format(target));
+      return;
+    }
+    if (this.shown === target) return;
+    const k = 1 - Math.pow(0.004, Math.min(0.05, dtMs / 1000));
+    const next = this.shown + (target - this.shown) * k;
+    this.shown = Math.abs(target - next) < 1 ? target : next;
+    setText(this.node, this.format(this.shown));
+    this.node.classList.remove('is-changing');
+    // Reading offsetWidth restarts the animation; without it a value that
+    // changes every frame never re-triggers the flash.
+    void this.node.offsetWidth;
+    this.node.classList.add('is-changing');
+  }
+}
+
 function setText(node: HTMLElement, value: string): void {
   if (node.textContent !== value) node.textContent = value;
 }
 
 function assetUrl(path: string): string {
   return `${import.meta.env.BASE_URL}assets/${path}`;
+}
+
+/**
+ * An icon that takes its colour from the surrounding text.
+ *
+ * Not an `<img>`: `stroke="currentColor"` inside an image-referenced SVG
+ * resolves against that SVG document's own `color`, which defaults to black
+ * and does not inherit from the host page. Every icon in the HUD was therefore
+ * rendering pure black on a near-black chrome -- 1.09:1 against a 3:1 floor.
+ * Masking a `currentColor` fill makes the icon inherit properly, and gets
+ * hover and active states for free.
+ */
+function iconNode(cls: string, path: string): HTMLElement {
+  const node = el('i', cls);
+  node.style.setProperty('--icon', `url("${assetUrl(path)}")`);
+  return node;
 }
 
 export function mountHud(game: Game, root: HTMLElement): () => void {
@@ -78,23 +129,23 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     stats.append(box);
     statNodes[key] = v;
   };
-  addStat('pp', 'PP');
-  addStat('mp', 'MANPOWER');
-  addStat('civ', 'CIV');
-  addStat('mil', 'MIL');
-  addStat('div', 'DIV');
+  addStat('pp', UI.politicalPower);
+  addStat('mp', UI.manpower);
+  addStat('civ', UI.civFactories);
+  addStat('mil', UI.milFactories);
+  addStat('div', UI.divisions);
 
   const clock = el('div', 'hud-clock');
   const dateNode = el('div', 'hud-date', '');
   const speedRow = el('div', 'hud-speed');
   const pauseBtn = el('button', 'hud-btn hud-pause', '▶');
-  pauseBtn.setAttribute('aria-label', 'Play or pause');
+  pauseBtn.setAttribute('aria-label', UI.playPause);
   const speedPips = el('div', 'hud-pips');
   const pips: HTMLElement[] = [];
   for (let i = 1; i <= 5; i++) {
     const pip = el('button', 'hud-pip');
     pip.dataset.speed = String(i);
-    pip.setAttribute('aria-label', `Speed ${i}`);
+    pip.setAttribute('aria-label', `${UI.speed} ${i}`);
     pips.push(pip);
     speedPips.append(pip);
   }
@@ -107,11 +158,15 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const resNodes: Partial<Record<ResourceType, HTMLElement>> = {};
   for (const r of RESOURCE_TYPES) {
     const chip = el('div', 'hud-res');
-    const icon = el('img', 'hud-res-icon');
-    icon.src = assetUrl(`icons/resource-${r}.svg`);
-    icon.alt = '';
+    const icon = iconNode('hud-res-icon', `icons/resource-${r}.svg`);
     const v = el('span', 'hud-res-v', '0');
-    chip.append(icon, v, el('span', 'hud-res-l', RESOURCE_SHORT[r]));
+    // Icon and number only. Six labelled chips need 493px on a 412px screen,
+    // so the last resource was simply cut off by the screen edge; the icon
+    // already identifies the resource, and the name stays as the accessible
+    // label for anyone who needs it.
+    chip.title = RESOURCE_SHORT[r];
+    chip.setAttribute('aria-label', RESOURCE_SHORT[r]);
+    chip.append(icon, v);
     resStrip.append(chip);
     resNodes[r] = v;
   }
@@ -139,7 +194,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const sheetHeader = el('div', 'hud-sheet-header');
   const sheetTitle = el('div', 'hud-sheet-title', '');
   const sheetClose = el('button', 'hud-sheet-close', '×');
-  sheetClose.setAttribute('aria-label', 'Close panel');
+  sheetClose.setAttribute('aria-label', UI.closePanel);
   sheetHeader.append(sheetTitle, sheetClose);
   const sheetBody = el('div', 'hud-sheet-body');
   sheet.append(sheetGrip, sheetHeader, sheetBody);
@@ -150,10 +205,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   for (const [id, label, icon] of NAV) {
     const b = el('button', 'hud-nav-btn');
     b.dataset.panel = id;
-    const img = el('img', 'hud-nav-icon');
-    img.src = assetUrl(`icons/${icon}.svg`);
-    img.alt = '';
-    b.append(img, el('span', 'hud-nav-label', label));
+    b.append(iconNode('hud-nav-icon', `icons/${icon}.svg`), el('span', 'hud-nav-label', label));
     b.addEventListener('click', () => togglePanel(id));
     navButtons.push(b);
     nav.append(b);
@@ -164,9 +216,16 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
   // --- outcome -------------------------------------------------------------
   const outcome = el('div', 'hud-outcome');
+  // One child, not two: `place-items: center` on a two-child grid builds an
+  // implicit two-row track and centres each child in its own row, which put
+  // the title and its reason four hundred pixels apart.
+  const outcomeCard = el('div', 'hud-outcome-card');
   const outcomeTitle = el('div', 'hud-outcome-title', '');
   const outcomeSub = el('div', 'hud-outcome-sub', '');
-  outcome.append(outcomeTitle, outcomeSub);
+  const outcomeAgain = el('button', 'hud-outcome-again', UI.restart);
+  outcomeAgain.addEventListener('click', () => location.reload());
+  outcomeCard.append(outcomeTitle, outcomeSub, outcomeAgain);
+  outcome.append(outcomeCard);
 
   root.append(top, resStrip, modeBar, toasts, sheet, nav, outcome);
 
@@ -193,6 +252,10 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     }
     for (const b of navButtons) b.classList.toggle('is-active', b.dataset.panel === openPanel);
   }
+
+  // Panels that are not nav destinations open from inside another panel: the
+  // designer from the army list, the province sheet from a tap on the map.
+  game.openPanel = (id) => togglePanel(id as PanelId | null);
 
   /** The province panel is titled with the place it is showing. */
   function panelTitle(id: PanelId): string {
@@ -241,16 +304,29 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
   // --- toasts --------------------------------------------------------------
   let lastLogLength = game.state.log.length;
+  // Wars, capitulations and the outcome concern everyone; a finished factory
+  // concerns only its owner. Without that filter the player's first five
+  // minutes are a hundred and thirty toasts about Belgian construction.
   const TOAST_KINDS = new Set(['war', 'capitulation', 'construction', 'outcome']);
+  const OWN_ONLY = new Set(['construction', 'production']);
 
   function pushToast(e: GameEvent): void {
-    const node = el('div', `hud-toast kind-${e.kind}`, e.text);
+    const node = el('div', `hud-toast kind-${e.kind}`,
+      eventText(e.body, (id) => game.index.get(id).name));
     toasts.append(node);
     // Fade and remove; the log panel keeps the permanent record.
     setTimeout(() => node.classList.add('is-out'), 4200);
     setTimeout(() => node.remove(), 4800);
     while (toasts.childElementCount > 4) toasts.firstElementChild?.remove();
   }
+
+  const tweens = {
+    pp: new NumberTween(statNodes.pp, formatNumber),
+    mp: new NumberTween(statNodes.mp, formatNumber),
+    civ: new NumberTween(statNodes.civ, (v) => String(Math.round(v))),
+    mil: new NumberTween(statNodes.mil, (v) => String(Math.round(v))),
+    div: new NumberTween(statNodes.div, (v) => String(Math.round(v))),
+  };
 
   // --- per-frame refresh ---------------------------------------------------
   let lastSpeed = -1;
@@ -267,21 +343,27 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       flag.src = assetUrl(`flags/${me.tag}.svg`);
       flag.alt = me.name;
     }
-    setText(countryName, me.name);
+    setText(countryName, country(me.tag));
     setText(countryTag, me.tag);
 
-    setText(statNodes.pp, formatNumber(me.economy.politicalPower));
-    setText(statNodes.mp, formatNumber(me.economy.manpower * 1000));
-    setText(statNodes.civ, String(me.economy.civilianFactories));
-    setText(statNodes.mil, String(me.economy.militaryFactories));
-    setText(statNodes.div, String(me.stats.divisionCount));
+    const dt = game.lastFrameMs;
+    tweens.pp.set(me.economy.politicalPower, dt);
+    tweens.mp.set(me.economy.manpower * 1000, dt);
+    tweens.civ.set(me.economy.civilianFactories, dt);
+    tweens.mil.set(me.economy.militaryFactories, dt);
+    tweens.div.set(me.stats.divisionCount, dt);
 
     for (const r of RESOURCE_TYPES) {
       const flow = me.economy.resources[r];
       const node = resNodes[r]!;
-      const net = Math.round(flow.produced - flow.consumed);
+      // The shortfall, not the balance. A shortage used to render as a red
+      // zero -- production and consumption net out at the point supply is
+      // capped -- and a red nought tells the player nothing about how short
+      // they are or whether it is getting worse.
+      const short = flow.deficit > 0.001;
+      const net = Math.round(short ? -flow.deficit : flow.produced - flow.consumed);
       setText(node, net > 0 ? `+${net}` : String(net));
-      node.classList.toggle('is-short', flow.deficit > 0.001);
+      node.classList.toggle('is-short', short);
     }
 
     setText(dateNode, formatDateLong(state.clock));
@@ -312,7 +394,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     if (state.log.length !== lastLogLength) {
       const fresh = state.log.slice(Math.max(0, lastLogLength));
       lastLogLength = state.log.length;
-      for (const e of fresh) if (TOAST_KINDS.has(e.kind)) pushToast(e);
+      for (const e of fresh) {
+        if (!TOAST_KINDS.has(e.kind)) continue;
+        if (OWN_ONLY.has(e.kind) && e.country !== state.meta.playerCountry) continue;
+        pushToast(e);
+      }
     }
 
     // Outcome overlay.
@@ -322,8 +408,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       if (status === 'playing') {
         outcome.classList.remove('is-shown');
       } else {
-        setText(outcomeTitle, status === 'victory' ? 'VICTORY' : 'DEFEAT');
-        setText(outcomeSub, 'reason' in state.outcome ? state.outcome.reason : '');
+        setText(outcomeTitle, status === 'victory' ? UI.victory : UI.defeat);
+        setText(outcomeSub,
+          'reason' in state.outcome ? outcomeReason(state.outcome.reason) : '');
         outcome.classList.add('is-shown');
         outcome.classList.toggle('is-defeat', status === 'defeat');
       }

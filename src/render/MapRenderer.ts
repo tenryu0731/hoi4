@@ -14,7 +14,8 @@ import {
 } from './textures';
 import { NATIONS } from '../sim/scenario/nations';
 import { LabelLayer } from './layers/LabelLayer';
-import { UnitLayer } from './layers/UnitLayer';
+import { UnitLayer, type DragOrder } from './layers/UnitLayer';
+import { country } from '../ui/strings';
 
 /**
  * Draws the map.
@@ -183,12 +184,13 @@ export class MapRenderer {
 
     // Nation display names come from the scenario table rather than the map,
     // which only stores tags.
-    const countryNames = new Map<string, string>(NATIONS.map((n) => [n.tag, n.name]));
+    const countryNames = new Map<string, string>(NATIONS.map((n) => [n.tag, country(n.tag)]));
     this.labels = new LabelLayer(this.index, countryNames);
     this.world.addChild(this.labels.container);
 
     this.units = new UnitLayer(this.index);
     this.world.addChild(this.units.container);
+    this.world.addChild(this.labels.topContainer);
   }
 
   /**
@@ -351,7 +353,13 @@ export class MapRenderer {
   // Colouring
   // -------------------------------------------------------------------------
 
+  /** The in-progress order drag, so the map can show where it would land. */
+  setDragOrder(drag: DragOrder | null): void {
+    this.units.setDrag(drag);
+  }
+
   setMapMode(mode: MapMode): void {
+    this.units.setNeutral(mode !== 'political');
     if (this.mode === mode) return;
     this.mode = mode;
     this.lastTintKey.fill('');
@@ -363,6 +371,7 @@ export class MapRenderer {
 
   setSelection(id: ProvinceId | null): void {
     this.selected = id;
+    this.units.setSelection(id);
   }
 
   setHover(id: ProvinceId | null): void {
@@ -474,7 +483,8 @@ export class MapRenderer {
     this.drawSelection();
     let reserved: readonly { x: number; y: number; w: number; h: number }[] = [];
     if (state) {
-      reserved = this.units.update(state, cam, this.staticMode ? 0 : this.elapsed);
+      reserved = this.units.update(state, cam, this.staticMode ? 0 : this.elapsed,
+        this.staticMode ? 1e6 : dtMs);
       this.drawFrontline(state);
     }
     this.labels.update(cam, reserved);
@@ -531,28 +541,61 @@ export class MapRenderer {
     }
   }
 
+  /**
+   * The front, drawn on the ground it actually runs along.
+   *
+   * This used to join province centroids with straight sticks, which is a
+   * debug view of the adjacency graph rather than a front line -- it cut across
+   * territory, ignored the coast, and at any realistic zoom was not findable on
+   * screen. The boundary two provinces share is recoverable from the map's arc
+   * topology, so the line can follow the real border.
+   *
+   * Two passes: a wide soft band that reads as pressure at a glance, and a hard
+   * line on top that says exactly where the boundary is. The shared geometry is
+   * cached per pair, because it only changes when a province changes hands.
+   */
   private drawFrontline(state: GameState): void {
     const g = this.frontLayer;
     g.clear();
     if (state.wars.length === 0) return;
     const zoom = Math.max(0.02, this.camera.zoom);
     const view = this.camera.visibleRect();
+    const pad = 60 / zoom;
 
+    const runs: number[][] = [];
     for (const p of this.index.provinces) {
-      if (p.centerX < view.minX || p.centerX > view.maxX) continue;
-      if (p.centerY < view.minY || p.centerY > view.maxY) continue;
-      const me = state.provinces[p.id].controller;
+      if (p.centerX < view.minX - pad || p.centerX > view.maxX + pad) continue;
+      if (p.centerY < view.minY - pad || p.centerY > view.maxY + pad) continue;
+      const me = state.provinces[p.id]?.controller;
+      if (me === undefined) continue;
       for (const nb of p.neighbors) {
+        // Each boundary belongs to exactly one of its two provinces, so it is
+        // walked once however many times the pair comes up.
         if (nb < p.id) continue;
-        const other = state.provinces[nb].controller;
-        if (me === other) continue;
+        const other = state.provinces[nb]?.controller;
+        if (other === undefined || me === other) continue;
         if (!state.countries[me].atWarWith.includes(other)) continue;
-        const q = this.index.provinces[nb];
-        g.moveTo(p.centerX, p.centerY);
-        g.lineTo(q.centerX, q.centerY);
+        runs.push(...this.sharedBorderCached(p.id, nb));
       }
     }
-    g.stroke({ color: PALETTE.frontline, width: 2.5 / zoom, alpha: 0.55, cap: 'round' });
+    if (runs.length === 0) return;
+
+    for (const r of runs) this.tracePolyline(g, r);
+    g.stroke({ color: PALETTE.frontline, width: 10 / zoom, alpha: 0.2, cap: 'round', join: 'round' });
+    for (const r of runs) this.tracePolyline(g, r);
+    g.stroke({ color: PALETTE.frontline, width: 3.2 / zoom, alpha: 0.95, cap: 'round', join: 'round' });
+  }
+
+  private frontCache = new Map<number, number[][]>();
+
+  private sharedBorderCached(a: ProvinceId, b: ProvinceId): number[][] {
+    const key = a * 100_000 + b;
+    let runs = this.frontCache.get(key);
+    if (runs === undefined) {
+      runs = this.index.sharedBorder(a, b);
+      this.frontCache.set(key, runs);
+    }
+    return runs;
   }
 
   /** Percentile helper for the perf harness. */

@@ -1,3 +1,4 @@
+import { effectiveTemplate, techModifiers } from '../research';
 import { TERRAIN } from '../core/data';
 import type {
   CountryId, Division, DivisionTemplate, GameState, ProvinceId,
@@ -17,8 +18,17 @@ import {
  * then crawls, which is the behaviour the period demands.
  */
 
-/** Hours of movement are scaled so a foot division covers ~110km/day on roads. */
-const KM_PER_HOUR_SCALE = 0.5;
+/**
+ * Marching speed is not road speed.
+ *
+ * Provinces here average 223km between centres -- HOI4's are a quarter of that
+ * -- so the scale has to be read against this map, not against a doctrine
+ * table. At 2.2 a foot division covers roughly 210km/day and crosses a typical
+ * province in under a day; at the 0.5 this used to be, a single hop took two
+ * and a half in-game days and nineteen real seconds, and an order looked
+ * exactly like an order that had been ignored.
+ */
+const KM_PER_HOUR_SCALE = 2.2;
 /** Nobody moves slower than this fraction of their nominal speed. */
 const MIN_SPEED_FACTOR = 0.15;
 /** A division may not move while its organisation is below this fraction. */
@@ -75,6 +85,65 @@ export function removeDivision(state: GameState, d: Division): void {
 // Orders
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Naval capability
+// ---------------------------------------------------------------------------
+
+/**
+ * Divisions a single dockyard can keep in transit.
+ *
+ * Crossing water used to be a pathfinding *cost* rather than a capability, so
+ * a foot infantry division walked the English Channel in under a day with no
+ * transports and no naval preparation, and Britain fell in about a fortnight
+ * to an army that had strolled there. A crossing now needs shipping, and a
+ * power with no dockyards cannot make one at all.
+ */
+const DIVISIONS_PER_DOCKYARD = 0.8;
+
+/** Convoys in the stockpile needed to lift one more division beyond that. */
+const CONVOYS_PER_DIVISION = 40;
+
+/** Hard ceiling, so a naval superpower still cannot move its whole army at once. */
+const MAX_SEALIFT = 24;
+
+/**
+ * Fraction of organisation a division keeps when it steps ashore.
+ *
+ * A landing is the most disorganised thing an army does, and without a penalty
+ * an amphibious assault is strictly better than a land attack -- it arrives
+ * where the enemy is not.
+ */
+const LANDING_ORG_KEPT = 0.35;
+
+/** How many divisions this country can have at sea at once. */
+export function sealiftCapacity(state: GameState, owner: CountryId): number {
+  const c = state.countries[owner];
+  const fromYards = c.economy.dockyards * DIVISIONS_PER_DOCKYARD;
+  const fromConvoys = (c.economy.stockpile.convoy ?? 0) / CONVOYS_PER_DIVISION;
+  const m = techModifiers(state, owner);
+  return Math.min(MAX_SEALIFT, Math.floor((fromYards + fromConvoys) * m.sealift));
+}
+
+/** Divisions of this country currently mid-crossing. */
+function sealiftInUse(state: GameState, ctx: MilitaryContext, owner: CountryId): number {
+  let n = 0;
+  for (const d of state.divisions) {
+    if (d.dead || d.owner !== owner || d.path.length === 0) continue;
+    if (ctx.index.isSeaLink(d.provinceId, d.path[0])) n++;
+  }
+  return n;
+}
+
+/** True when any step of this route crosses water. */
+function routeCrossesSea(ctx: MilitaryContext, from: ProvinceId, path: ProvinceId[]): boolean {
+  let prev = from;
+  for (const step of path) {
+    if (ctx.index.isSeaLink(prev, step)) return true;
+    prev = step;
+  }
+  return false;
+}
+
 /**
  * Routes a division toward a target. Enemy-held provinces are passable -- the
  * unit will attack into them -- but cost far more, so the pathfinder prefers to
@@ -98,6 +167,13 @@ export function orderMove(
     },
   });
   if (!path || path.length < 2) {
+    d.path = [];
+    return false;
+  }
+  // Refused outright rather than left queueing on a beach forever: a power with
+  // no shipping has no business being given an overseas order at all.
+  if (routeCrossesSea(ctx, d.provinceId, path.slice(1))
+      && sealiftCapacity(state, d.owner) <= 0) {
     d.path = [];
     return false;
   }
@@ -209,7 +285,7 @@ export function retreat(
     state.log.push({
       day: state.clock.totalDays,
       kind: 'combat',
-      text: `${state.countries[d.owner].tag}: a division was destroyed with no line of retreat`,
+      body: { k: 'divisionLost', country: state.countries[d.owner].tag },
       province: from,
       country: d.owner,
     });
@@ -263,7 +339,7 @@ export function captureProvince(
 export function movementSpeed(
   state: GameState, ctx: MilitaryContext, d: Division, into: ProvinceId,
 ): number {
-  const tpl = templateOf(state, d);
+  const tpl = effectiveTemplate(state, d.owner, templateOf(state, d));
   const geo = ctx.index.get(into);
   const terrain = TERRAIN[geo.terrain];
   const infra = state.states[geo.stateId]?.infrastructure ?? 1;
@@ -275,16 +351,30 @@ export function movementSpeed(
 
 function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): void {
   if (d.path.length === 0) return;
-  const tpl = templateOf(state, d);
+  const tpl = effectiveTemplate(state, d.owner, templateOf(state, d));
   if (d.org < tpl.maxOrg * MIN_ORG_TO_MOVE || d.retreatCooldown > 0) return;
 
   const next = d.path[0];
+  // Shipping is a live resource: a division waits on the quay until a hull is
+  // free, which is what stops an entire army crossing in one tide.
+  const crossing = ctx.index.isSeaLink(d.provinceId, next);
+  if (crossing && d.moveProgress === 0
+      && sealiftInUse(state, ctx, d.owner) >= sealiftCapacity(state, d.owner)) {
+    return;
+  }
   const distance = Math.max(1, ctx.index.distance(d.provinceId, next));
   const kmThisHour = movementSpeed(state, ctx, d, next);
   d.moveProgress += kmThisHour / distance;
   if (d.moveProgress < 1) return;
 
   d.moveProgress = 0;
+  if (crossing) {
+    // Ashore, and disorganised. Without this an amphibious assault is strictly
+    // better than a land attack, because it arrives where the enemy is not.
+    const tplNow = effectiveTemplate(state, d.owner, templateOf(state, d));
+    const kept = Math.min(0.9, LANDING_ORG_KEPT * techModifiers(state, d.owner).landingOrg);
+    d.org = Math.min(d.org, tplNow.maxOrg * kept);
+  }
   const controller = state.provinces[next].controller;
 
   if (isHostile(state, d.owner, controller)) {
@@ -308,7 +398,12 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
       state.log.push({
         day: state.clock.totalDays,
         kind: 'combat',
-        text: `${state.countries[d.owner].tag} attacks ${state.countries[controller].tag} at ${ctx.index.get(next).name}`,
+        body: {
+          k: 'attack',
+          attacker: state.countries[d.owner].tag,
+          defender: state.countries[controller].tag,
+          province: next,
+        },
         province: next,
         country: d.owner,
       });

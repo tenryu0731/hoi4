@@ -112,7 +112,26 @@ test.describe('touch input', () => {
     // The sheet is titled with the place, and names its owner underneath.
     const expected = await page.evaluate((id) => window.__game!.index.get(id).name, pos.id);
     await expect(page.locator('.hud-sheet-title')).toHaveText(expected);
-    await expect(page.locator('.panel-sub')).toContainText('France');
+    await expect(page.locator('.panel-sub')).toContainText('フランス');
+  });
+
+  test('a slow tap still selects', async ({ page }) => {
+    // A thumb resting for a third of a second is an ordinary tap, not a
+    // gesture. This used to fall between the tap deadline and the hold timer
+    // and register as nothing at all.
+    await bootGame(page);
+    await page.evaluate(() => {
+      const g = window.__game!;
+      const p = g.index.provinces.find((q) => q.ownerTag === 'FRA')!;
+      g.renderer.camera.centerOn(p.centerX, p.centerY);
+      g.renderer.camera.zoom = 0.25;
+      g.tickFrame(16);
+    });
+    const pos = await provinceScreenPos(page, 'FRA');
+    await tapAt(page, pos.x, pos.y, 360);
+
+    expect(await page.evaluate(() => window.__game!.selection.province)).toBe(pos.id);
+    await expect(page.locator('.hud-sheet')).toHaveClass(/is-open/);
   });
 
   test('a drag does not register as a tap', async ({ page }) => {
@@ -148,16 +167,49 @@ test.describe('touch input', () => {
     await swipe(page, from, to, 16);
     await page.waitForTimeout(200);
 
-    const issued = await page.evaluate(() => {
+    // The order must be live on the divisions without the clock being stepped.
+    // Pausing to give orders is how this genre is played, and a queue that is
+    // only read on the hour never runs at all while the game is paused.
+    const ordered = await page.evaluate(() => {
       const g = window.__game!;
-      // The queue drains on the next simulation hour; step one to flush it.
-      const seen: unknown[] = [];
-      g.onCommand = (_state, cmd) => { seen.push(cmd); };
-      g.stepHours(1);
-      return seen;
+      return g.selection.divisions.map((d) => g.state.divisions[d].order);
     });
-    expect(issued.length).toBeGreaterThan(0);
-    expect(issued[0]).toMatchObject({ t: 'moveDivisions', target: setup.to });
+    expect(ordered.length).toBeGreaterThan(0);
+    for (const order of ordered) {
+      expect(order).toMatchObject({ kind: 'move', target: setup.to });
+    }
+  });
+
+  test('orders given while paused take effect', async ({ page }) => {
+    await bootGame(page, { static: false });
+    await page.locator('.hud-pause').click();
+
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const ger = g.index.provinces.find((p) => p.ownerTag === 'GER')!;
+      const target = g.index.provinces.find((p) => p.ownerTag === 'POL')!;
+      g.renderer.camera.centerOn(
+        (ger.centerX + target.centerX) / 2,
+        (ger.centerY + target.centerY) / 2,
+      );
+      g.renderer.camera.zoom = 0.22;
+      g.tickFrame(16);
+      g.selectProvince(ger.id);
+      return { to: target.id, speed: g.time.speed, selected: g.selection.divisions.length };
+    });
+    expect(setup.speed).toBe(0);
+    expect(setup.selected).toBeGreaterThan(0);
+
+    await swipe(page, await provinceScreenPos(page, 'GER'), await provinceScreenPos(page, 'POL'), 16);
+    await page.waitForTimeout(300);
+
+    const state = await page.evaluate(() => {
+      const g = window.__game!;
+      const d = g.state.divisions[g.selection.divisions[0]];
+      return { order: d.order, path: d.path.length, hours: g.time.hours };
+    });
+    expect(state.order).toMatchObject({ kind: 'move', target: setup.to });
+    expect(state.path).toBeGreaterThan(0);
   });
 
   test('map mode buttons recolour without errors', async ({ page }) => {

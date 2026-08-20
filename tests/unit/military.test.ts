@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
+import { Simulation } from '../../src/sim/Simulation';
+
 import {
   ORG_RECOVERY_PER_HOUR, effectiveness, equipmentRatio, findCombatAt,
   resolveCombatRound, tickDivisionUpkeep,
 } from '../../src/sim/military/combat';
 import {
   captureProvince, isHostile, movementSpeed, orderMove, placeDivision,
-  retreat, tickMilitaryHourly, tickReinforcementDaily,
+  retreat, sealiftCapacity, tickMilitaryHourly, tickReinforcementDaily,
 } from '../../src/sim/military/movement';
 import {
   computeSupply, encircledProvinces, supplySources, tickSupplyDaily,
@@ -734,5 +736,133 @@ describe('territory control', () => {
     placeDivision(f.state, d, b);
     expect(f.state.provinces[a].divisions).not.toContain(d.id);
     expect(f.state.provinces[b].divisions).toContain(d.id);
+  });
+});
+
+/**
+ * Division designer.
+ *
+ * The command was a stub that accepted and discarded everything, so a player
+ * could compose a division and get nothing. These fix the contract the panel
+ * relies on: what it previews is what the simulation fights with.
+ */
+describe('division templates', () => {
+  it('adds a designed template that the country can then recruit', () => {
+    const f = makeFixture({ seed: 7, playerTag: 'GER' });
+    const sim = new Simulation(f.state, f.index);
+    const me = f.state.countries[f.state.meta.playerCountry];
+    const before = me.templates.length;
+
+    sim.execute({
+      t: 'createTemplate', country: me.id, name: '試製師団',
+      battalions: ['infantry', 'infantry', 'artillery'], supports: ['engineer'],
+    });
+
+    expect(me.templates).toHaveLength(before + 1);
+    const tpl = me.templates[me.templates.length - 1];
+    expect(tpl.name).toBe('試製師団');
+    expect(tpl.battalions).toEqual(['infantry', 'infantry', 'artillery']);
+    expect(tpl.softAttack).toBeGreaterThan(0);
+    expect(tpl.equipmentNeed.infantry_equipment).toBeGreaterThan(0);
+  });
+
+  it('replaces a template of the same name rather than piling up duplicates', () => {
+    const f = makeFixture({ seed: 7, playerTag: 'GER' });
+    const sim = new Simulation(f.state, f.index);
+    const me = f.state.countries[f.state.meta.playerCountry];
+    const first = me.templates[0];
+
+    sim.execute({
+      t: 'createTemplate', country: me.id, name: first.name,
+      battalions: ['medium_armor', 'medium_armor'], supports: [],
+    });
+
+    expect(me.templates.filter((t) => t.name === first.name)).toHaveLength(1);
+    expect(me.templates[0].battalions).toEqual(['medium_armor', 'medium_armor']);
+    // Same id, so divisions already in the field follow the edited template.
+    expect(me.templates[0].id).toBe(first.id);
+  });
+
+  it('refuses an empty division and caps an absurd one', () => {
+    const f = makeFixture({ seed: 7, playerTag: 'GER' });
+    const sim = new Simulation(f.state, f.index);
+    const me = f.state.countries[f.state.meta.playerCountry];
+    const before = me.templates.length;
+
+    sim.execute({ t: 'createTemplate', country: me.id, name: 'x', battalions: [], supports: [] });
+    expect(me.templates).toHaveLength(before);
+
+    sim.execute({
+      t: 'createTemplate', country: me.id, name: '巨大',
+      battalions: new Array(60).fill('infantry'),
+      supports: ['engineer', 'engineer', 'recon'],
+    });
+    const huge = me.templates[me.templates.length - 1];
+    expect(huge.battalions.length).toBeLessThanOrEqual(24);
+    // Duplicate support companies collapse: they are a modifier, not a stack.
+    expect(new Set(huge.supports).size).toBe(huge.supports.length);
+  });
+});
+
+/**
+ * Crossing water is a capability, not a discount.
+ *
+ * It used to be a pathfinding cost multiplier, so foot infantry walked the
+ * English Channel with no transports and Britain fell to an army that had
+ * strolled there.
+ */
+describe('sealift', () => {
+  it('scales capacity with dockyards and denies it to landlocked powers', () => {
+    const f = makeFixture({ seed: 1, playerTag: 'GER' });
+    const byTag = (t: string) => f.state.countries.find((c) => c.tag === t)!;
+    const eng = byTag('ENG');
+    const swi = byTag('SWI');
+    expect(swi.economy.dockyards).toBe(0);
+    expect(sealiftCapacity(f.state, swi.id)).toBe(0);
+    expect(sealiftCapacity(f.state, eng.id)).toBeGreaterThan(0);
+    // More yards, more hulls.
+    expect(sealiftCapacity(f.state, eng.id))
+      .toBeGreaterThan(sealiftCapacity(f.state, byTag('GER').id));
+  });
+
+  it('refuses an overseas order to a power with no shipping', () => {
+    const f = makeFixture({ seed: 1, playerTag: 'GER' });
+    const swi = f.state.countries.find((c) => c.tag === 'SWI')!;
+    swi.economy.dockyards = 0;
+    swi.economy.stockpile.convoy = 0;
+    const home = f.index.provinces.find((p) => f.state.provinces[p.id].owner === swi.id)!;
+    // Somewhere only reachable across water.
+    const overseas = f.index.provinces.find((p) => p.ownerTag === 'ENG');
+    if (!overseas) return;
+    const d = spawnDivision(f.state, swi.id, swi.templates[0].id, home.id, 1);
+    expect(orderMove(f.state, ctxOf(f), d, overseas.id)).toBe(false);
+    expect(d.path).toEqual([]);
+  });
+});
+
+/**
+ * Every template computes a supplyUse, and until recently nothing consumed it,
+ * so thirty divisions on one tile were supplied as well as three.
+ */
+describe('supply throughput', () => {
+  it('starves a province that is stacked beyond its infrastructure', () => {
+    const measure = (n: number): number => {
+      const f = makeFixture({ seed: 1, playerTag: 'GER' });
+      const ger = f.state.countries.find((c) => c.tag === 'GER')!;
+      const pol = f.state.countries.find((c) => c.tag === 'POL')!;
+      declareWar(f.state, ger.id, pol.id);
+      const prov = f.index.provinces.find((p) => f.state.provinces[p.id].owner === ger.id)!.id;
+      for (const id of [...f.state.provinces[prov].divisions]) f.state.divisions[id].dead = true;
+      f.state.provinces[prov].divisions = [];
+      for (let i = 0; i < n; i++) {
+        spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, prov, 1);
+      }
+      tickSupplyDaily(f.state, f.index);
+      return f.state.provinces[prov].supply;
+    };
+    const light = measure(4);
+    const heavy = measure(30);
+    expect(light).toBeGreaterThan(0);
+    expect(heavy).toBeLessThan(light * 0.6);
   });
 });
