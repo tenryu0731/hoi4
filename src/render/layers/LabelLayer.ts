@@ -170,9 +170,18 @@ export class LabelLayer {
     // Country names first. Without them a zoomed-out map is a mosaic of a
     // few hundred place names and no sense of who holds what.
     for (const c of this.collectCountries()) {
+      // Sized by how much room the country has, not by one number for all of
+      // them. Measured at a flat 15 a country name rendered 9.9px tall next to
+      // a 19.3px counter -- half the height of a division marker, for the name
+      // of a nation -- and a flat 34 fitted only 17 of the 28 names that used
+      // to show, because Luxembourg has nowhere to put one. The real game sets
+      // its country names at roughly 3.25x its own counters, and this reaches
+      // that for the countries with the space and steps down for the rest.
+      const room = Math.sqrt(c.width * c.height);
+      const size = Math.max(16, Math.min(40, room * 0.055));
       this.makeLabel(
         c.name.toUpperCase(), FONT_COUNTRY,
-        c.x, c.y, 0, 15, c.area,
+        c.x, c.y, 0, size, c.area,
         c.width, c.height,
         this.countryLabels,
       );
