@@ -50,6 +50,9 @@ export const UI = {
 
   // National focus
   focusTree: '方針ツリー',
+  focusAvailable: '着手できる方針',
+  focusLocked: '前提を満たしていない方針',
+  focusCompleted: '完了した方針',
   currentFocus: '進行中の方針',
   startFocus: '開始',
   cancelFocus: '中止',

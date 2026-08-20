@@ -65,6 +65,11 @@ function setText(node: HTMLElement, value: string): void {
   if (node.textContent !== value) node.textContent = value;
 }
 
+/** Assets are served from the base path, which is not "/" on GitHub Pages. */
+function flagUrl(tag: string): string {
+  return `${import.meta.env.BASE_URL}assets/flags/${tag}.svg`;
+}
+
 export function formatNumber(n: number): string {
   const v = Math.round(n);
   if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
@@ -537,8 +542,17 @@ export const diplomacyPanel: Panel = {
       const row = el('div', 'panel-row');
       row.dataset.country = String(c.id);
 
-      const swatch = el('i', 'panel-swatch');
+      // A framed flag, as HOI4 puts on every country row. Thirty flags ship
+      // with the game and exactly one of them was being used -- the player's
+      // own, in the top bar -- while this list identified twenty-nine nations
+      // by a 12px square of their map colour.
+      const swatch = el('img', 'panel-flag');
+      swatch.alt = '';
+      swatch.src = flagUrl(c.tag);
+      // The map colour is the fallback, so a country without artwork still
+      // reads rather than leaving a hole in the row.
       swatch.style.background = `rgb(${c.color[0]},${c.color[1]},${c.color[2]})`;
+      swatch.addEventListener('error', () => { swatch.removeAttribute('src'); });
 
       const main = el('div', 'panel-row-main');
       main.append(
@@ -708,6 +722,44 @@ export const provincePanel: Panel = {
     }
   },
 };
+
+/**
+ * A collapsible section.
+ *
+ * The focus panel opened six and a half screens deep, because it listed every
+ * focus in the tree as a full card and at the 1936 start all but one of them
+ * is locked. What a player needs on opening is what is running and what can be
+ * started; the rest is reference, and reference belongs behind a heading you
+ * can open. The count is on the heading so the section says how much is inside
+ * without being opened.
+ *
+ * Open state is keyed by section so it survives the rebuild that every command
+ * triggers -- collapsing a section and having it spring back open on the next
+ * tick would be worse than not collapsing at all.
+ */
+const sectionOpen = new Map<string, boolean>();
+
+function section(key: string, label: string, count: number, openByDefault: boolean): {
+  head: HTMLElement;
+  body: HTMLElement;
+} {
+  const open = sectionOpen.get(key) ?? openByDefault;
+  const head = el('button', 'panel-section', '');
+  const caret = el('i', 'panel-caret', '');
+  head.append(caret, el('span', 'panel-section-l', label), el('span', 'panel-section-n', String(count)));
+  const body = el('div', 'panel-list');
+  const apply = (v: boolean) => {
+    head.classList.toggle('is-open', v);
+    body.style.display = v ? '' : 'none';
+  };
+  apply(open);
+  head.addEventListener('click', () => {
+    const next = !(sectionOpen.get(key) ?? openByDefault);
+    sectionOpen.set(key, next);
+    apply(next);
+  });
+  return { head, body };
+}
 
 function stat(label: string, value: string): HTMLElement {
   const box = el('div', 'hud-stat');
@@ -938,10 +990,11 @@ export const focusPanel: Panel = {
       root.append(row);
     }
 
-    root.append(el('div', 'panel-label', UI.focusTree));
-    const list = el('div', 'panel-list');
-    for (const v of views) {
-      if (v.current) continue;
+    const open = views.filter((v) => !v.current && !v.completed && v.selectable);
+    const locked = views.filter((v) => !v.current && !v.completed && !v.selectable);
+    const done = views.filter((v) => v.completed);
+
+    const card = (v: (typeof views)[number]): HTMLElement => {
       const row = el('div', 'panel-focus');
       row.classList.toggle('is-done', v.completed);
       row.classList.toggle('is-locked', !v.selectable && !v.completed);
@@ -964,9 +1017,19 @@ export const focusPanel: Panel = {
       } else {
         row.append(el('div', 'panel-focus-block', v.blockText ?? UI.locked));
       }
-      list.append(row);
+      return row;
+    };
+
+    for (const [key, label, items, byDefault] of [
+      ['focus.open', UI.focusAvailable, open, true],
+      ['focus.locked', UI.focusLocked, locked, false],
+      ['focus.done', UI.focusCompleted, done, false],
+    ] as const) {
+      if (items.length === 0) continue;
+      const sec = section(key, label, items.length, byDefault);
+      for (const v of items) sec.body.append(card(v));
+      root.append(sec.head, sec.body);
     }
-    root.append(list);
   },
   refresh(game, root) {
     // The tree only changes on a completion or a command, both of which rebuild.

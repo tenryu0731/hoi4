@@ -166,10 +166,10 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   topRow.append(flag, nameBox, el('div', 'hud-spacer'), clock);
 
   // --- resource strip ------------------------------------------------------
-  // Appended to the same row as the figures rather than absolutely positioned
-  // 48px down: that offset was measured against a one-row top bar and left the
-  // strip lying across the figures the moment the bar needed two rows.
-  const resStrip = stats;
+  // Its own row under the figures, not absolutely positioned 48px down: that
+  // offset was measured against a one-row top bar and left the strip lying
+  // across the figures the moment the bar needed two rows.
+  const resStrip = el('div', 'hud-resources');
   const resNodes: Partial<Record<ResourceType, HTMLElement>> = {};
   for (const r of RESOURCE_TYPES) {
     const chip = el('div', 'hud-res');
@@ -257,9 +257,12 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   outcomeCard.append(outcomeTitle, outcomeSub, outcomeAgain);
   outcome.append(outcomeCard);
 
-  const strip = el('div', 'hud-strip');
-  strip.append(stats);
-  top.append(topRow, strip);
+  // Two rows of chips, not one scrolling row. Eleven chips need 610px and the
+  // screen is 412: a third of the strip -- four of the six strategic resources
+  // -- was parked behind the fade with nothing to say it was there. Split by
+  // kind, each row fits, and the whole national position is visible at once
+  // the way it is in the real game.
+  top.append(topRow, stats, resStrip);
 
   root.append(top, modeBar, toasts, sheet, nav, outcome);
 
