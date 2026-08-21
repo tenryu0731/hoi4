@@ -43,19 +43,68 @@
     el.parentNode.appendChild(d);
   }
   window.__bootFail = show;
+
+  /* A build's chunk names are content hashes, so every deploy replaces them and
+     deletes the old ones. A returning visitor holding a cached index.html then
+     asks for a chunk that no longer exists and gets a 404 -- which is what
+     happened to assets/Hud-XWMYDJ55.js after a redeploy. Reloading picks up the
+     current index.html and its current chunk names. Once per session, so a
+     genuinely missing file cannot become a refresh loop. */
+  var RELOAD_KEY = 'hoi4.staleReload';
+  function looksStale(url) {
+    return /\/assets\/[^/]+-[A-Za-z0-9_-]{6,}\.(js|css)$/.test(String(url || ''));
+  }
+  function recover(url) {
+    try {
+      if (sessionStorage.getItem(RELOAD_KEY)) return false;
+      sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
+    } catch (err) {
+      return false;      /* private mode: fall through to the message */
+    }
+    location.reload();
+    return true;
+  }
+  function reportAsset(url) {
+    if (looksStale(url) && recover(url)) return;
+    /* Two different failures, and they used to share one message that named
+       only the second. A path under /src/ really is the dev entry point being
+       served raw; a hashed chunk is a build that went missing. */
+    if (/\/src\/|\.ts(\?|$)/.test(String(url || ''))) {
+      show('ゲームのコードを読み込めませんでした。',
+        'ブラウザが ' + url + ' を拒否しました。これは開発用のエントリポイントで、' +
+        'TypeScript のソースは Vite 上でしか実行できません。配信するには' +
+        'ビルド (npm run build) して dist/ を配信してください。');
+    } else {
+      show('ゲームのコードを読み込めませんでした。',
+        'ブラウザが ' + url + ' を読み込めませんでした。公開が更新された直後に' +
+        '古いページが残っていると起こります。再読み込みしても直らない場合は、' +
+        'ブラウザのキャッシュを消してください。');
+    }
+  }
+
+  /* Vite raises this when a dynamically imported chunk fails to load, which is
+     exactly the stale-deploy case and does not surface as a script error. */
+  window.addEventListener('vite:preloadError', function (e) {
+    var url = (e && e.payload && e.payload.message) || '';
+    if (recover(url)) { e.preventDefault(); return; }
+    reportAsset(url);
+  });
+
   window.addEventListener('error', function (e) {
     var t = e.target;
     if (t && t !== window && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
-      show('ゲームのコードを読み込めませんでした。',
-        'ブラウザが ' + (t.src || t.href) + ' を拒否しました。このページは開発用の' +
-        'エントリポイントで、TypeScript のソースは Vite 上でしか実行できません。' +
-        '配信するにはビルド (npm run build) して dist/ を配信してください。');
+      reportAsset(t.src || t.href);
       return;
     }
     show('起動エラー。', String((e && e.message) || e));
   }, true);
   window.addEventListener('unhandledrejection', function (e) {
-    show('起動エラー。', String((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+    var reason = (e && e.reason) || {};
+    var text = String(reason.stack || reason.message || e.reason);
+    /* A failed dynamic import arrives here as a rejection naming the chunk. */
+    var m = text.match(/https?:\/\/[^\s'")]+/);
+    if (m && looksStale(m[0])) { reportAsset(m[0]); return; }
+    show('起動エラー。', text);
   });
   setTimeout(function () {
     if (!window.__bootStarted) {
