@@ -48,6 +48,7 @@ export const UI = {
   navPolitics: '政治',
   fuel: '燃料',
   priority: '優先度',
+  airStrength: '航空戦力',
   priorityNames: ['低', '並', '高', '最'] as const,
   alertFuel: '燃料が不足しています。機甲・自動車化部隊が動けません',
   alertIdleFactories: '民需工場が遊んでいます。建設を指示してください',

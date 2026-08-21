@@ -125,7 +125,16 @@ const ARMOUR_FRACTION = 0.2;
  * in, so anything above zero is every nation burning a tenth of its economy on
  * items that cannot affect a single battle.
  */
-const AIR_SHARE = 0;
+/**
+ * Share of military industry that goes to aircraft.
+ *
+ * This was 0 with a comment saying there was no air layer to fly them in --
+ * but `desiredMix` still listed fighters last and the allocator hands the last
+ * entry the rounding remainder, so between 2% and 4% of Europe's military
+ * industry went into them anyway. There is an air layer now, so the share is
+ * real and deliberate rather than an artefact of a rounding rule.
+ */
+const AIR_SHARE = 0.12;
 
 /**
  * Factory allocation, derived from what the army actually eats.

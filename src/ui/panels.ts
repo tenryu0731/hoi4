@@ -19,6 +19,7 @@ import {
 import { CONSCRIPTION_NAME, ECONOMY_NAME } from './lawNames';
 import { ENTRENCHMENT_PER_LEVEL } from '../sim/military/movement';
 import { winterSeverity } from '../sim/military/weather';
+import { airStrength } from '../sim/military/air';
 import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
 import { availableFocuses } from '../sim/focus';
 import {
@@ -1142,6 +1143,7 @@ export const commandPanel: Panel = {
       stat(UI.divisions, String(state.divisions.filter(
         (d) => d.owner === me.id && !d.dead).length)),
       stat(UI.unassigned, String(loose)),
+      stat(UI.airStrength, formatNumber(Math.round(airStrength(state, me.id)))),
     );
     root.append(head);
 

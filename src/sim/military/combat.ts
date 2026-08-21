@@ -1,7 +1,8 @@
-import { effectiveTemplate, techModifiers } from '../research';
+import { effectiveTemplate } from '../research';
 import { armyById, commandModifiers } from './command';
 import { ENTRENCHMENT_PER_LEVEL } from './movement';
 import { DRY_HARD_ATTACK, fuelPenalty } from '../economy/fuel';
+import { airAdvantage, airMultiplier } from './air';
 import {
   WINTER_ATTACK_PENALTY, WINTER_SPECIALIST_RELIEF, winterSeverity,
 } from './weather';
@@ -417,12 +418,18 @@ export function resolveCombatRound(
   if (winter > 0 && sideHasTrait(state, combat.attackers, 'winter_specialist')) {
     winter *= 1 - WINTER_SPECIALIST_RELIEF;
   }
+  // Air power, measured against the size of the battle rather than applied
+  // flat. The multiplier used to be the air technology modifier on its own,
+  // which meant it applied at full strength to a country that had never built
+  // an aeroplane -- and the aeroplanes it did build had all-zero combat stats
+  // and could not affect anything.
+  const engaged = att.engaged.length + def.engaged.length;
+  const air = airAdvantage(state, combat.attackerCountry, combat.defenderCountry, engaged);
   const attackerMod = terrain.attackMod * ATTACKER_PENALTY
     * (1 - Math.min(0.6, fort * 0.12))
     * (1 - WINTER_ATTACK_PENALTY * winter)
-    * techModifiers(state, combat.attackerCountry).airSupport;
-  const defenderMod = terrain.defenceMod
-    * techModifiers(state, combat.defenderCountry).airSupport;
+    * airMultiplier(air);
+  const defenderMod = terrain.defenceMod * airMultiplier(-air);
 
   const attRoll = jitter(state.rng, COMBAT_JITTER);
   const defRoll = jitter(state.rng, COMBAT_JITTER);

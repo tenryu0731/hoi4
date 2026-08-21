@@ -1,5 +1,6 @@
 import type { Command } from './core/commands';
 import { tickFuelDaily } from './economy/fuel';
+import { tickAirDaily } from './military/air';
 import { changeLaw, tickPoliticsDaily } from './politics/politics';
 import { deriveTemplate, recomputeCountryStats, spawnDivision } from './scenario/europe1936';
 import type { EquipmentType, GameState } from './core/types';
@@ -296,6 +297,7 @@ export class Simulation {
       tickEconomyDaily(state, this.ctx);
       tickPoliticsDaily(state, (id) => occupationRatio(state, id));
       tickFuelDaily(state);
+      tickAirDaily(state);
       tickConditionsDaily(state, this.index);
       tickReinforcementDaily(state);
       tickResearchDaily(state);
