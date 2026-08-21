@@ -260,6 +260,7 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       dockyards: s.dockyards,
       infrastructure: s.infrastructure,
       provinces: index.provinces.filter((p) => p.stateId === s.id).map((p) => p.id),
+      resistance: 0,
       manpowerPool: s.manpower,
       buildingSlots: s.buildingSlots,
     };

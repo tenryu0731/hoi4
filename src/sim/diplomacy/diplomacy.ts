@@ -1,4 +1,5 @@
 import { randRange } from '../core/rng';
+import { INITIAL_RESISTANCE } from '../economy/occupation';
 import { surrenderTolerance } from '../politics/politics';
 import type {
   CountryId, GameState, ProvinceId, War,
@@ -376,7 +377,14 @@ function absorbCountry(
     if (members.length === 0) continue;
     const holder = state.provinces[members[0]].controller;
     if (members.every((id) => state.provinces[id].controller === holder)) {
-      st.controller = holder;
+      if (st.controller !== holder) {
+        st.controller = holder;
+        // Territory taken from a beaten country is occupied, not owned: it
+        // resists until it is garrisoned. Without this, mass conquest through
+        // capitulation -- which is how most territory changes hands -- never
+        // raised any resistance at all.
+        st.resistance = st.owner === holder ? 0 : INITIAL_RESISTANCE;
+      }
     }
   }
 

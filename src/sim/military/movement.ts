@@ -1,6 +1,7 @@
 import { effectiveTemplate, techModifiers } from '../research';
 import { commandModifiers } from './command';
 import { DRY_SPEED, fuelPenalty } from '../economy/fuel';
+import { INITIAL_RESISTANCE } from '../economy/occupation';
 import {
   WINTER_ATTRITION_PER_DAY, WINTER_SPECIALIST_RELIEF, winterSeverity,
 } from './weather';
@@ -346,7 +347,13 @@ export function captureProvince(
   const stateId = ctx.index.get(province).stateId;
   const members = ctx.index.data.states[stateId].provinces;
   if (members.every((id) => state.provinces[id].controller === by)) {
-    state.states[stateId].controller = by;
+    const st = state.states[stateId];
+    if (st.controller !== by) {
+      st.controller = by;
+      // Ground taken from someone else starts restive; ground you are taking
+      // back is your own, and settles the moment you hold it.
+      st.resistance = st.owner === by ? 0 : INITIAL_RESISTANCE;
+    }
   }
 }
 

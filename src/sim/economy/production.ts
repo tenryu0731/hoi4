@@ -1,4 +1,5 @@
 import { techModifiers } from '../research';
+import { occupiedOutput } from './occupation';
 import { lawEffects, politicalPowerPerDay } from '../politics/politics';
 import {
   BASE_EFFICIENCY, BASE_EFFICIENCY_CAP, BUILDING_CAP, BUILDING_COST,
@@ -55,10 +56,13 @@ export function computeResourceOutput(
   const staticStates = index.data.states;
   for (let i = 0; i < staticStates.length; i++) {
     if (state.states[i].controller !== country) continue;
+    // Mines in a restive province produce for the occupier at a discount, the
+    // same way its factories do.
+    const collected = yieldBonus * occupiedOutput(state.states[i]);
     const res = staticStates[i].resources;
     for (const r of RESOURCE_TYPES) {
       const v = res[r];
-      if (v) out[r] += v * yieldBonus;
+      if (v) out[r] += v * collected;
     }
   }
   return out;
@@ -86,10 +90,16 @@ export function recomputeFactories(state: GameState, country: CountryId): void {
   let dock = 0;
   for (const s of state.states) {
     if (s.controller !== country) continue;
-    civ += s.civilianFactories;
-    mil += s.militaryFactories;
-    dock += s.dockyards;
+    // A restive province runs its factories at a fraction of what they are
+    // worth, so a conquest has to be digested rather than banked.
+    const yield_ = occupiedOutput(s);
+    civ += s.civilianFactories * yield_;
+    mil += s.militaryFactories * yield_;
+    dock += s.dockyards * yield_;
   }
+  civ = Math.floor(civ);
+  mil = Math.floor(mil);
+  dock = Math.floor(dock);
   c.economy.civilianFactories = civ;
   c.economy.militaryFactories = mil;
   c.economy.dockyards = dock;

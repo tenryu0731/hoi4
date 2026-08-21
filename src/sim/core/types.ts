@@ -415,6 +415,12 @@ export interface StateRuntime {
   militaryFactories: number;
   dockyards: number;
   infrastructure: number;
+  /**
+   * How much of this state is fighting its occupier, 0..1.
+   *
+   * Zero on home ground by definition; see sim/economy/occupation.
+   */
+  resistance: number;
   /** Remaining recruitable population, in thousands. */
   manpowerPool: number;
   /** Shared civilian + military factory slots. */

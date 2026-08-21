@@ -686,6 +686,11 @@ export const provincePanel: Panel = {
     head.dataset.role = 'prov-head';
     head.append(stat(UI.victoryPoints, String(geo.vp)), stat(UI.supplyLevel, '—'),
       stat(UI.totalDivisions, '0'));
+    // Only where it applies: home ground never resists.
+    const st = state.states[geo.stateId];
+    if (st.owner !== st.controller) {
+      head.append(stat(UI.resistance, `${Math.round(st.resistance * 100)}%`));
+    }
     root.append(head);
 
     const sub = el('div', 'panel-sub');
