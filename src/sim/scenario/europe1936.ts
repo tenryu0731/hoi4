@@ -10,6 +10,8 @@ import {
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 import { NATIONS, NATION_BY_TAG, type NationDef } from './nations';
 import { commandersFor } from '../military/commanderData';
+import { ECONOMY, startingLaws } from '../politics/lawData';
+import { templateFuelUse } from '../economy/fuel';
 import {
   appointCommander, ARMY_GROUP_LIMIT, ARMY_GROUP_NAME, assignDivisions, COMMAND_LIMIT,
   createArmy, nextArmyName, setArmyParent,
@@ -117,6 +119,7 @@ export function deriveTemplate(
     hardness: hardnessDen > 0 ? Math.round((hardnessNum / hardnessDen) * 100) / 100 : 0,
     speedKmh: speed === Infinity ? 4 : speed,
     supplyUse: Math.round(supplyUse * 100) / 100,
+    fuelUse: templateFuelUse(equipmentNeed),
     width,
     equipmentNeed,
     manpowerNeed,
@@ -160,13 +163,16 @@ function emptyEconomy(n: NationDef): Economy {
     civilianFactories: n.civilianFactories,
     militaryFactories: n.militaryFactories,
     dockyards: n.dockyards,
-    // A peacetime economy sinks most of its civilian industry into consumer
-    // goods; war economy laws claw that back later.
-    consumerGoodsRatio: n.major ? 0.3 : 0.35,
+    // Set from the country's economy law on the first economic tick; this is
+    // only the value it shows before that runs.
+    consumerGoodsRatio: ECONOMY[startingLaws(n.ideology, n.major).economy].consumerGoods,
     stockpile,
     resources,
     manpower: Math.round(n.population * 1000 * 1.5),
     politicalPower: 25,
+    // Everyone begins with tanks in the sheds and a tank's worth of fuel.
+    fuel: 600,
+    fuelRatio: 1,
     freeCivilianFactories: 0,
   };
 }
@@ -194,14 +200,17 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       ideology: n.ideology,
       isAI: tag !== playerTag,
       major: n.major,
+      // The 1936 start is a race because the dictatorships begin further up
+      // both ladders than the democracies do; see politics/lawData.
+      stability: n.ideology === 'democratic' ? 0.75 : 0.6,
+      warSupport: n.ideology === 'democratic' ? 0.1 : 0.25,
+      laws: startingLaws(n.ideology, n.major),
       economy: emptyEconomy(n),
       productionLines: [],
       constructionQueue: [],
       templates: defaultTemplates(),
       research: {
         slots: n.major ? 3 : 2,
-        levels: { infantry: 0, armor: 0, air: 0, industry: 0 },
-        progress: { infantry: 0, armor: 0, air: 0, industry: 0 },
       },
       diplomacy: {
         opinion: new Array(orderedTags.length).fill(0),
@@ -250,6 +259,8 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       militaryFactories: s.militaryFactories,
       dockyards: s.dockyards,
       infrastructure: s.infrastructure,
+      provinces: index.provinces.filter((p) => p.stateId === s.id).map((p) => p.id),
+      resistance: 0,
       manpowerPool: s.manpower,
       buildingSlots: s.buildingSlots,
     };

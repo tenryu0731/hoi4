@@ -1,4 +1,5 @@
 import type { GameClock } from '../time/calendar';
+import type { ConscriptionLaw, EconomyLaw } from '../politics/lawData';
 import type { RngState } from './rng';
 
 export type CountryId = number;
@@ -106,6 +107,15 @@ export interface Economy {
   resources: Record<ResourceType, ResourceFlow>;
   manpower: number;
   politicalPower: number;
+  /** Fuel in store; see sim/economy/fuel. */
+  fuel: number;
+  /**
+   * How much of yesterday's fuel demand was met, 0..1.
+   *
+   * Cached here so movement and combat see the same figure within a tick
+   * without either of them walking the division list again.
+   */
+  fuelRatio: number;
   /** Cached: civilian factories actually available for construction. */
   freeCivilianFactories: number;
 }
@@ -157,6 +167,8 @@ export interface DivisionTemplate {
   hardness: number;
   speedKmh: number;
   supplyUse: number;
+  /** Daily fuel draw; zero for a formation that marches. */
+  fuelUse: number;
   /** Combat width consumed in a battle. */
   width: number;
   equipmentNeed: Partial<Record<EquipmentType, number>>;
@@ -390,10 +402,25 @@ export interface ProvinceState {
 export interface StateRuntime {
   owner: CountryId;
   controller: CountryId;
+  /**
+   * The provinces this state is made of, in id order.
+   *
+   * Fixed at scenario creation -- a province never changes which state it
+   * belongs to, only who holds it -- and cached here so the economy can reach
+   * from a state to its ground without every function that needs to do so
+   * having to carry a ProvinceIndex.
+   */
+  provinces: readonly ProvinceId[];
   civilianFactories: number;
   militaryFactories: number;
   dockyards: number;
   infrastructure: number;
+  /**
+   * How much of this state is fighting its occupier, 0..1.
+   *
+   * Zero on home ground by definition; see sim/economy/occupation.
+   */
+  resistance: number;
   /** Remaining recruitable population, in thousands. */
   manpowerPool: number;
   /** Shared civilian + military factory slots. */
@@ -430,12 +457,6 @@ export interface ResearchState {
   active?: ResearchSlot[];
   /** Technologies finished, in completion order. */
   completed?: TechId[];
-  /**
-   * The pre-tree drip, kept because production.ts still reads
-   * `levels.industry`. Nothing in sim/research writes either field.
-   */
-  levels: { infantry: number; armor: number; air: number; industry: number };
-  progress: { infantry: number; armor: number; air: number; industry: number };
 }
 
 /**
@@ -472,6 +493,25 @@ export interface Country {
   color: [number, number, number];
   capital: ProvinceId;
   ideology: Ideology;
+  /**
+   * How firmly the government is in the saddle, 0..1.
+   *
+   * Spent by conscription laws and by being at war; buys political power and
+   * keeps industry off consumer goods.
+   */
+  stability: number;
+  /**
+   * How far the nation will follow the government into a war, 0..1.
+   *
+   * Gates the conscription ladder and sets how much of itself the country
+   * will lose before it capitulates.
+   */
+  warSupport: number;
+  /** The two ladders every campaign is built around; see sim/politics. */
+  laws: {
+    conscription: ConscriptionLaw;
+    economy: EconomyLaw;
+  };
   isAI: boolean;
   major: boolean;
   economy: Economy;

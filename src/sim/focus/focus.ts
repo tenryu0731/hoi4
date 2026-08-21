@@ -1,4 +1,5 @@
 import { dateReached } from '../ai/doctrine';
+import { techDef } from '../research/techData';
 import { BUILDING_CAP, FACTORY_OUTPUT } from '../core/data';
 import {
   JUSTIFY_BASE_DAYS, adjustOpinion, areAllied,
@@ -34,14 +35,6 @@ export interface FocusContext {
 
 /** Research slots a country may ever hold, matching sim/research. */
 const MAX_RESEARCH_SLOTS = 5;
-
-/**
- * The legacy research drip's level-up curve, from Simulation.tickResearchDaily.
- * Duplicated rather than imported so this module does not depend on the
- * composition root; see addResearchDays for why both runtimes are fed.
- */
-const RESEARCH_BASE_DAYS = 180;
-const RESEARCH_DAYS_PER_LEVEL = 60;
 
 const BRANCHES: readonly ResearchBranch[] = ['infantry', 'armor', 'air', 'industry'];
 
@@ -357,33 +350,33 @@ function applyStandingBonuses(state: GameState, c: Country, f: CountryFocus): vo
 }
 
 /**
- * Research days, paid into whichever research runtime is live.
+ * Research days, paid into the branch the focus advertised.
  *
- * The pre-tree drip stores a level and a progress count per branch and is what
- * production.ts reads; the slot-based runtime stores days against the
- * technology currently under way. A focus bonus is meaningful under either, and
- * only one of them ticks in any given build, so both are credited rather than
- * making this module guess which one the composition root wired in.
+ * They used to go to whichever slot happened to be busy first. Measured over a
+ * campaign, 3,463 bonus days were granted and 283 of them -- 8.2% -- landed in
+ * the branch the focus named, so 「機甲研究 +100日分」 usually paid for
+ * whatever infantry technology happened to be in slot one. The same days were
+ * also paid a second time into a per-branch ledger whose comment claimed
+ * production.ts read it; production.ts does not, and neither does anything
+ * else, so 11,421 research-days a campaign accumulated into counters with no
+ * reader. That ledger is gone.
+ *
+ * A country researching nothing in the named branch still gets the days -- the
+ * intent is to speed up research, and refusing to pay a bonus because the
+ * player is between technologies in that branch would be worse than paying it
+ * imprecisely.
  */
 function addResearchDays(c: Country, branch: ResearchBranch, days: number): void {
-  const r = c.research;
-  r.progress[branch] = Math.max(0, r.progress[branch] + days);
-  for (;;) {
-    const needed = RESEARCH_BASE_DAYS + r.levels[branch] * RESEARCH_DAYS_PER_LEVEL;
-    if (r.progress[branch] < needed) break;
-    r.progress[branch] -= needed;
-    r.levels[branch]++;
-  }
-
-  const slots = r.active;
+  const slots = c.research.active;
   if (!slots) return;
-  for (const s of slots) {
-    if (s.tech === null) continue;
-    // The first busy slot takes it; completion stays the research runtime's
-    // job, so an overshoot here simply finishes the technology tomorrow.
-    s.progress = Math.max(0, s.progress + days);
-    return;
-  }
+  const inBranch = slots.find(
+    (s) => s.tech !== null && techDef(s.tech)?.branch === branch,
+  );
+  const target = inBranch ?? slots.find((s) => s.tech !== null);
+  if (!target) return;
+  // Completion stays the research runtime's job, so an overshoot here simply
+  // finishes the technology tomorrow.
+  target.progress = Math.max(0, target.progress + days);
 }
 
 /** An extra crew on the front of the construction queue. */

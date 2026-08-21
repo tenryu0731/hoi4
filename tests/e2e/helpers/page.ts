@@ -172,7 +172,15 @@ export async function swipe(
     });
     await page.waitForTimeout(12);
   }
-  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  // The lifted point has to be named. An empty touchEnd leaves Chrome to
+  // synthesise the pointerup's coordinates, and it does not always choose the
+  // last touch position -- which made the drag-to-order test fail about one
+  // run in three with the selection intact and no order issued, because the
+  // release was being read at a point off the map.
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [{ x: to.x, y: to.y, id: 1 }],
+  });
 }
 
 /** Taps a screen point using the touch pipeline rather than a synthetic click. */

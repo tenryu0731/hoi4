@@ -9,6 +9,7 @@ import type {
  * replayable and means the AI exercises exactly the same code paths as a human.
  */
 export type Command =
+  | { t: 'changeLaw'; country: CountryId; kind: 'conscription' | 'economy'; step: 1 | -1 }
   // --- production / economy -------------------------------------------------
   | { t: 'addProductionLine'; country: CountryId; equipment: EquipmentType }
   | { t: 'removeProductionLine'; country: CountryId; line: number }

@@ -1,4 +1,6 @@
 import { randRange } from '../core/rng';
+import { INITIAL_RESISTANCE } from '../economy/occupation';
+import { surrenderTolerance } from '../politics/politics';
 import type {
   CountryId, GameState, ProvinceId, War,
 } from '../core/types';
@@ -375,7 +377,14 @@ function absorbCountry(
     if (members.length === 0) continue;
     const holder = state.provinces[members[0]].controller;
     if (members.every((id) => state.provinces[id].controller === holder)) {
-      st.controller = holder;
+      if (st.controller !== holder) {
+        st.controller = holder;
+        // Territory taken from a beaten country is occupied, not owned: it
+        // resists until it is garrisoned. Without this, mass conquest through
+        // capitulation -- which is how most territory changes hands -- never
+        // raised any resistance at all.
+        st.resistance = st.owner === holder ? 0 : INITIAL_RESISTANCE;
+      }
     }
   }
 
@@ -543,7 +552,12 @@ export function tickCapitulationDaily(state: GameState, ctx: DiplomacyContext): 
     if (c.capitulated || c.atWarWith.length === 0) continue;
     const ratio = occupationRatio(state, c.id);
     const capitalLost = state.provinces[c.capital]?.controller !== c.id;
-    const beaten = (ratio >= c.surrenderLimit && capitalLost) || ratio >= TOTAL_OCCUPATION;
+    // War support moves the line. A nation that believes in the war holds on
+    // past the point where one that does not has already asked for terms, so
+    // the same map position surrenders a demoralised country and not a
+    // determined one.
+    const limit = c.surrenderLimit * surrenderTolerance(c);
+    const beaten = (ratio >= limit && capitalLost) || ratio >= TOTAL_OCCUPATION;
     if (beaten) capitulate(state, ctx, c.id);
   }
   closeSettledWars(state);

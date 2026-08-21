@@ -1,4 +1,8 @@
 import type { Command } from './core/commands';
+import { tickFuelDaily } from './economy/fuel';
+import { tickAirDaily } from './military/air';
+import { tickOccupationDaily } from './economy/occupation';
+import { changeLaw, tickPoliticsDaily } from './politics/politics';
 import { deriveTemplate, recomputeCountryStats, spawnDivision } from './scenario/europe1936';
 import type { EquipmentType, GameState } from './core/types';
 
@@ -21,7 +25,7 @@ import {
 import {
   declareWar, demandSubmission, guarantee, improveRelations,
   joinFaction, leaveFaction, startJustification, tickCapitulationDaily,
-  tickJustificationsDaily, tickTensionMonthly,
+  tickJustificationsDaily, tickTensionMonthly, occupationRatio,
 } from './diplomacy/diplomacy';
 import {
   orderMove, stopDivision, tickConditionsDaily, tickMilitaryHourly, tickReinforcementDaily,
@@ -157,6 +161,12 @@ export class Simulation {
         createArmy(state, cmd.country, cmd.name, cmd.isArmyGroup ?? false);
         return;
       }
+      case 'changeLaw': {
+        // Guarded here as well as in the panel: a command that arrives while
+        // the requirements have lapsed must not slip through.
+        changeLaw(state, cmd.country, cmd.kind, cmd.step);
+        return;
+      }
       case 'disbandArmy': {
         if (armyById(state, cmd.army)?.owner !== cmd.country) return;
         disbandArmy(state, cmd.army);
@@ -286,6 +296,10 @@ export class Simulation {
       tickCommanderExperienceDaily(state);
       tickSupplyDaily(state, this.index);
       tickEconomyDaily(state, this.ctx);
+      tickPoliticsDaily(state, (id) => occupationRatio(state, id));
+      tickFuelDaily(state);
+      tickAirDaily(state);
+      tickOccupationDaily(state);
       tickConditionsDaily(state, this.index);
       tickReinforcementDaily(state);
       tickResearchDaily(state);

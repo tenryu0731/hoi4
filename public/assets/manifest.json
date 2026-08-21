@@ -3,11 +3,11 @@
   "counts": {
     "flags": 30,
     "resourceIcons": 6,
-    "uiIcons": 17,
+    "uiIcons": 20,
     "unitIcons": 12
   },
-  "totalBytes": 23015,
-  "totalGzipBytes": 14250,
+  "totalBytes": 23949,
+  "totalGzipBytes": 14918,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -225,6 +225,11 @@
       "gzipBytes": 162
     },
     {
+      "path": "assets/icons/ui-fuel.svg",
+      "bytes": 321,
+      "gzipBytes": 237
+    },
+    {
       "path": "assets/icons/ui-manpower.svg",
       "bytes": 243,
       "gzipBytes": 204
@@ -260,6 +265,11 @@
       "gzipBytes": 240
     },
     {
+      "path": "assets/icons/ui-stability.svg",
+      "bytes": 350,
+      "gzipBytes": 226
+    },
+    {
       "path": "assets/icons/ui-supply.svg",
       "bytes": 442,
       "gzipBytes": 255
@@ -268,6 +278,11 @@
       "path": "assets/icons/ui-victory_point.svg",
       "bytes": 220,
       "gzipBytes": 186
+    },
+    {
+      "path": "assets/icons/ui-war_support.svg",
+      "bytes": 263,
+      "gzipBytes": 205
     },
     {
       "path": "assets/icons/ui-warning.svg",

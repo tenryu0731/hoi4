@@ -1,5 +1,7 @@
 import { effectiveTemplate, techModifiers } from '../research';
 import { commandModifiers } from './command';
+import { DRY_SPEED, fuelPenalty } from '../economy/fuel';
+import { INITIAL_RESISTANCE } from '../economy/occupation';
 import {
   WINTER_ATTRITION_PER_DAY, WINTER_SPECIALIST_RELIEF, winterSeverity,
 } from './weather';
@@ -345,7 +347,13 @@ export function captureProvince(
   const stateId = ctx.index.get(province).stateId;
   const members = ctx.index.data.states[stateId].provinces;
   if (members.every((id) => state.provinces[id].controller === by)) {
-    state.states[stateId].controller = by;
+    const st = state.states[stateId];
+    if (st.controller !== by) {
+      st.controller = by;
+      // Ground taken from someone else starts restive; ground you are taking
+      // back is your own, and settles the moment you hold it.
+      st.resistance = st.owner === by ? 0 : INITIAL_RESISTANCE;
+    }
   }
 }
 
@@ -362,14 +370,24 @@ export function movementSpeed(
   const infra = state.states[geo.stateId]?.infrastructure ?? 1;
   const infraFactor = 0.6 + (infra / 5) * 0.6;
   const supplyFactor = 0.5 + 0.5 * Math.min(1, d.supplyLevel);
-  const factor = Math.max(MIN_SPEED_FACTOR, terrain.speed * infraFactor * supplyFactor);
+  // Mountain troops give back part of what the ground takes: the terrain
+  // penalty is what they are trained against.
+  const trained = tpl.battalions.length === 0 ? 0
+    : tpl.battalions.filter((b) => b === 'mountaineers').length / tpl.battalions.length;
+  const rough = geo.terrain === 'mountain' || geo.terrain === 'hills';
+  const terrainSpeed = rough
+    ? terrain.speed + (1 - terrain.speed) * trained
+    : terrain.speed;
+  const factor = Math.max(MIN_SPEED_FACTOR, terrainSpeed * infraFactor * supplyFactor);
   // A panzer general gets his armour moving faster than the book says, which
   // is the only thing the trait is famous for.
   const cmd = commandModifiers(state, d);
   const led = cmd.traits.has('panzer_leader')
     && tpl.battalions.some((b) => b === 'light_armor' || b === 'medium_armor')
     ? 1 + PANZER_LEADER_SPEED : 1;
-  return tpl.speedKmh * factor * KM_PER_HOUR_SCALE * led;
+  // A dry tank has to be pushed. Only formations that burn fuel feel this.
+  const dry = fuelPenalty(tpl, state.countries[d.owner].economy.fuelRatio, DRY_SPEED);
+  return tpl.speedKmh * factor * KM_PER_HOUR_SCALE * led * dry;
 }
 
 function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): void {

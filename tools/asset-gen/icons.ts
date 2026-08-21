@@ -167,6 +167,33 @@ export const UI_ICONS: Record<string, string> = {
     '<path d="M16 3.2L29 13.4l-3.4 2.6L16 8.6 6.4 16 3 13.4z"/>' +
     '<path d="M16 12.4L29 22.6l-3.4 2.6L16 17.8l-9.6 7.4L3 22.6z"/>',
   ),
+  // A jerrycan. Fuel borrowed the oil-barrel glyph, so the same picture meant
+  // 燃料 600 in one row of the top bar and 石油 0 two rows below it.
+  fuel: solid(
+    '<path d="M6.4 7.2h15.2v21.2H6.4z' +
+    'M9.2 11.4h9.6v2.4H9.2z"/>' +
+    '<path d="M9 3.6h10v3H9z"/>' +
+    '<path d="M22.6 9.6h3.2c1.6 0 2.8 1.3 2.8 2.9v9.2c0 1.2-1 2.2-2.2 2.2' +
+    'h-1.6v-2.8h1v-8.6c0-.1-.1-.2-.2-.2h-3z"/>',
+  ),
+  // Scales. Stability is the government's balance, and borrowing the
+  // victory-point star for it said "this province is worth something".
+  stability: solid(
+    '<path d="M14.6 3.4h2.8v24.2h-2.8z"/>' +
+    '<path d="M7.4 26h17.2v2.8H7.4z"/>' +
+    '<path d="M5.4 8.4h21.2v2.6H5.4z"/>' +
+    '<path d="M2 20.4l4.4-9.6 4.4 9.6z' +
+    'M6.4 15.2l-1.5 3.2h3z"/>' +
+    '<path d="M21.2 20.4l4.4-9.6 4.4 9.6z' +
+    'M25.6 15.2l-1.5 3.2h3z"/>',
+  ),
+  // A rifle held up. War support is the nation's willingness to fight, and the
+  // warning triangle it borrowed meant "something is wrong".
+  war_support: solid(
+    '<path d="M20.6 2.4l3 1.9-14.4 22.6-3-1.9z"/>' +
+    '<path d="M8.2 20.6l6.4 4.1-2 3.1-6.4-4.1z"/>' +
+    '<path d="M17.4 9.2l5.2 3.3-1.5 2.4-5.2-3.3z"/>',
+  ),
   warning: solid(
     '<path d="M16 2.8l14 25.4H2z' +
     'M14.6 11.4h2.8v8.4h-2.8z' +

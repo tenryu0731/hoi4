@@ -4,6 +4,7 @@ import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
 import { PANELS, formatNumber, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
+import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
 import { RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
 
@@ -139,7 +140,12 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     statNodes[key] = v;
   };
   addStat('pp', UI.politicalPower, 'ui-political_power');
+  // Stability and war support sit next to political power in the real game's
+  // top bar, because all three are the same decision seen from three sides.
+  addStat('stab', UI.stability, 'ui-stability');
+  addStat('ws', UI.warSupport, 'ui-war_support');
   addStat('mp', UI.manpower, 'ui-manpower');
+  addStat('fuel', UI.fuel, 'ui-fuel');
   addStat('civ', UI.civFactories, 'ui-factory');
   addStat('mil', UI.milFactories, 'ui-military_factory');
   addStat('div', UI.divisions, 'ui-army');
@@ -164,8 +170,16 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // Two rows: identity and clock above, the figures below. One row cannot hold
   // a flag, a name, five figures and a clock on a 412px screen without one of
   // them being pushed off, which is what was happening.
+  // Tapping your own flag opens politics, which is where the real game puts
+  // it: there is no room for a seventh tab on a 412px screen, and the flag is
+  // already the thing that means "my country".
+  const identity = el('button', 'hud-identity');
+  identity.setAttribute('aria-label', UI.navPolitics);
+  identity.append(flag, nameBox);
+  identity.addEventListener('click', () => togglePanel('politics'));
+
   const topRow = el('div', 'hud-top-row');
-  topRow.append(flag, nameBox, el('div', 'hud-spacer'), clock);
+  topRow.append(identity, el('div', 'hud-spacer'), clock);
 
   // --- resource strip ------------------------------------------------------
   // Its own row under the figures, not absolutely positioned 48px down: that
@@ -264,7 +278,30 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // -- was parked behind the fade with nothing to say it was there. Split by
   // kind, each row fits, and the whole national position is visible at once
   // the way it is in the real game.
-  top.append(topRow, stats, resStrip);
+  // --- alerts --------------------------------------------------------------
+  const alertRow = el('div', 'hud-alerts');
+  let lastAlertKey = '';
+
+  function syncAlerts(): void {
+    const alerts = collectAlerts(game);
+    const key = alerts.map((a) => `${a.id}:${a.text}`).join('|');
+    if (key === lastAlertKey) return;
+    lastAlertKey = key;
+    alertRow.innerHTML = '';
+    alertRow.classList.toggle('is-empty', alerts.length === 0);
+    for (const a of alerts) {
+      const chip = el('button', 'hud-alert');
+      chip.classList.toggle('is-urgent', a.urgent);
+      chip.title = a.title;
+      chip.setAttribute('aria-label', a.title);
+      chip.append(iconNode('hud-res-icon', `icons/${a.icon}.svg`));
+      if (a.text !== '') chip.append(el('span', 'hud-alert-v', a.text));
+      chip.addEventListener('click', () => togglePanel(a.panel));
+      alertRow.append(chip);
+    }
+  }
+
+  top.append(topRow, stats, resStrip, alertRow);
 
   root.append(top, modeBar, toasts, sheet, nav, outcome);
 
@@ -275,9 +312,20 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const measureTop = () => {
     root.style.setProperty('--hud-top-h', `${Math.round(top.getBoundingClientRect().height)}px`);
   };
-  const topObserver = new ResizeObserver(measureTop);
+  // The strip of map a player can actually see, which is what the map-mode
+  // column has to fit inside: the sheet covers everything below it.
+  function measureBand(): void {
+    const topH = top.getBoundingClientRect().height;
+    const sheetTop = sheet.classList.contains('is-open')
+      ? sheet.getBoundingClientRect().top
+      : window.innerHeight - 56;
+    root.style.setProperty('--map-band', `${Math.max(60, Math.round(sheetTop - topH))}px`);
+  }
+
+  const topObserver = new ResizeObserver(() => { measureTop(); measureBand(); });
   topObserver.observe(top);
   measureTop();
+  measureBand();
 
   // -------------------------------------------------------------------------
   // Behaviour
@@ -301,6 +349,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       sheet.classList.add('is-open');
     }
     for (const b of navButtons) b.classList.toggle('is-active', b.dataset.panel === openPanel);
+    root.classList.toggle('is-panel-open', openPanel !== null);
+    measureBand();
   }
 
   // Panels that are not nav destinations open from inside another panel: the
@@ -407,6 +457,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     civ: new NumberTween(statNodes.civ, (v) => String(Math.round(v))),
     mil: new NumberTween(statNodes.mil, (v) => String(Math.round(v))),
     div: new NumberTween(statNodes.div, (v) => String(Math.round(v))),
+    stab: new NumberTween(statNodes.stab, (v) => `${Math.round(v)}%`),
+    ws: new NumberTween(statNodes.ws, (v) => `${Math.round(v)}%`),
+    fuel: new NumberTween(statNodes.fuel, (v) => String(Math.round(v))),
   };
 
   // --- per-frame refresh ---------------------------------------------------
@@ -433,9 +486,19 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     tweens.civ.set(me.economy.civilianFactories, dt);
     tweens.mil.set(me.economy.militaryFactories, dt);
     tweens.div.set(me.stats.divisionCount, dt);
+    syncAlerts();
+    tweens.stab.set(me.stability * 100, dt);
+    tweens.ws.set(me.warSupport * 100, dt);
+    tweens.fuel.set(me.economy.fuel, dt);
+    statNodes.fuel.classList.toggle('is-short', me.economy.fuelRatio < 0.999);
 
     for (const r of RESOURCE_TYPES) {
       const flow = me.economy.resources[r];
+      // A chip that has read zero since 1936 is not information. Six of the
+      // fourteen in the top bar were permanently empty, taking a whole row.
+      resNodes[r]?.parentElement?.classList.toggle(
+        'is-idle', flow.produced === 0 && flow.consumed === 0,
+      );
       const node = resNodes[r]!;
       // The shortfall, not the balance. A shortage used to render as a red
       // zero -- production and consumption net out at the point supply is

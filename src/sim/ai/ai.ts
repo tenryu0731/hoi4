@@ -13,6 +13,9 @@ import {
   occupationRatio, opinionOf, startJustification,
 } from '../diplomacy/diplomacy';
 import { orderMove } from '../military/movement';
+import { canChangeLaw, changeLaw } from '../politics/politics';
+import { fuelRatio } from '../economy/fuel';
+import { LAW_COST } from '../politics/lawData';
 import { spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY } from '../scenario/europe1936';
 import {
   dateReached, doctrineFor, monthIndexOf, monthsSince, nowIndex,
@@ -122,7 +125,16 @@ const ARMOUR_FRACTION = 0.2;
  * in, so anything above zero is every nation burning a tenth of its economy on
  * items that cannot affect a single battle.
  */
-const AIR_SHARE = 0;
+/**
+ * Share of military industry that goes to aircraft.
+ *
+ * This was 0 with a comment saying there was no air layer to fly them in --
+ * but `desiredMix` still listed fighters last and the allocator hands the last
+ * entry the rounding remainder, so between 2% and 4% of Europe's military
+ * industry went into them anyway. There is an air layer now, so the share is
+ * real and deliberate rather than an artefact of a rounding rule.
+ */
+const AIR_SHARE = 0.12;
 
 /**
  * Factory allocation, derived from what the army actually eats.
@@ -144,8 +156,12 @@ function desiredMix(c: Country): [EquipmentType, number][] {
       demand.set(eq, (demand.get(eq) ?? 0) + need * EQUIPMENT[eq].cost * share);
     }
   };
-  add(infantry, 1 - ARMOUR_FRACTION);
-  add(armour, ARMOUR_FRACTION);
+  // Tanks a country cannot fuel are worse than the infantry it did not build:
+  // they cost steel and rubber and then move at half speed. A country running
+  // dry stops laying down armour until it has taken an oilfield.
+  const armourShare = ARMOUR_FRACTION * fuelRatio(c);
+  add(infantry, 1 - armourShare);
+  add(armour, armourShare);
 
   // Anything a template needs but the calculation missed still gets a line.
   for (const eq of requiredEquipment(c)) {
@@ -189,6 +205,11 @@ export function runEconomyAI(state: GameState, _ctx: AIContext, c: Country): voi
         ? Math.max(floor, total - assigned)
         : Math.max(floor, Math.round(total * share));
       setLineFactories(c, line.id, want);
+      // The mix already says what this country cares about, so the scarce
+      // steel goes to the same place the factories did. Without this every
+      // line sat at the same priority and the allocator's sort fell back to
+      // line id -- which is to say, to nothing.
+      line.priority = share >= 0.4 ? 3 : share >= 0.2 ? 2 : share > 0 ? 1 : 0;
       assigned += line.assignedFactories;
     }
   }
@@ -232,7 +253,8 @@ export function runRecruitmentAI(state: GameState, _ctx: AIContext, c: Country):
   // Keying the choice to the division count alone deadlocks: a country that
   // cannot afford a tank never raises the division that would move the count
   // past the armour slot, so it raises nothing at all, forever.
-  const wantArmour = c.major && c.stats.divisionCount % 5 === 4;
+  const wantArmour = c.major && c.stats.divisionCount % 5 === 4
+    && fuelRatio(c) > 0.5;
   const order = wantArmour
     ? [TEMPLATE_ARMOUR, TEMPLATE_INFANTRY]
     : [TEMPLATE_INFANTRY, TEMPLATE_ARMOUR];
@@ -390,8 +412,65 @@ function standingOnTheDefensive(state: GameState, c: Country): boolean {
   return state.clock.totalDays - joined < PHONEY_WAR_DAYS;
 }
 
+/**
+ * Writes the AI's intent onto its armies.
+ *
+ * The chain of command was player-only: measured over four ten-year campaigns,
+ * 0 of 128,783 army-days carried an order, so `frontProvinces` was empty for
+ * every AI formation in the game and every one of them was pinned to the
+ * half-rate planning fallback -- mean planning 0.193 against a ceiling of
+ * 0.330. A bonus the human collects at twice the rate is a difficulty setting
+ * nobody chose.
+ *
+ * The AI still moves its own divisions: that loop is tuned around garrison
+ * budgets and re-order suppression that the generic spreader does not model,
+ * and two controllers issuing movement on the same day would thrash. What the
+ * order buys is the thing that was actually missing -- a declared front, and
+ * the preparation that goes with holding one.
+ */
+function declareArmyIntent(state: GameState, ctx: AIContext, c: Country): void {
+  const armies = (state.armies ?? []).filter(
+    (a) => a.owner === c.id && !a.isArmyGroup && a.divisions.length > 0,
+  );
+  if (armies.length === 0) return;
+
+  const enemy = c.atWarWith
+    .map((id) => state.countries[id])
+    .filter((e) => !e.capitulated)
+    .sort((a, b) => b.stats.victoryPoints - a.stats.victoryPoints || a.id - b.id)[0];
+
+  if (!enemy) {
+    // At peace an army holds what it is standing on rather than nothing.
+    for (const army of armies) {
+      const held = army.divisions
+        .map((id) => state.divisions.find((d) => d.id === id))
+        .filter((d): d is NonNullable<typeof d> => !!d && !d.dead)
+        .map((d) => d.provinceId);
+      army.order = held.length > 0 ? { kind: 'garrison', provinces: [...new Set(held)] } : null;
+    }
+    return;
+  }
+
+  const attacking = !standingOnTheDefensive(state, c);
+  // Land objectives only: an amphibious operation is not something an army
+  // order can express, and the AI's own loop handles those.
+  const targets = attacking
+    ? frontTargets(state, ctx, c).filter((t) => !t.overseas).slice(0, 4).map((t) => t.province)
+    : [];
+  armies.forEach((army, i) => {
+    // The first formation holds the line whatever else is happening; the rest
+    // press, which is the same split the division loop below makes.
+    const press = attacking && targets.length > 0 && i > 0;
+    army.order = press
+      ? { kind: 'offensive', targets }
+      : { kind: 'front', against: enemy.id };
+  });
+}
+
 export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
+
+  declareArmyIntent(state, ctx, c);
 
   const available = state.divisions.filter(
     (d) => !d.dead && d.owner === c.id && d.combatId === null,
@@ -986,6 +1065,7 @@ export function tickAIDaily(state: GameState, ctx: AIContext): void {
   for (const c of state.countries) {
     if (c.capitulated || !c.isAI) continue;
 
+    aiMobilise(state, c);
     runEconomyAI(state, ctx, c);
     runRecruitmentAI(state, ctx, c);
 
@@ -996,5 +1076,48 @@ export function tickAIDaily(state: GameState, ctx: AIContext): void {
     if (c.id % 7 === dayOfWeek) {
       runDiplomacyAI(state, ctx, c);
     }
+  }
+}
+
+/**
+ * Mobilisation.
+ *
+ * Without this the laws would be a mechanic only the human player has, and a
+ * player who moves to a war economy in 1937 would out-build an AI frozen on
+ * civilian economy for the whole campaign. The AI does not plan: it takes the
+ * next step whenever it can afford one and the gates allow it, which is what
+ * a country under pressure actually does.
+ *
+ * Political power is kept for laws only above a floor, so passing them never
+ * starves the diplomacy the AI also needs power for.
+ */
+const AI_LAW_RESERVE = 60;
+
+/**
+ * Manpower in the bank, in thousands, below which a country starts reaching
+ * for a harder conscription law.
+ *
+ * Conscription is not free industry: the top of that ladder takes 35% of the
+ * workforce off the factory floor and a third of the country's stability with
+ * it. A country with men to spare that keeps climbing anyway ends up with a
+ * large army it cannot equip, which is what an AI taking every step it could
+ * afford actually produced -- by 1940 every nation in Europe sat on identical
+ * maximum laws at minimum stability.
+ */
+const MANPOWER_COMFORT = 250;
+
+export function aiMobilise(state: GameState, c: Country): void {
+  if (c.capitulated) return;
+  if (c.economy.politicalPower < LAW_COST + AI_LAW_RESERVE) return;
+
+  // Industry first and always: factories compound, and the penalties are small.
+  if (canChangeLaw(state, c, 'economy', 1).allowed) {
+    changeLaw(state, c.id, 'economy', 1);
+    return;
+  }
+  // Men only when short of them. Running out is what justifies the cost.
+  if (c.economy.manpower < MANPOWER_COMFORT
+    && canChangeLaw(state, c, 'conscription', 1).allowed) {
+    changeLaw(state, c.id, 'conscription', 1);
   }
 }

@@ -28,13 +28,23 @@ export const HUD_CSS = `
   pointer-events: auto;
 }
 .hud-top-row { display: flex; align-items: center; gap: 8px; }
+/* The flag and the country name are one control: it opens politics. */
+.hud-identity {
+  display: flex; align-items: center; gap: 8px; min-height: 44px;
+  padding: 0; background: none; border: none; color: inherit;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.hud-identity:active { transform: none; }
+.hud-identity:active .hud-flag { box-shadow: 0 0 0 1px var(--accent), 0 1px 3px rgba(0,0,0,0.7); }
 .hud-spacer { flex: 1 1 auto; }
+/* A pale metal surround, as in the reference. The frame used to be #0d0c0a,
+   which the black band of the German tricolour met at 1.028:1 -- the top third
+   of the flag disappeared into its own border and the player's identity
+   control rendered as white-over-red, which is Poland. */
 .hud-flag {
   width: 34px; height: 23px; flex: 0 0 auto;
-  /* Framed, the way every flag in the game is: a hard dark rule with a thin
-     gold inner edge. An unframed rectangle reads as a placeholder image. */
-  border: 1px solid #0d0c0a;
-  box-shadow: 0 0 0 1px rgba(211,171,99,0.45), 0 1px 3px rgba(0,0,0,0.7);
+  border: 1px solid #8a7f6a;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.7);
   background: #2b2a26;
 }
 .hud-country { min-width: 0; flex: 0 0 auto; }
@@ -43,7 +53,7 @@ export const HUD_CSS = `
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 74px;
 }
 .hud-country-tag {
-  font-size: 9px; color: var(--accent-dim); letter-spacing: var(--track);
+  font-size: 11px; color: var(--ink-dim); letter-spacing: var(--track);
 }
 
 /* The figures and the resources are one scrolling row of identical chips. */
@@ -94,6 +104,35 @@ export const HUD_CSS = `
   100% { color: inherit; }
 }
 
+/* The alert row. Amber for something idle, red for something being lost. */
+.hud-alerts {
+  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
+  touch-action: pan-x;
+}
+.hud-alerts.is-empty { display: none; }
+.hud-alerts::-webkit-scrollbar { display: none; }
+.hud-alert {
+  display: flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  /* 44px on the long axis and 36 on the short, which is the rule this file
+     opens with. They are buttons, not chips: each one opens the panel where
+     the problem is fixed. */
+  min-width: 44px; min-height: 36px; padding: 3px 9px; justify-content: center;
+  background: linear-gradient(180deg, #3a3222 0%, #2a2417 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--accent); font: inherit; font-size: 12px; cursor: pointer;
+}
+.hud-alert.is-urgent {
+  background: linear-gradient(180deg, #3f2620 0%, #2c1a16 100%);
+  color: #e8a094;
+}
+/* A slow pulse, so a warning is noticed without being a strobe. */
+.hud-alert.is-urgent { animation: hud-alert-pulse 2.4s ease-in-out infinite; }
+@keyframes hud-alert-pulse {
+  0%, 100% { border-color: #100f0d; }
+  50% { border-color: #8a4034; }
+}
+.hud-alert-v { font-weight: 700; font-variant-numeric: tabular-nums; }
+
 .hud-clock { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .hud-date {
   font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
@@ -140,15 +179,34 @@ export const HUD_CSS = `
   font-size: 11px; font-variant-numeric: tabular-nums;
   min-width: 3ch; text-align: right;
 }
-.hud-res-v.is-short { color: var(--danger); font-weight: 700; }
+.hud-res-v.is-short, .hud-stat-v.is-short { color: #f0a294; font-weight: 700; }
+/* Hidden until the country has any of it at all. */
+.hud-res.is-idle { display: none; }
 .hud-res-l { font-size: 11px; color: var(--ink-dim); letter-spacing: 0; }
 
 /* Map modes hug the top-right so the centre of the screen stays gesture-only. */
+/* Bounded by the space above the sheet. Raising these to 44px tall pushed the
+   column to y 157..446 while an open panel's top edge lands at y 361 on a
+   412px screen and y 250 on a 360px one -- so opening any panel buried two of
+   the six buttons, and four of them on a small screen. Measured with
+   elementFromPoint: 補給 15% reachable, 勝利点 0%. */
 .hud-modes {
   position: absolute; top: calc(var(--hud-top-h, 88px) + 6px); right: 8px;
   display: flex; flex-direction: column; gap: 5px; pointer-events: auto;
   touch-action: manipulation;
 }
+/* With a panel open there is no vertical room for a column of six, so the
+   strip lies down above the sheet instead of scrolling out of reach. Bounding
+   it to the visible band left 2 of 6 buttons off-screen at 360px, which is no
+   better than being underneath the panel. */
+.is-panel-open .hud-modes {
+  top: auto; left: 8px; right: 8px;
+  bottom: calc(var(--safe-bottom) + 56px + var(--sheet-h, 52vh) + 6px);
+  flex-direction: row; justify-content: flex-end;
+  overflow-x: auto; scrollbar-width: none;
+}
+.is-panel-open .hud-modes::-webkit-scrollbar { display: none; }
+.is-panel-open .hud-mode { flex: 0 0 auto; min-width: 52px; }
 /* 44px, like everything else. These were 28px tall on a 31px pitch, and they
    are the only way to change map mode. */
 .hud-mode {
@@ -184,9 +242,13 @@ export const HUD_CSS = `
 .hud-toast.kind-outcome { border-left-color: #fff; }
 
 /* --- bottom sheet -------------------------------------------------------- */
+/* The sheet ground is darker than the plates that sit on it. Measured before:
+   a card at #26241f on a #1f1e1a ground is 1.076:1 -- every card in the game
+   was carried by a single hairline, where HOI4's focus node plate reads
+   2.08:1 against its tree. */
 .hud-sheet {
   position: absolute; left: 0; right: 0; bottom: calc(var(--safe-bottom) + 56px);
-  background: linear-gradient(180deg, #2a2823 0%, #201f1b 34%, #1b1a17 100%);
+  background: linear-gradient(180deg, #1a1917 0%, #151412 34%, #121110 100%);
   border-top: 1px solid #0d0c0a;
   box-shadow: inset 0 1px 0 var(--edge-hi), 0 -4px 14px rgba(0,0,0,0.6);
   transform: translateY(calc(100% + var(--safe-bottom) + 56px));
@@ -275,7 +337,7 @@ export const HUD_CSS = `
 .panel-row {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 8px; border-radius: 2px;
-  background: linear-gradient(180deg, #2b2924 0%, #211f1b 100%);
+  background: linear-gradient(180deg, #35312a 0%, #272420 100%);
   border: 1px solid #100f0d; box-shadow: var(--bevel);
 }
 .panel-row.is-hostile {
@@ -286,15 +348,17 @@ export const HUD_CSS = `
 .panel-row-main { flex: 1 1 auto; min-width: 0; }
 .panel-row-title {
   font-size: 13px; font-weight: 700;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  /* Wraps rather than clipping. Japanese country names on one nowrap line
+     beside three buttons lost 27 of 30 rows to the ellipsis at 360px. */
+  overflow-wrap: anywhere; line-break: strict;
 }
 .panel-row-sub { font-size: 11px; color: var(--ink-dim); margin-top: 2px; line-height: 1.6; }
 .panel-row-controls { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 /* The same frame the player's own flag carries in the top bar, at list size. */
 .panel-flag {
   width: 26px; height: 17px; flex: 0 0 auto; object-fit: cover;
-  border: 1px solid #0d0c0a;
-  box-shadow: 0 0 0 1px rgba(211,171,99,0.35), 0 1px 2px rgba(0,0,0,0.7);
+  border: 1px solid #8a7f6a;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.6), 0 1px 2px rgba(0,0,0,0.7);
 }
 .panel-btn {
   min-width: 44px; min-height: 44px; padding: 0 8px;
@@ -308,11 +372,13 @@ export const HUD_CSS = `
    war, start a focus, add a division -- and they were the smallest text on
    the screen. 12px is the floor for CJK now. */
 .panel-btn.wide { min-width: 64px; font-size: 12px; }
+.panel-btn.prio { min-width: 44px; font-size: 12px; color: var(--ink-dim); }
+.panel-btn.prio.is-high { color: var(--accent); font-weight: 700; }
 .panel-btn.danger {
   color: #f0a49a; border-color: #100f0d;
   background: linear-gradient(180deg, #43302b 0%, #2c1e1a 100%);
 }
-.panel-btn:disabled { color: #7d7566; background: #1c1b17; }
+.panel-btn:disabled { color: #a49b89; background: #1c1b17; }
 .panel-count {
   min-width: 22px; text-align: center; font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -333,7 +399,7 @@ export const HUD_CSS = `
 .panel-build {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   min-height: 46px; padding: 7px 9px; text-align: left;
-  background: linear-gradient(180deg, #33302a 0%, #232119 100%); color: var(--ink);
+  background: linear-gradient(180deg, #3a352c 0%, #2a261f 100%); color: var(--ink);
   border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
   cursor: pointer;
 }
@@ -378,11 +444,24 @@ export const HUD_CSS = `
   background: linear-gradient(180deg, #e0bd7c 0%, #a8853f 100%);
   border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
-.panel-build.is-blocked .panel-build-note { color: var(--danger); }
-.panel-kvs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; }
+.panel-build.is-blocked .panel-build-note { color: #f0a294; }
+/* A parchment data plate, which is the surface HOI4 puts every table of
+   numbers on and the one thing this interface had none of: with text masked
+   out, 0.00% of any panel's pixels were above L 0.15, against 23.8% on the
+   real game's division designer. */
+.panel-kvs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px;
+  padding: 8px 10px; margin: 2px 0 4px;
+  background: linear-gradient(180deg, #cbb98f 0%, #ab9a74 100%);
+  border: 1px solid #100f0d; border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255,248,225,0.4), inset 0 -1px 0 rgba(0,0,0,0.35);
+  color: #241f16;
+}
+.panel-kvs .panel-k { color: #5d5340; }
+.panel-kvs .panel-v { color: #1c1810; font-weight: 700; }
 .panel-kv {
   display: flex; justify-content: space-between; gap: 8px; font-size: 12px;
-  padding: 3px 0; border-bottom: 1px dotted rgba(157,148,132,0.3);
+  padding: 3px 0; border-bottom: 1px dotted rgba(60,50,32,0.4);
 }
 .panel-k { color: var(--ink-dim); }
 .panel-v { font-variant-numeric: tabular-nums; text-align: right; }
@@ -540,7 +619,7 @@ button:active { transform: scale(0.96); }
    four illegible. */
 .panel-focus {
   padding: 11px 12px; margin-bottom: 8px;
-  background: linear-gradient(180deg, #2d2a24 0%, #201f1b 100%);
+  background: linear-gradient(180deg, #3a352c 0%, #2a261f 100%);
   border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
 }
 .panel-focus.is-current {
@@ -565,7 +644,11 @@ button:active { transform: scale(0.96); }
 .panel-focus-effect {
   margin-top: 5px; font-size: 11px; line-height: 1.6; color: #a8c47f;
 }
-.panel-focus-block { margin-top: 6px; font-size: 11px; color: var(--danger); }
+/* Measured at 3.05:1 against the plate behind it while the comment beside it
+   claimed it kept its full strength. This is the one line a player who cannot
+   press the button actually needs, so it is the one that has to clear the
+   floor. */
+.panel-focus-block { margin-top: 6px; font-size: 12px; color: #f0a294; }
 .panel-focus-meta { margin-top: 4px; font-size: 11px; color: var(--ink-dim); }
 .panel-focus .panel-btn.wide { margin-top: 9px; width: 100%; min-height: 46px; }
 

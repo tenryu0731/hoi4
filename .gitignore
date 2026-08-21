@@ -13,3 +13,10 @@ tests/e2e/__screenshots__/determinism-check.png
 # the way. None of them are part of the project.
 *shot*.mjs
 /.*.mjs
+
+# Throwaway probe scripts. Review agents write these at the repo root so
+# their imports resolve; three of them were swept into a commit by git add -A
+# before this rule existed.
+.audit-*
+.ad-*
+.*.mjs

@@ -10,8 +10,16 @@ import {
 } from '../sim/core/types';
 import { deriveTemplate } from '../sim/scenario/europe1936';
 import { canQueueBuilding } from '../sim/economy/production';
+import {
+  CONSCRIPTION_LAWS, ECONOMY_LAWS, LAW_COST,
+} from '../sim/politics/lawData';
+import {
+  canChangeLaw, lawEffects, lawIndex, type LawCheck, type LawKind,
+} from '../sim/politics/politics';
+import { CONSCRIPTION_NAME, ECONOMY_NAME } from './lawNames';
 import { ENTRENCHMENT_PER_LEVEL } from '../sim/military/movement';
 import { winterSeverity } from '../sim/military/weather';
+import { airStrength } from '../sim/military/air';
 import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
 import { availableFocuses } from '../sim/focus';
 import {
@@ -37,7 +45,7 @@ import {
 
 export type PanelId =
   | 'focus' | 'research' | 'production' | 'construction' | 'army' | 'command'
-  | 'diplomacy' | 'province' | 'designer';
+  | 'diplomacy' | 'province' | 'designer' | 'politics';
 
 export interface Panel {
   id: PanelId;
@@ -90,7 +98,7 @@ const EQUIPMENT_LABEL = EQUIPMENT_NAME;
 const RESOURCE_LABEL = RESOURCE;
 
 const BUILDABLE: BuildingType[] = [
-  'civilian_factory', 'military_factory', 'dockyard', 'infrastructure',
+  'civilian_factory', 'military_factory', 'dockyard', 'infrastructure', 'fort',
 ];
 
 // ---------------------------------------------------------------------------
@@ -143,7 +151,27 @@ export const productionPanel: Panel = {
           factories: line.assignedFactories + 1,
         });
       });
-      controls.append(minus, count, plus);
+      // Priority decides which line gets scarce steel and tungsten first. It
+      // was a four-step mechanic with no control anywhere: measured over a
+      // campaign, 316,806 line-days carried one distinct value, so the
+      // allocator's priority sort degenerated to a sort by line id.
+      const prio = el('button', 'panel-btn prio');
+      const paintPrio = () => {
+        setText(prio, UI.priorityNames[line.priority]);
+        prio.classList.toggle('is-high', line.priority >= 2);
+        prio.setAttribute(
+          'aria-label',
+          `${EQUIPMENT_LABEL[line.equipment]}: ${UI.priority} ${UI.priorityNames[line.priority]}`,
+        );
+      };
+      paintPrio();
+      prio.addEventListener('click', () => {
+        const next = ((line.priority + 1) % 4) as 0 | 1 | 2 | 3;
+        game.issue({ t: 'setLinePriority', country: me.id, line: line.id, priority: next });
+        line.priority = next;
+        paintPrio();
+      });
+      controls.append(prio, minus, count, plus);
 
       row.append(name, controls);
       list.append(row);
@@ -562,9 +590,13 @@ export const diplomacyPanel: Panel = {
       swatch.style.background = `rgb(${c.color[0]},${c.color[1]},${c.color[2]})`;
       swatch.addEventListener('error', () => { swatch.removeAttribute('src'); });
 
+      // The ideology belongs on the detail line, not welded to the name. On one
+      // nowrap line beside three 44px buttons, 27 of 30 rows were clipped at
+      // 360px -- worst case 171px of text in a 52px box, cutting
+      // チェコスロバキア to チェコス.
       const main = el('div', 'panel-row-main');
       main.append(
-        el('div', 'panel-row-title', `${country(c.tag)}　${IDEOLOGY[c.ideology]}`),
+        el('div', 'panel-row-title', country(c.tag)),
         el('div', 'panel-row-sub', ''),
       );
 
@@ -610,7 +642,7 @@ export const diplomacyPanel: Panel = {
       if (!row) continue;
       const sub = row.querySelector<HTMLElement>('.panel-row-sub');
       if (!sub) continue;
-      const parts: string[] = [];
+      const parts: string[] = [IDEOLOGY[c.ideology]];
       if (c.capitulated) parts.push('降伏');
       else if (me.atWarWith.includes(c.id)) parts.push('交戦中');
       else if (c.factionId !== null && c.factionId === me.factionId) parts.push('同盟');
@@ -654,6 +686,11 @@ export const provincePanel: Panel = {
     head.dataset.role = 'prov-head';
     head.append(stat(UI.victoryPoints, String(geo.vp)), stat(UI.supplyLevel, '—'),
       stat(UI.totalDivisions, '0'));
+    // Only where it applies: home ground never resists.
+    const st = state.states[geo.stateId];
+    if (st.owner !== st.controller) {
+      head.append(stat(UI.resistance, `${Math.round(st.resistance * 100)}%`));
+    }
     root.append(head);
 
     const sub = el('div', 'panel-sub');
@@ -960,6 +997,7 @@ export const PANELS: Record<PanelId, Panel> = {
   diplomacy: diplomacyPanel,
   province: provincePanel,
   designer: designerPanel,
+  get politics() { return politicsPanel; },
 } as Record<PanelId, Panel>;
 
 export { RESOURCE_LABEL, EQUIPMENT_LABEL, RESOURCE_TYPES };
@@ -1110,6 +1148,7 @@ export const commandPanel: Panel = {
       stat(UI.divisions, String(state.divisions.filter(
         (d) => d.owner === me.id && !d.dead).length)),
       stat(UI.unassigned, String(loose)),
+      stat(UI.airStrength, formatNumber(Math.round(airStrength(state, me.id)))),
     );
     root.append(head);
 
@@ -1524,3 +1563,103 @@ function cheapestResearchable(game: Game, owner: number): string | null {
 function list_append(root: HTMLElement, row: HTMLElement): void {
   root.append(row);
 }
+
+
+// ---------------------------------------------------------------------------
+// Politics
+// ---------------------------------------------------------------------------
+
+/** One rung of a law ladder, with the two buttons that move it. */
+function lawRow(
+  game: Game, kind: LawKind, label: string, current: string, rebuild: () => void,
+): HTMLElement {
+  const me = game.state.countries[game.state.meta.playerCountry];
+  const card = el('div', 'panel-focus');
+  card.append(el('div', 'panel-label', label));
+  card.append(el('div', 'panel-focus-name', current));
+
+  const rung = lawIndex(me, kind);
+  const total = kind === 'conscription' ? CONSCRIPTION_LAWS.length : ECONOMY_LAWS.length;
+  const bar = el('div', 'panel-bar');
+  const fill = el('i', 'panel-bar-fill');
+  fill.style.width = `${((rung + 1) / total * 100).toFixed(1)}%`;
+  bar.append(fill);
+  card.append(bar);
+
+  const row = el('div', 'panel-chips');
+  for (const [step, text] of [[-1, UI.lawRelax], [1, UI.lawMobilise]] as const) {
+    const check = canChangeLaw(game.state, me, kind, step);
+    const btn = el('button', 'panel-btn wide', `${text}（${LAW_COST} ${UI.lawCost}）`);
+    btn.disabled = !check.allowed;
+    if (step === 1 && check.allowed) btn.classList.add('primary');
+    btn.addEventListener('click', () => {
+      game.issue({ t: 'changeLaw', country: me.id, kind, step });
+      rebuild();
+    });
+    row.append(btn);
+    if (!check.allowed && check.reason !== '' && step === 1) {
+      card.append(el('div', 'panel-focus-block', lawBlockReason(check.reason)));
+    }
+  }
+  card.append(row);
+  return card;
+}
+
+function lawBlockReason(reason: LawCheck['reason']): string {
+  switch (reason) {
+    case 'cost': return UI.lawBlockedCost;
+    case 'war_support': return UI.lawBlockedWarSupport;
+    case 'tension': return UI.lawBlockedTension;
+    case 'needs_war': return UI.lawBlockedNeedsWar;
+    case 'democracy': return UI.lawBlockedDemocracy;
+    default: return UI.lawBlockedEnd;
+  }
+}
+
+/**
+ * The politics screen, reached by tapping your own flag, which is where the
+ * real game keeps it.
+ */
+export const politicsPanel: Panel = {
+  id: 'politics',
+  title: UI.navPolitics,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const effects = lawEffects(me);
+    const rebuild = () => politicsPanel.build(game, root);
+
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.politicalPower, String(Math.round(me.economy.politicalPower))),
+      stat(UI.stability, `${Math.round(me.stability * 100)}%`),
+      stat(UI.warSupport, `${Math.round(me.warSupport * 100)}%`),
+      stat(UI.worldTension, `${Math.round(state.worldTension)}%`),
+    );
+    root.append(head);
+
+    root.append(lawRow(
+      game, 'economy', UI.economyLaw, ECONOMY_NAME[me.laws.economy], rebuild,
+    ));
+    root.append(lawRow(
+      game, 'conscription', UI.conscriptionLaw,
+      CONSCRIPTION_NAME[me.laws.conscription], rebuild,
+    ));
+
+    // What the two ladders are currently worth, so the cost of a step is
+    // legible before it is paid rather than after.
+    root.append(el('div', 'panel-label', UI.effects));
+    const kvs = el('div', 'panel-kvs');
+    const kv = (k: string, v: string) => {
+      const box = el('div', 'panel-kv');
+      box.append(el('span', 'panel-k', k), el('span', 'panel-v', v));
+      kvs.append(box);
+    };
+    kv(UI.recruitable, `${(effects.conscriptionFraction * 100).toFixed(1)}%`);
+    kv(UI.consumerGoodsShare, `${Math.round(effects.consumerGoods * 100)}%`);
+    kv(UI.constructionSpeed, `${Math.round(effects.construction * 100)}%`);
+    kv(UI.factoryOutputLabel, `${Math.round(effects.output * effects.factoryStaffing * 100)}%`);
+    root.append(kvs);
+  },
+};
