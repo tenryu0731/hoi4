@@ -76,8 +76,8 @@ export class Game {
     this.time = new TimeEngine(state.clock.totalHours);
 
     this.input = new TouchController(renderer.camera, {
-      onTap: (wx, wy) => this.handleTap(wx, wy),
-      onLongPress: (wx, wy) => this.handleTap(wx, wy),
+      onTap: (wx, wy, sx, sy) => this.handleTap(wx, wy, sx, sy),
+      onLongPress: (wx, wy, sx, sy) => this.handleTap(wx, wy, sx, sy),
       canStartOrderDrag: (wx, wy) => this.canDragFrom(wx, wy),
       onOrderDrag: (phase, fx, fy, tx, ty) => this.handleOrderDrag(phase, fx, fy, tx, ty),
       onCameraChange: () => { /* camera is read every frame; nothing to invalidate */ },
@@ -268,12 +268,79 @@ export class Game {
   // Selection
   // -------------------------------------------------------------------------
 
-  private handleTap(worldX: number, worldY: number): void {
+  /**
+   * Tap a unit, then tap where it should go.
+   *
+   * The old interaction was tap the province, then drag out of it -- which
+   * meant finding a province you had already selected, keeping your finger
+   * inside a target the size of a fingernail, and dragging without the gesture
+   * being read as a pan. Tapping the counter is aiming at the thing that is
+   * actually drawn, and the second tap can land anywhere. Dragging still works.
+   */
+  private handleTap(worldX: number, worldY: number, screenX: number, screenY: number): void {
+    const mine = this.state.meta.playerCountry;
     // Touch targets need slack: a fingertip covers roughly 8mm, and coastal
     // provinces are frequently narrower than that on screen.
     const slackWorld = 22 / Math.max(1e-4, this.renderer.camera.zoom);
     const id = this.index.pickNearest(worldX, worldY, slackWorld);
+    const hit = this.renderer.units.pickCounter(screenX, screenY);
+
+    // Counter or ground? Both are under the same finger -- a counter is drawn
+    // lifted above its province centre, so its box overhangs its neighbours --
+    // and the nearer of the two in screen space is the one being aimed at.
+    // Testing the counter first instead made its box win every tap inside
+    // 18px of it, which at map scale spans three provinces: with a stack
+    // selected there was then no way to name a destination next to it,
+    // because the tap kept landing back on the stack.
+    let takeCounter = hit !== null && hit.owner === mine;
+    if (takeCounter && id !== null && id !== hit!.province) {
+      const p = this.index.get(id);
+      const dx = this.renderer.camera.worldToScreenX(p.centerX) - screenX;
+      const dy = this.renderer.camera.worldToScreenY(p.centerY) - screenY;
+      const hx = hit!.x - screenX;
+      const hy = hit!.y - screenY;
+      if (dx * dx + dy * dy < hx * hx + hy * hy) takeCounter = false;
+    }
+
+    if (takeCounter) {
+      // Tapping the stack you already have selected puts it down again.
+      if (this.ordering && this.selection.province === hit!.province) {
+        this.unitSelected = false;
+        this.selectProvince(null);
+        return;
+      }
+      this.selectProvince(hit!.province);
+      this.unitSelected = this.selection.divisions.length > 0;
+      return;
+    }
+
+    if (this.ordering && id !== null && id !== this.selection.province) {
+      this.issue({ t: 'moveDivisions', divisions: [...this.selection.divisions], target: id });
+      // The stack stays selected, as it does in the real game, so a second
+      // objective can be given without hunting for the counter again.
+      return;
+    }
+
+    this.unitSelected = false;
     this.selectProvince(id);
+  }
+
+  private ordering = false;
+
+  /**
+   * Whether the current selection is a stack under orders rather than a
+   * province being looked at. Only a tap on the player's own counter sets it,
+   * and the counter is drawn differently while it holds, because on a touch
+   * screen the same gesture reads the map and commands the army.
+   */
+  get unitSelected(): boolean {
+    return this.ordering;
+  }
+
+  set unitSelected(on: boolean) {
+    if (this.ordering === on) return;
+    this.ordering = on;
+    this.renderer.setSelection(this.selection.province, on);
   }
 
   selectProvince(id: ProvinceId | null): void {
@@ -284,7 +351,7 @@ export class Game {
           (d) => this.state.divisions[d] && !this.state.divisions[d].dead
             && this.state.divisions[d].owner === this.state.meta.playerCountry,
         );
-    this.renderer.setSelection(id);
+    this.renderer.setSelection(id, this.ordering);
   }
 
   private canDragFrom(worldX: number, worldY: number): boolean {

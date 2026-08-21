@@ -48,6 +48,10 @@ export const UI = {
   navPolitics: '政治',
   fuel: '燃料',
   priority: '優先度',
+  mapMode: '地図モード',
+  cancel: '選択解除',
+  /** Shown while a stack is under orders and the next tap sets its objective. */
+  orderHint: (n: number): string => `${n}個師団を選択中 — 移動先をタップ`,
   airStrength: '航空戦力',
   resistance: '抵抗運動',
   priorityNames: ['低', '並', '高', '最'] as const,

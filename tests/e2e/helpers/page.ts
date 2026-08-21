@@ -192,8 +192,27 @@ export async function tapAt(
     type: 'touchStart', touchPoints: [{ x, y, id: 1 }],
   });
   await page.waitForTimeout(holdMs);
-  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  // The lifted point is named, for the same reason it is in `swipe`: an empty
+  // touchEnd leaves Chromium to invent the release coordinates.
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd', touchPoints: [{ x, y, id: 1 }],
+  });
   await page.waitForTimeout(120);
+}
+
+/** Screen position of a specific province's centre, in CSS pixels. */
+export async function provinceScreenPosById(
+  page: Page, id: number,
+): Promise<{ x: number; y: number }> {
+  return page.evaluate((pid) => {
+    const g = window.__game!;
+    const p = g.index.get(pid);
+    const box = g.renderer.canvas.getBoundingClientRect();
+    return {
+      x: box.left + g.renderer.camera.worldToScreenX(p.centerX),
+      y: box.top + g.renderer.camera.worldToScreenY(p.centerY),
+    };
+  }, id);
 }
 
 /** Screen position of a province centre, in CSS pixels. */

@@ -65,7 +65,8 @@ export class MapRenderer {
   private cityLayer = new Graphics();
   /** Exposed for the visual-determinism probe in the e2e suite. */
   labels!: LabelLayer;
-  private units!: UnitLayer;
+  /** Public so input can ask which counter a tap landed on. */
+  units!: UnitLayer;
 
   private reliefTexture!: Texture;
   private mode: MapMode = 'political';
@@ -383,9 +384,9 @@ export class MapRenderer {
     return this.mode;
   }
 
-  setSelection(id: ProvinceId | null): void {
+  setSelection(id: ProvinceId | null, ordering = false): void {
     this.selected = id;
-    this.units.setSelection(id);
+    this.units.setSelection(id, ordering);
   }
 
   setHover(id: ProvinceId | null): void {

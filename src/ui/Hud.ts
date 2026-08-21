@@ -207,16 +207,54 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // control in the centre of the screen steals the pinch gestures that belong
   // to the map underneath it.
   const modeBar = el('div', 'hud-modes');
+  // Shown only while a panel is open, when the column has nowhere to go: it
+  // opens the list on demand rather than the list standing over the map.
+  const modeToggle = el('button', 'hud-modes-toggle', '⊞');
+  modeToggle.setAttribute('aria-label', UI.mapMode);
+  modeToggle.addEventListener('click', () => modeBar.classList.toggle('is-open'));
+  modeBar.append(modeToggle);
   const modeButtons: HTMLElement[] = [];
   for (const [mode, label] of MAP_MODES) {
     const b = el('button', 'hud-mode', label);
     b.dataset.mode = mode;
     b.addEventListener('click', () => {
       game.setMapMode(mode);
+      modeBar.classList.remove('is-open');
       syncModes();
     });
     modeButtons.push(b);
     modeBar.append(b);
+  }
+
+  // --- order hint ----------------------------------------------------------
+  // One gesture has to do two jobs on a touch screen: reading the map and
+  // commanding the army. This says which job the next tap will do, and gives
+  // the player a way out that is not "tap the counter again and hope".
+  const orderHint = el('div', 'hud-order');
+  const orderText = el('span', 'hud-order-text', '');
+  const orderCancel = el('button', 'hud-order-cancel', '✕');
+  orderCancel.setAttribute('aria-label', UI.cancel);
+  orderCancel.addEventListener('click', () => {
+    game.unitSelected = false;
+    game.selectProvince(null);
+    syncOrder();
+  });
+  orderHint.append(orderText, orderCancel);
+
+  function syncOrder(): void {
+    // Counted live rather than from the selection array: the divisions in it
+    // were alive when the counter was tapped, and a stack that has since been
+    // destroyed must not leave the map in ordering mode.
+    let live = 0;
+    if (game.unitSelected) {
+      for (const id of game.selection.divisions) {
+        const d = game.state.divisions[id];
+        if (d && !d.dead) live++;
+      }
+      if (live === 0) game.unitSelected = false;
+    }
+    orderHint.classList.toggle('is-on', live > 0);
+    if (live > 0) setText(orderText, UI.orderHint(live));
   }
 
   // --- bottom sheet --------------------------------------------------------
@@ -303,7 +341,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
   top.append(topRow, stats, resStrip, alertRow);
 
-  root.append(top, modeBar, toasts, sheet, nav, outcome);
+  root.append(top, modeBar, orderHint, toasts, sheet, nav, outcome);
 
   // Everything below the top bar is placed against its measured height rather
   // than a constant. The constant was 78px, chosen when the bar was one row;
@@ -350,6 +388,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     }
     for (const b of navButtons) b.classList.toggle('is-active', b.dataset.panel === openPanel);
     root.classList.toggle('is-panel-open', openPanel !== null);
+    modeBar.classList.remove('is-open');
     measureBand();
   }
 
@@ -531,6 +570,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
         PANELS.construction.build(game, sheetBody);
       }
     }
+
+    syncOrder();
 
     if (openPanel !== null) PANELS[openPanel].refresh?.(game, sheetBody);
 

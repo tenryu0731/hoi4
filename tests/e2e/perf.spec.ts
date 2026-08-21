@@ -130,10 +130,18 @@ test.describe('performance', () => {
     console.log('scene graph:', JSON.stringify(scene));
 
     // Pixi batches aggressively, but every visible node still costs a transform
-    // update and a batch check each frame. Keep the ceiling well under the
-    // point where that becomes the frame's dominant cost.
-    expect(scene.visible).toBeLessThan(1400);
-    expect(scene.nodes).toBeLessThan(3000);
+    // update and a batch check each frame. The ceiling comes from the frame
+    // budget above, not from whatever the code happens to build: at the 1,524
+    // visible nodes this scene holds today the scene step measures p50 1.7-1.8ms
+    // against a 16.6ms frame, and p99 lands between 9ms and 22ms depending on
+    // how loaded the container is -- inside the 33.3ms floor either way, with
+    // room to roughly double. 2,000 is that headroom spent.
+    //
+    // It was 1,400 while the map had 323 provinces. One Graphics per province
+    // is the structure, so subdividing to 1,266 moved this and nothing else --
+    // the per-frame cost above is unchanged.
+    expect(scene.visible).toBeLessThan(2000);
+    expect(scene.nodes).toBeLessThan(4000);
   });
 
   test('recolouring the whole map is cheap', async ({ page }) => {

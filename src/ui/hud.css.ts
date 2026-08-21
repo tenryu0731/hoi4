@@ -195,18 +195,22 @@ export const HUD_CSS = `
   display: flex; flex-direction: column; gap: 5px; pointer-events: auto;
   touch-action: manipulation;
 }
-/* With a panel open there is no vertical room for a column of six, so the
-   strip lies down above the sheet instead of scrolling out of reach. Bounding
-   it to the visible band left 2 of 6 buttons off-screen at 360px, which is no
-   better than being underneath the panel. */
-.is-panel-open .hud-modes {
-  top: auto; left: 8px; right: 8px;
-  bottom: calc(var(--safe-bottom) + 56px + var(--sheet-h, 52vh) + 6px);
-  flex-direction: row; justify-content: flex-end;
-  overflow-x: auto; scrollbar-width: none;
+/* With a panel open there is no vertical room for a column of six, and laying
+   it down horizontally was worse: it put a 44px full-width band of buttons
+   across the middle of the map, measured at y 311..355 from x 8 to 404, which
+   swallowed every tap aimed at the ground underneath it. So it collapses to
+   one button showing the current mode, and opens on demand. */
+.is-panel-open .hud-modes:not(.is-open) .hud-mode { display: none; }
+.is-panel-open .hud-modes:not(.is-open) .hud-mode.is-active { display: flex; }
+.hud-modes-toggle { display: none; }
+.is-panel-open .hud-modes-toggle {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 58px; min-height: 44px;
+  background: linear-gradient(180deg, rgba(48,46,41,0.94) 0%, rgba(29,28,24,0.94) 100%);
+  color: var(--ink-dim); border: 1px solid #100f0d; border-radius: 2px;
+  box-shadow: var(--bevel); font: inherit; font-size: 16px; cursor: pointer;
 }
-.is-panel-open .hud-modes::-webkit-scrollbar { display: none; }
-.is-panel-open .hud-mode { flex: 0 0 auto; min-width: 52px; }
+.is-panel-open .hud-modes { max-height: calc(var(--map-band, 60vh) - 12px); overflow: hidden; }
 /* 44px, like everything else. These were 28px tall on a 31px pitch, and they
    are the only way to change map mode. */
 .hud-mode {
@@ -240,6 +244,40 @@ export const HUD_CSS = `
 .hud-toast.kind-capitulation { border-left-color: #b06ad0; }
 .hud-toast.kind-construction { border-left-color: var(--good); }
 .hud-toast.kind-outcome { border-left-color: #fff; }
+
+/* --- order hint ---------------------------------------------------------- */
+/* Sits just above the sheet, centred, and only while a stack is taking orders.
+   Without it the two modes of a single tap -- read this province, march the
+   army there -- are indistinguishable, and the gold ring on the counter says
+   only "selected", which it also says when nothing has been ordered. */
+.hud-order {
+  /* Directly under the top bar. It was above the sheet first, which put it
+     exactly over the stack it was describing -- the selected counter sat
+     behind the banner announcing that it was selected. */
+  position: absolute; left: 50%; transform: translate(-50%, -8px);
+  top: calc(var(--hud-top-h, 200px) + 8px);
+  display: none; align-items: center; gap: 8px;
+  padding: 0 4px 0 12px; height: 40px;
+  background: linear-gradient(180deg, rgba(58,52,38,0.96) 0%, rgba(36,32,24,0.96) 100%);
+  border: 1px solid #0f0e0c; border-radius: 3px;
+  box-shadow: var(--bevel), 0 4px 14px rgba(0,0,0,0.55);
+  color: var(--ink); font-size: 13px; white-space: nowrap;
+  /* Transparent to touch except for its own button. It sits over the map band,
+     and a banner that eats taps is exactly the bug the horizontal map-mode
+     strip had: the counter it is telling you about was underneath it. */
+  pointer-events: none; opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.hud-order.is-on { display: flex; opacity: 1; transform: translate(-50%, 0); }
+/* Clear of the map-mode control in the top-right corner. */
+.hud-order { max-width: calc(100% - 150px); }
+.hud-order-text { color: #f0e4c4; }
+.hud-order-cancel {
+  pointer-events: auto;
+  min-width: 32px; min-height: 32px; padding: 0;
+  background: transparent; border: 0; color: var(--ink-dim);
+  font: inherit; font-size: 15px; cursor: pointer;
+}
 
 /* --- bottom sheet -------------------------------------------------------- */
 /* The sheet ground is darker than the plates that sit on it. Measured before:
