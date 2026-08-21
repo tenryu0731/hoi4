@@ -609,6 +609,7 @@ export type GameEventBody =
   | { k: 'joinedFaction'; country: string; faction: string }
   | { k: 'capitulated'; country: string; occupation: number }
   | { k: 'annexed'; country: string; by: string }
+  | { k: 'ceded'; country: string; by: string; states: number }
   | { k: 'itemCompleted'; country: string; item: string }
   | { k: 'divisionLost'; country: string }
   | { k: 'attack'; attacker: string; defender: string; province: ProvinceId }

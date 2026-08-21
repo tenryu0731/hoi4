@@ -47,6 +47,18 @@ export const TENSION_PER_ANNEXATION = 9;
  */
 export const DEMAND_STRENGTH_RATIO = 3;
 
+/**
+ * How much harder a focus presses than a bare ultimatum.
+ *
+ * Measured at 1: Germany in March 1938 does not clear the bar against Austria
+ * -- the ratio of the two blocs is well under three -- so the Anschluss focus
+ * completed and nothing happened, which is the bug this is here to fix.
+ */
+export const FOCUS_PERSUASION = 3.2;
+
+/** A border strip is a smaller thing to ask for than the whole country. */
+export const CESSION_EASE = 1.6;
+
 export interface DiplomacyContext {
   index: ProvinceIndex;
 }
@@ -496,10 +508,30 @@ export function demandSubmission(
 ): boolean {
   if (!canDemand(state, demander, target)) return false;
   const a = state.countries[demander];
-  const t = state.countries[target];
   if (a.economy.politicalPower < DEMAND_COST) return false;
   a.economy.politicalPower -= DEMAND_COST;
 
+  if (!submits(state, demander, target, 1)) {
+    refuse(state, demander, target);
+    return false;
+  }
+  annex(state, ctx, demander, target);
+  return true;
+}
+
+/**
+ * Does the target fold?
+ *
+ * `persuasion` scales the bar a demand has to clear. An ultimatum bought with
+ * political power presses at 1; a national focus presses harder, because what
+ * it spends is two months of the whole government's attention and the
+ * mobilisation everyone can see behind it.
+ */
+function submits(
+  state: GameState, demander: CountryId, target: CountryId, persuasion: number,
+): boolean {
+  const a = state.countries[demander];
+  const t = state.countries[target];
   const ratio = blocStrength(state, demander) / blocStrength(state, target);
   let threshold = randRange(state.rng, DEMAND_STRENGTH_RATIO * 0.8, DEMAND_STRENGTH_RATIO * 1.25);
   // A government that shares the demander's politics has a faction at home
@@ -508,19 +540,34 @@ export function demandSubmission(
   // Nobody folds to a power their people already loathe. Opinion is bounded to
   // +/-100, so this swings the bar by a quarter either way.
   threshold *= 1 - opinionOf(state, target, demander) / 400;
+  return ratio >= threshold / Math.max(0.05, persuasion);
+}
 
-  if (ratio < threshold) {
-    // Refusal hardens the victim and puts everyone else on notice.
-    adjustOpinion(state, target, demander, -30);
-    for (const c of state.countries) {
-      if (c.id === demander) continue;
-      adjustOpinion(state, c.id, demander, -5);
-    }
-    state.worldTension = Math.min(100, state.worldTension + 3);
-    return false;
+/** Refusal hardens the victim and puts everyone else on notice. */
+function refuse(state: GameState, demander: CountryId, target: CountryId): void {
+  adjustOpinion(state, target, demander, -30);
+  for (const c of state.countries) {
+    if (c.id === demander) continue;
+    adjustOpinion(state, c.id, demander, -5);
   }
+  state.worldTension = Math.min(100, state.worldTension + 3);
+}
 
+function annex(
+  state: GameState, ctx: DiplomacyContext, demander: CountryId, target: CountryId,
+): void {
+  const t = state.countries[target];
   absorbCountry(state, ctx, target, demander);
+  // Swallowed at the table rather than beaten in the field: the border moves
+  // with the flag, so the annexed territory is owned, not merely occupied.
+  // Left as occupation it would raise resistance forever and never pay, and
+  // the Anschluss did not leave Austria a garrison problem.
+  for (const p of state.provinces) {
+    if (p.owner === target) { p.owner = demander; p.controller = demander; }
+  }
+  for (const st of state.states) {
+    if (st.owner === target) { st.owner = demander; st.controller = demander; st.resistance = 0; }
+  }
   for (const c of state.countries) {
     if (c.id === demander) continue;
     adjustOpinion(state, c.id, demander, -12);
@@ -532,7 +579,98 @@ export function demandSubmission(
     body: { k: 'annexed', country: t.tag, by: state.countries[demander].tag },
     country: target,
   });
+}
+
+/**
+ * The demand a national focus makes: no political power, and it presses much
+ * harder than an ordinary ultimatum.
+ *
+ * Returns whether the target folded. The caller decides what a refusal means
+ * -- for the historical focuses it means a war goal, which is exactly what
+ * happened when the guarantees were real.
+ */
+export function focusDemandAnnexation(
+  state: GameState, ctx: DiplomacyContext, demander: CountryId, target: CountryId,
+): boolean {
+  if (!canDemand(state, demander, target)) return false;
+  if (!submits(state, demander, target, FOCUS_PERSUASION)) {
+    refuse(state, demander, target);
+    return false;
+  }
+  annex(state, ctx, demander, target);
   return true;
+}
+
+/**
+ * A partial cession: the border strip, not the country.
+ *
+ * The Sudetenland and Bessarabia were handed over whole states at a time under
+ * exactly this kind of pressure, and the state is the tier the map keeps
+ * industry and population on -- so a cession moves real weight without ending
+ * anyone. Transfers up to `count` of the target's states that touch the
+ * demander, nearest the border first.
+ */
+export function focusDemandCession(
+  state: GameState, ctx: DiplomacyContext,
+  demander: CountryId, target: CountryId, count: number,
+): number {
+  if (!canDemand(state, demander, target)) return 0;
+  // Ceding a strip is a smaller ask than surrendering the state, so it clears
+  // a lower bar than annexation does.
+  if (!submits(state, demander, target, FOCUS_PERSUASION * CESSION_EASE)) {
+    refuse(state, demander, target);
+    return 0;
+  }
+
+  // States of the target that touch the demander, biggest first: the demand is
+  // for the industrial border districts, not for a moor nobody wants.
+  const touching: { id: number; weight: number }[] = [];
+  for (let i = 0; i < state.states.length; i++) {
+    const st = state.states[i];
+    if (st.owner !== target || st.controller !== target) continue;
+    const members = ctx.index.data.states[i].provinces;
+    const borders = members.some(
+      (pid) => ctx.index.provinces[pid]?.neighbors.some(
+        (n) => state.provinces[n]?.owner === demander,
+      ),
+    );
+    if (!borders) continue;
+    const geo = ctx.index.data.states[i];
+    touching.push({ id: i, weight: geo.manpower + st.civilianFactories * 400 });
+  }
+  touching.sort((a, b) => b.weight - a.weight || a.id - b.id);
+
+  const taken = touching.slice(0, Math.max(0, count));
+  if (taken.length === 0) return 0;
+  for (const { id } of taken) {
+    const st = state.states[id];
+    st.owner = demander;
+    st.controller = demander;
+    st.resistance = 0;
+    for (const pid of ctx.index.data.states[id].provinces) {
+      const p = state.provinces[pid];
+      if (!p) continue;
+      p.owner = demander;
+      p.controller = demander;
+    }
+  }
+  for (const c of state.countries) {
+    if (c.id === demander) continue;
+    adjustOpinion(state, c.id, demander, -8);
+  }
+  state.worldTension = Math.min(100, state.worldTension + TENSION_PER_ANNEXATION * 0.6);
+  state.log.push({
+    day: state.clock.totalDays,
+    kind: 'capitulation',
+    body: {
+      k: 'ceded',
+      country: state.countries[target].tag,
+      by: state.countries[demander].tag,
+      states: taken.length,
+    },
+    country: target,
+  });
+  return taken.length;
 }
 
 /**

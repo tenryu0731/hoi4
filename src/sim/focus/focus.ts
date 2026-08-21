@@ -3,6 +3,7 @@ import { techDef } from '../research/techData';
 import { BUILDING_CAP, FACTORY_OUTPUT } from '../core/data';
 import {
   JUSTIFY_BASE_DAYS, adjustOpinion, areAllied,
+  focusDemandAnnexation, focusDemandCession,
 } from '../diplomacy/diplomacy';
 import { recomputeFactories } from '../economy/production';
 import type {
@@ -443,6 +444,15 @@ function applyEffect(
     case 'wargoal':
       grantWargoal(state, c, e.target);
       return;
+    case 'annex':
+      pressDemand(state, c, e.target, (t) => focusDemandAnnexation(state, ctx, c.id, t));
+      return;
+    case 'cede':
+      pressDemand(
+        state, c, e.target,
+        (t) => focusDemandCession(state, ctx, c.id, t, e.states) > 0,
+      );
+      return;
     case 'guarantee':
       grantGuarantee(state, c, e.target);
       return;
@@ -603,6 +613,26 @@ function grantWargoal(state: GameState, c: Country, tag: string): void {
   const size = Math.max(1, t.stats.victoryPoints);
   const required = Math.round(JUSTIFY_BASE_DAYS * (1 + Math.min(2, size / 120)));
   c.diplomacy.justifications.push({ target: t.id, progress: required, required });
+}
+
+/**
+ * Presses a focus's territorial demand, and falls back to a war goal.
+ *
+ * Every one of these focuses is named for a thing that happened, and every one
+ * of them happened because the demand was met. When it is not -- the target is
+ * guaranteed, or in a bloc, or big enough to say no -- the focus must still
+ * leave the government somewhere to go, or two months of national attention
+ * bought nothing at all. A matured war goal is that somewhere: it is what
+ * Danzig turned into.
+ */
+function pressDemand(
+  state: GameState, c: Country, tag: string,
+  press: (target: CountryId) => boolean,
+): void {
+  const t = countryByTag(state, tag);
+  if (!t || t.id === c.id || t.capitulated) return;
+  if (press(t.id)) return;
+  grantWargoal(state, c, tag);
 }
 
 /** As diplomacy.guarantee, but paid for with the focus rather than with power. */
@@ -798,6 +828,8 @@ export function effectText(e: FocusEffect): string {
     case 'warEconomy': return `消費財割合の上限 ${Math.round(e.consumerGoods * 100)}%`;
     case 'equipment': return `${EQUIPMENT_NAME[e.equipment] ?? e.equipment} ${signed(e.amount)}`;
     case 'wargoal': return `${e.target}に対する戦争目標`;
+    case 'annex': return `${e.target}を併合（拒まれた場合は戦争目標）`;
+    case 'cede': return `${e.target}に${e.states}ステートの割譲を要求`;
     case 'guarantee': return `${e.target}の独立を保証`;
     case 'opinion': return `${e.target}との関係 ${signed(e.amount)}`;
     case 'worldTension': return `世界緊張度 ${signed(e.amount)}%`;

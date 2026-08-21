@@ -333,6 +333,8 @@ export function eventText(
       return `${country(body.attacker)}が${country(body.defender)}に宣戦布告`;
     case 'joinedFaction':
       return `${country(body.country)}が${body.faction}に加入`;
+    case 'ceded':
+      return `${country(body.country)}が${country(body.by)}に${body.states}ステートを割譲`;
     case 'capitulated':
       return `${country(body.country)}が降伏 (占領率 ${Math.round(body.occupation * 100)}%)`;
     case 'annexed':
