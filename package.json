@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "npm run data && npm run assets && vite build",
     "preview": "vite preview --port 4173",
-    "data": "tsx tools/map-build/build.ts --subdivide --states=56",
+    "data": "tsx tools/map-build/build.ts --subdivide --states=240",
     "assets": "tsx tools/asset-gen/build.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
