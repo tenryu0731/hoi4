@@ -372,6 +372,8 @@ export const HUD_CSS = `
    war, start a focus, add a division -- and they were the smallest text on
    the screen. 12px is the floor for CJK now. */
 .panel-btn.wide { min-width: 64px; font-size: 12px; }
+.panel-btn.prio { min-width: 44px; font-size: 12px; color: var(--ink-dim); }
+.panel-btn.prio.is-high { color: var(--accent); font-weight: 700; }
 .panel-btn.danger {
   color: #f0a49a; border-color: #100f0d;
   background: linear-gradient(180deg, #43302b 0%, #2c1e1a 100%);

@@ -196,6 +196,11 @@ export function runEconomyAI(state: GameState, _ctx: AIContext, c: Country): voi
         ? Math.max(floor, total - assigned)
         : Math.max(floor, Math.round(total * share));
       setLineFactories(c, line.id, want);
+      // The mix already says what this country cares about, so the scarce
+      // steel goes to the same place the factories did. Without this every
+      // line sat at the same priority and the allocator's sort fell back to
+      // line id -- which is to say, to nothing.
+      line.priority = share >= 0.4 ? 3 : share >= 0.2 ? 2 : share > 0 ? 1 : 0;
       assigned += line.assignedFactories;
     }
   }

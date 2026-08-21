@@ -301,11 +301,52 @@ function applyBuilding(state: GameState, stateId: StateId, kind: BuildingType): 
     case 'military_factory': st.militaryFactories++; break;
     case 'dockyard': st.dockyards++; break;
     case 'infrastructure': st.infrastructure = Math.min(BUILDING_CAP.infrastructure, st.infrastructure + 1); break;
-    case 'fort': break;   // forts live on provinces, handled by the military layer
+    case 'fort': fortifyState(state, stateId); break;
   }
 }
 
 /** Current level of a building type in a state, for cap checks. */
+/** Provinces of a state that its controller still holds. */
+function stateProvinces(state: GameState, stateId: StateId): number[] {
+  const st = state.states[stateId];
+  return st.provinces.filter((id) => state.provinces[id]?.controller === st.controller);
+}
+
+/**
+ * Puts the next level of fortification on the frontier.
+ *
+ * Construction is ordered per state but forts are held per province, and
+ * nothing bridged the two: `applyBuilding` had an empty case with a comment
+ * saying the military layer handled it, and no military layer did. Ten forts
+ * could be queued, paid for and completed, each logging a completion, while
+ * every province in the state stayed at level 0.
+ *
+ * The level goes to the least-fortified province in the state, and among
+ * equals to the one worth the most victory points -- so a line thickens evenly
+ * rather than piling up on one tile, and the places worth holding get theirs
+ * first.
+ */
+function fortifyState(state: GameState, stateId: StateId): void {
+  const mine = stateProvinces(state, stateId);
+  if (mine.length === 0) return;
+  let best = mine[0];
+  for (const id of mine) {
+    const p = state.provinces[id];
+    const b = state.provinces[best];
+    if (p.fortLevel < b.fortLevel || (p.fortLevel === b.fortLevel && p.vp > b.vp)) best = id;
+  }
+  const target = state.provinces[best];
+  target.fortLevel = Math.min(BUILDING_CAP.fort, target.fortLevel + 1);
+}
+
+function lowestFort(state: GameState, stateId: StateId): number {
+  const mine = stateProvinces(state, stateId);
+  if (mine.length === 0) return BUILDING_CAP.fort;
+  let low = Infinity;
+  for (const id of mine) low = Math.min(low, state.provinces[id].fortLevel);
+  return low;
+}
+
 export function buildingLevel(state: GameState, stateId: StateId, kind: BuildingType): number {
   const st = state.states[stateId];
   switch (kind) {
@@ -313,7 +354,10 @@ export function buildingLevel(state: GameState, stateId: StateId, kind: Building
     case 'military_factory': return st.militaryFactories;
     case 'dockyard': return st.dockyards;
     case 'infrastructure': return st.infrastructure;
-    case 'fort': return 0;
+    // The lowest fort in the state, which is the one the next level lands on.
+    // Returning a constant 0 meant the cap never bit and ten completed forts
+    // could be paid for without a single one existing.
+    case 'fort': return lowestFort(state, stateId);
   }
 }
 

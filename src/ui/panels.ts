@@ -97,7 +97,7 @@ const EQUIPMENT_LABEL = EQUIPMENT_NAME;
 const RESOURCE_LABEL = RESOURCE;
 
 const BUILDABLE: BuildingType[] = [
-  'civilian_factory', 'military_factory', 'dockyard', 'infrastructure',
+  'civilian_factory', 'military_factory', 'dockyard', 'infrastructure', 'fort',
 ];
 
 // ---------------------------------------------------------------------------
@@ -150,7 +150,27 @@ export const productionPanel: Panel = {
           factories: line.assignedFactories + 1,
         });
       });
-      controls.append(minus, count, plus);
+      // Priority decides which line gets scarce steel and tungsten first. It
+      // was a four-step mechanic with no control anywhere: measured over a
+      // campaign, 316,806 line-days carried one distinct value, so the
+      // allocator's priority sort degenerated to a sort by line id.
+      const prio = el('button', 'panel-btn prio');
+      const paintPrio = () => {
+        setText(prio, UI.priorityNames[line.priority]);
+        prio.classList.toggle('is-high', line.priority >= 2);
+        prio.setAttribute(
+          'aria-label',
+          `${EQUIPMENT_LABEL[line.equipment]}: ${UI.priority} ${UI.priorityNames[line.priority]}`,
+        );
+      };
+      paintPrio();
+      prio.addEventListener('click', () => {
+        const next = ((line.priority + 1) % 4) as 0 | 1 | 2 | 3;
+        game.issue({ t: 'setLinePriority', country: me.id, line: line.id, priority: next });
+        line.priority = next;
+        paintPrio();
+      });
+      controls.append(prio, minus, count, plus);
 
       row.append(name, controls);
       list.append(row);

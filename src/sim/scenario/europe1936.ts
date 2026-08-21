@@ -211,8 +211,6 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       templates: defaultTemplates(),
       research: {
         slots: n.major ? 3 : 2,
-        levels: { infantry: 0, armor: 0, air: 0, industry: 0 },
-        progress: { infantry: 0, armor: 0, air: 0, industry: 0 },
       },
       diplomacy: {
         opinion: new Array(orderedTags.length).fill(0),
@@ -261,6 +259,7 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       militaryFactories: s.militaryFactories,
       dockyards: s.dockyards,
       infrastructure: s.infrastructure,
+      provinces: index.provinces.filter((p) => p.stateId === s.id).map((p) => p.id),
       manpowerPool: s.manpower,
       buildingSlots: s.buildingSlots,
     };

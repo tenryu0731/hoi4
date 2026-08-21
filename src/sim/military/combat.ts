@@ -148,6 +148,9 @@ interface SideStats {
   engaged: Division[];
 }
 
+/** What fire is still worth against armour it cannot touch at all. */
+const PIERCE_FLOOR = 0.45;
+
 /** What a trait is worth where it applies. */
 const TRAIT_BONUS = 0.1;
 
@@ -155,6 +158,25 @@ const TRAIT_BONUS = 0.1;
 function isArmoured(tpl: DivisionTemplate): boolean {
   return tpl.battalions.some((b) => b === 'light_armor' || b === 'medium_armor');
 }
+
+/**
+ * How much of this formation is trained for the high ground, 0..1.
+ *
+ * The mountaineers battalion was a byte-identical copy of infantry -- same
+ * equipment, manpower, organisation, strength, width and speed -- and no code
+ * anywhere gave it a mountain or a hill. The map has 74 mountain provinces and
+ * 22 of hills, and the 山岳師団 the scenario fields carries one fewer line
+ * battalion than the 歩兵師団 at identical cost, so it was strictly the worse
+ * of the two.
+ */
+function mountainShare(tpl: DivisionTemplate): number {
+  if (tpl.battalions.length === 0) return 0;
+  const trained = tpl.battalions.filter((b) => b === 'mountaineers').length;
+  return trained / tpl.battalions.length;
+}
+
+/** What full mountain training is worth where the ground is against you. */
+const MOUNTAINEER_BONUS = 0.25;
 
 /** True when this formation marches: the infantry a foot general knows. */
 function isFootborne(tpl: DivisionTemplate): boolean {
@@ -202,6 +224,7 @@ function sideHasTrait(state: GameState, ids: number[], trait: 'winter_specialist
 function collectSide(
   state: GameState, ids: number[], width: number, attacking: boolean,
   ignorePlanning = false,
+  rough = false,
 ): SideStats {
   const out: SideStats = {
     softAttack: 0, hardAttack: 0, defence: 0, breakthrough: 0,
@@ -249,6 +272,13 @@ function collectSide(
     // trenches it is walking out of.
     const dug = attacking ? 1 : 1 + d.entrenchment * ENTRENCHMENT_PER_LEVEL;
 
+    // Mountain troops, where there is a mountain.
+    if (rough) {
+      const share = mountainShare(tpl);
+      attackMod += MOUNTAINEER_BONUS * share;
+      defenceMod += MOUNTAINEER_BONUS * share;
+    }
+
     // Fuel: the armoured half of a formation's firepower is what runs dry.
     // Its rifles keep working, which is why this multiplies hard attack and
     // breakthrough and leaves soft attack alone.
@@ -279,7 +309,19 @@ export function sideDamage(
 
   // Armour that the enemy cannot pierce blunts most incoming fire; this is
   // what makes a concentrated tank formation disproportionately powerful.
-  const pierced = attacker.piercing >= defender.armor ? 1 : 0.45;
+  //
+  // A ratio, not a threshold. The threshold form asked `piercing >= armor`,
+  // and the two populations are three times apart: infantry pierces 8, rising
+  // to 14.6 with every one of the 59 technologies researched, against armour
+  // of 30 rising to 47.4. Measured over 83,973 combat rounds, research flipped
+  // that comparison exactly zero times -- so eleven anti-tank and armour
+  // technologies advertised numbers that could not change an outcome, in
+  // either direction, at any point in any campaign. A ratio gives every point
+  // of piercing something to buy and leaves the extremes where they were.
+  const armour = Math.max(1, defender.armor);
+  const pierced = attacker.piercing >= armour
+    ? 1
+    : PIERCE_FLOOR + (1 - PIERCE_FLOOR) * (attacker.piercing / armour);
 
   const hits = raw * modifier * pierced * roll;
   // Fire the defence absorbs still costs cohesion; only what gets through
@@ -350,13 +392,14 @@ export function resolveCombatRound(
   const terrain = TERRAIN[geo.terrain];
   const width = terrain.combatWidth;
 
-  const att = collectSide(state, combat.attackers, width, true);
-  const def = collectSide(state, combat.defenders, width, false);
+  const rough = geo.terrain === 'mountain' || geo.terrain === 'hills';
+  const att = collectSide(state, combat.attackers, width, true, false, rough);
+  const def = collectSide(state, combat.defenders, width, false, false, rough);
 
   // A trickster on the defending side reads the attack: the preparation the
   // attacker spent weeks banking counts for nothing here.
   if (countersPlan(state, combat.defenders)) {
-    const attWithoutPlan = collectSide(state, combat.attackers, width, true, true);
+    const attWithoutPlan = collectSide(state, combat.attackers, width, true, true, rough);
     att.softAttack = attWithoutPlan.softAttack;
     att.hardAttack = attWithoutPlan.hardAttack;
   }

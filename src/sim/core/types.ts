@@ -402,6 +402,15 @@ export interface ProvinceState {
 export interface StateRuntime {
   owner: CountryId;
   controller: CountryId;
+  /**
+   * The provinces this state is made of, in id order.
+   *
+   * Fixed at scenario creation -- a province never changes which state it
+   * belongs to, only who holds it -- and cached here so the economy can reach
+   * from a state to its ground without every function that needs to do so
+   * having to carry a ProvinceIndex.
+   */
+  provinces: readonly ProvinceId[];
   civilianFactories: number;
   militaryFactories: number;
   dockyards: number;
@@ -442,12 +451,6 @@ export interface ResearchState {
   active?: ResearchSlot[];
   /** Technologies finished, in completion order. */
   completed?: TechId[];
-  /**
-   * The pre-tree drip, kept because production.ts still reads
-   * `levels.industry`. Nothing in sim/research writes either field.
-   */
-  levels: { infantry: number; armor: number; air: number; industry: number };
-  progress: { infantry: number; armor: number; air: number; industry: number };
 }
 
 /**

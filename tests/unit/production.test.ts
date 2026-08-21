@@ -10,6 +10,8 @@ import {
 } from '../../src/sim/core/data';
 import { RESOURCE_TYPES, type EquipmentType } from '../../src/sim/core/types';
 import { lawEffects } from '../../src/sim/politics/politics';
+import { Simulation } from '../../src/sim/Simulation';
+import { TimeEngine } from '../../src/sim/time/TimeEngine';
 import { makeFixture } from './helpers/fixture';
 
 function runDays(f: ReturnType<typeof makeFixture>, days: number): void {
@@ -102,7 +104,6 @@ describe('equipment production', () => {
     const ger = f.country('GER');
     // One line, fixed efficiency, no research, no shortage.
     ger.productionLines = [];
-    ger.research.levels.industry = 0;
     const line = addProductionLine(f.state, ger, 'infantry_equipment');
     line.efficiency = 0.4;
     line.efficiencyCap = 0.4;   // pinned, so growth cannot move it
@@ -177,7 +178,6 @@ describe('equipment production', () => {
       const g = makeFixture();
       const c = g.country('GER');
       c.productionLines = [];
-      c.research.levels.industry = 0;
       const l = addProductionLine(g.state, c, 'motorized');   // needs steel + rubber
       l.efficiency = 0.4;
       l.efficiencyCap = 0.4;
@@ -406,5 +406,45 @@ describe('determinism', () => {
         lines: c.productionLines.map((l) => [l.efficiency, l.progress]),
       }));
     expect(snap(a)).toEqual(snap(b));
+  });
+});
+
+describe('forts', () => {
+  it('exist once they are built', () => {
+    // Ten forts could be queued, paid for and completed, each logging a
+    // completion, while every province in the state stayed at level 0: the
+    // construction case was empty with a comment saying the military layer
+    // handled it, and no military layer did.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const stateId = f.index.get(ger.capital).stateId;
+    const levels = () => f.state.states[stateId].provinces
+      .map((id) => f.state.provinces[id].fortLevel);
+    expect(Math.max(...levels())).toBe(0);
+
+    const sim = new Simulation(f.state, f.index);
+    for (let i = 0; i < 4; i++) {
+      sim.execute({ t: 'queueConstruction', country: ger.id, state: stateId, kind: 'fort' });
+    }
+    const time = new TimeEngine(f.state.clock.totalHours);
+    time.on((c) => sim.tick(c));
+    time.step(24 * 400);
+
+    const built = levels().reduce((n, l) => n + l, 0);
+    expect(built).toBe(4);
+    // Spread rather than stacked: the least-fortified province takes the next.
+    expect(Math.max(...levels())).toBeLessThanOrEqual(1);
+  }, 30_000);
+
+  it('reports its real level so the cap can bite', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const stateId = f.index.get(ger.capital).stateId;
+    expect(buildingLevel(f.state, stateId, 'fort')).toBe(0);
+    for (const id of f.state.states[stateId].provinces) {
+      f.state.provinces[id].fortLevel = BUILDING_CAP.fort;
+    }
+    expect(buildingLevel(f.state, stateId, 'fort')).toBe(BUILDING_CAP.fort);
+    expect(canQueueBuilding(f.state, ger, stateId, 'fort')).toBe(false);
   });
 });

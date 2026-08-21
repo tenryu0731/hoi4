@@ -363,7 +363,15 @@ export function movementSpeed(
   const infra = state.states[geo.stateId]?.infrastructure ?? 1;
   const infraFactor = 0.6 + (infra / 5) * 0.6;
   const supplyFactor = 0.5 + 0.5 * Math.min(1, d.supplyLevel);
-  const factor = Math.max(MIN_SPEED_FACTOR, terrain.speed * infraFactor * supplyFactor);
+  // Mountain troops give back part of what the ground takes: the terrain
+  // penalty is what they are trained against.
+  const trained = tpl.battalions.length === 0 ? 0
+    : tpl.battalions.filter((b) => b === 'mountaineers').length / tpl.battalions.length;
+  const rough = geo.terrain === 'mountain' || geo.terrain === 'hills';
+  const terrainSpeed = rough
+    ? terrain.speed + (1 - terrain.speed) * trained
+    : terrain.speed;
+  const factor = Math.max(MIN_SPEED_FACTOR, terrainSpeed * infraFactor * supplyFactor);
   // A panzer general gets his armour moving faster than the book says, which
   // is the only thing the trait is famous for.
   const cmd = commandModifiers(state, d);

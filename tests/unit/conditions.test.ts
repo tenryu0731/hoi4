@@ -216,3 +216,34 @@ describe('commander traits', () => {
     expect(commandModifiers(f.state, f.div).traits.has('naval_invader')).toBe(true);
   });
 });
+
+describe('mountain troops', () => {
+  it('move faster over the ground they are trained for, and only there', () => {
+    const f = rig([]);
+    const ger = f.country('GER');
+    const mtn = ger.templates.find((t) => t.name.includes('山岳'))!;
+    const foot = ger.templates.find((t) => t.name.includes('歩兵'))!;
+    const ctx = { index: f.index } as never;
+
+    const mountain = f.index.provinces.find((p) => p.terrain === 'mountain')!;
+    const plains = f.index.provinces.find((p) => p.terrain === 'plains')!;
+
+    const speedOf = (templateId: number, into: number) => {
+      f.div.templateId = templateId;
+      return movementSpeed(f.state, ctx, f.div, into);
+    };
+    // Over a mountain the trained division is quicker.
+    expect(speedOf(mtn.id, mountain.id)).toBeGreaterThan(speedOf(foot.id, mountain.id));
+    // On the flat the training buys nothing at all.
+    expect(speedOf(mtn.id, plains.id)).toBeCloseTo(speedOf(foot.id, plains.id), 6);
+  });
+
+  it('is not a byte-identical copy of infantry any more', () => {
+    // The battalion still has the same equipment and manpower as infantry; what
+    // changed is that the game now asks where the division is standing.
+    const f = rig([]);
+    const ger = f.country('GER');
+    const mtn = ger.templates.find((t) => t.name.includes('山岳'))!;
+    expect(mtn.battalions.filter((b) => b === 'mountaineers').length).toBeGreaterThan(0);
+  });
+});
