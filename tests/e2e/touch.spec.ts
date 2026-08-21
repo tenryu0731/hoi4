@@ -143,41 +143,94 @@ test.describe('touch input', () => {
     expect(selected).toBeNull();
   });
 
-  test('dragging from a selected friendly stack issues a move order', async ({ page }) => {
-    await bootGame(page);
+  /*
+   * Retried, and only this one.
+   *
+   * Chromium's synthetic touch delivery under SwiftShader drops a gesture once
+   * the suite has been running for ten minutes. Measured: with the framing
+   * asserted, this test passes 10 of 10 repeats on its own and fails roughly
+   * once per full-suite run, at which point the controller has recorded no
+   * press at all -- no drag phase, no camera movement -- while the selection is
+   * intact and both endpoints hit the canvas well clear of the HUD. Retrying by
+   * hand inside the test made it worse, because the first gesture sometimes
+   * does arrive and pans the camera, leaving the second one's coordinates
+   * stale. Playwright's own retry starts from a fresh page and does not have
+   * that problem.
+   *
+   * The retry is scoped here rather than set globally so that a genuine
+   * regression anywhere else still fails on the first run.
+   */
 
-    // Frame Germany and its eastern neighbour, then select the German stack.
-    const setup = await page.evaluate(() => {
-      const g = window.__game!;
-      const ger = g.index.provinces.find((p) => p.ownerTag === 'GER')!;
-      const target = g.index.provinces.find((p) => p.ownerTag === 'POL')!;
-      g.renderer.camera.centerOn(
-        (ger.centerX + target.centerX) / 2,
-        (ger.centerY + target.centerY) / 2,
-      );
-      g.renderer.camera.zoom = 0.22;
-      g.tickFrame(16);
-      g.selectProvince(ger.id);
-      return { from: ger.id, to: target.id, selected: g.selection.divisions.length };
+  test.describe('the drag order', () => {
+    test.describe.configure({ retries: 2 });
+
+    test('dragging from a selected friendly stack issues a move order', async ({ page }) => {
+      await bootGame(page);
+
+      // Frame Germany and its eastern neighbour, then select the German stack.
+      const setup = await page.evaluate(() => {
+        const g = window.__game!;
+        const ger = g.index.provinces.find((p) => p.ownerTag === 'GER')!;
+        const target = g.index.provinces.find((p) => p.ownerTag === 'POL')!;
+        g.renderer.camera.centerOn(
+          (ger.centerX + target.centerX) / 2,
+          (ger.centerY + target.centerY) / 2,
+        );
+        g.renderer.camera.zoom = 0.22;
+        g.tickFrame(16);
+        g.selectProvince(ger.id);
+        return { from: ger.id, to: target.id, selected: g.selection.divisions.length };
+      });
+      expect(setup.selected).toBeGreaterThan(0);
+
+      const from = await provinceScreenPos(page, 'GER');
+      const to = await provinceScreenPos(page, 'POL');
+      // Both ends have to be on the map before the finger goes down. The
+      // gesture's geometry is what decides this test: at zoom 0.42 the target
+      // province leaves the viewport and seven runs in ten fail, and at 0.22 the
+      // margins are thin enough to fail about one in ten. Asserting the framing
+      // turns a flake into a message that says which end was off.
+      const frame = await page.evaluate(() => ({
+        w: window.innerWidth,
+        h: window.innerHeight,
+        top: document.querySelector('.hud-top')!.getBoundingClientRect().bottom,
+        nav: document.querySelector('.hud-nav')!.getBoundingClientRect().top,
+      }));
+      const onMap = (pt: { x: number; y: number }) => pt.x > 24 && pt.x < frame.w - 24
+        && pt.y > frame.top + 24 && pt.y < frame.nav - 24;
+      expect(onMap(from), `drag start ${JSON.stringify(from)} is off the map ${JSON.stringify(frame)}`)
+        .toBe(true);
+      expect(onMap(to), `drag end ${JSON.stringify(to)} is off the map ${JSON.stringify(frame)}`)
+        .toBe(true);
+
+      // A deliberate press, then the stroke: the order candidacy is decided at
+      // press time, and moving in the same millisecond as the press races it.
+      await swipe(page, from, to, 24, 150);
+
+      // Waits for the order rather than a fixed delay: it is applied
+      // synchronously when the gesture ends, but the events themselves arrive
+      // late under a full-suite load.
+      await page.waitForFunction((target) => {
+        const g = window.__game!;
+        return g.selection.divisions.length > 0
+          && g.selection.divisions.every((d) => {
+            const order = g.state.divisions[d].order;
+            return order?.kind === 'move' && order.target === target;
+          });
+      }, setup.to, { timeout: 10_000 });
+
+      // The order must be live on the divisions without the clock being stepped.
+      // Pausing to give orders is how this genre is played, and a queue that is
+      // only read on the hour never runs at all while the game is paused.
+      const ordered = await page.evaluate(() => {
+        const g = window.__game!;
+        return g.selection.divisions.map((d) => g.state.divisions[d].order);
+      });
+      expect(ordered.length).toBeGreaterThan(0);
+      for (const order of ordered) {
+        expect(order).toMatchObject({ kind: 'move', target: setup.to });
+      }
     });
-    expect(setup.selected).toBeGreaterThan(0);
-
-    const from = await provinceScreenPos(page, 'GER');
-    const to = await provinceScreenPos(page, 'POL');
-    await swipe(page, from, to, 16);
-    await page.waitForTimeout(200);
-
-    // The order must be live on the divisions without the clock being stepped.
-    // Pausing to give orders is how this genre is played, and a queue that is
-    // only read on the hour never runs at all while the game is paused.
-    const ordered = await page.evaluate(() => {
-      const g = window.__game!;
-      return g.selection.divisions.map((d) => g.state.divisions[d].order);
-    });
-    expect(ordered.length).toBeGreaterThan(0);
-    for (const order of ordered) {
-      expect(order).toMatchObject({ kind: 'move', target: setup.to });
-    }
   });
 
   test('orders given while paused take effect', async ({ page }) => {
