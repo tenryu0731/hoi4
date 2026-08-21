@@ -34,20 +34,20 @@ export interface SubdivideInput {
 }
 
 /** Square kilometres of European territory per province, before clamping. */
-const AREA_PER_PROVINCE = 26_000;
+const AREA_PER_PROVINCE = 6_000;
 /**
  * The same for colonial and desert holdings. Sparsely held ground does not
  * deserve the same granularity as the Ruhr, and without this France ends up
  * with more provinces in the Sahara than in France.
  */
-const COLONIAL_AREA_PER_PROVINCE = 110_000;
+const COLONIAL_AREA_PER_PROVINCE = 30_000;
 /**
  * Even the smallest nation gets more than one province. A single-province
  * country capitulates the moment one battle goes against it, which made the
  * country-level map unplayable.
  */
 const MIN_PROVINCES_PER_UNIT = 2;
-const MAX_PROVINCES_PER_UNIT = 22;
+const MAX_PROVINCES_PER_UNIT = 90;
 /** Cells smaller than this are merged away rather than shipped as slivers. */
 const MIN_PROVINCE_AREA = 500;
 

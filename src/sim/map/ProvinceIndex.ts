@@ -158,17 +158,56 @@ export class ProvinceIndex {
     }
   }
 
+  /**
+   * Marks every cell a boundary segment passes through.
+   *
+   * A grid traversal rather than point sampling. Sampling the segment at half
+   * a cell skips any cell the line only clips the corner of, and a skipped
+   * cell is a province the player cannot tap: measured on the finer map, the
+   * eastern tip of Saratov reached 3.8 units into a cell that the sampler
+   * never marked, so a tap there returned open sea. Halving the step again
+   * would only make the sliver smaller, not remove it -- there is always a
+   * corner thin enough to fall between two samples. This visits the cells the
+   * segment actually crosses, so there is no sliver to miss.
+   */
   private markSegment(
     x0: number, y0: number, x1: number, y1: number,
     id: number, mark: (cx: number, cy: number, id: number) => void,
   ): void {
     const c = this.cellSize;
-    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (c * 0.5)));
-    for (let s = 0; s <= steps; s++) {
-      const t = s / steps;
-      const x = x0 + (x1 - x0) * t;
-      const y = y0 + (y1 - y0) * t;
-      mark(Math.floor((x - this.gridOffX) / c), Math.floor((y - this.gridOffY) / c), id);
+    let cx = Math.floor((x0 - this.gridOffX) / c);
+    let cy = Math.floor((y0 - this.gridOffY) / c);
+    const cx1 = Math.floor((x1 - this.gridOffX) / c);
+    const cy1 = Math.floor((y1 - this.gridOffY) / c);
+    mark(cx, cy, id);
+    if (cx === cx1 && cy === cy1) return;
+
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const stepX = dx > 0 ? 1 : -1;
+    const stepY = dy > 0 ? 1 : -1;
+    // Distance along the segment, in units of t, to the next cell boundary in
+    // each axis, and the t spent crossing one whole cell.
+    const tDeltaX = dx === 0 ? Infinity : Math.abs(c / dx);
+    const tDeltaY = dy === 0 ? Infinity : Math.abs(c / dy);
+    const nextX = this.gridOffX + (cx + (stepX > 0 ? 1 : 0)) * c;
+    const nextY = this.gridOffY + (cy + (stepY > 0 ? 1 : 0)) * c;
+    let tMaxX = dx === 0 ? Infinity : (nextX - x0) / dx;
+    let tMaxY = dy === 0 ? Infinity : (nextY - y0) / dy;
+
+    // Bounded so a degenerate segment cannot spin: the traversal can never
+    // need more steps than the cells its bounding box spans.
+    const limit = Math.abs(cx1 - cx) + Math.abs(cy1 - cy) + 2;
+    for (let i = 0; i < limit; i++) {
+      if (tMaxX < tMaxY) {
+        cx += stepX;
+        tMaxX += tDeltaX;
+      } else {
+        cy += stepY;
+        tMaxY += tDeltaY;
+      }
+      mark(cx, cy, id);
+      if (cx === cx1 && cy === cy1) return;
     }
   }
 
