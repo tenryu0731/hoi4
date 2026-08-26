@@ -12,7 +12,7 @@ import type { Camera } from '../render/Camera';
  *                       └──up, still──────────▶ tap
  *   PENDING/PAN ──down(2)──▶ PINCH ──one up──▶ PAN
  *   PENDING over a unit stack ──moved──▶ DRAG_ORDER ──up──▶ issue move order
- *   HOLD ──moved >SLOP──▶ BOX ──up──▶ select every counter in the rectangle
+ *   PENDING with the marquee armed ──moved──▶ BOX ──up──▶ select what is inside
  */
 
 export type GesturePhase = 'start' | 'move' | 'end' | 'cancel';
@@ -31,12 +31,12 @@ export interface TouchCallbacks {
   /**
    * Whether a marquee may start here.
    *
-   * A press that has already become a hold is the gesture: on a phone there
-   * is no modifier key and no second button, and every other one-finger
-   * gesture is spoken for -- a short drag pans, a drag off a selected stack
-   * orders it. Holding still for half a second and then dragging is the one
-   * shape left, and it is what a touch UI conventionally reserves for
-   * "select a range".
+   * This has to be a tool the player picks up, not a gesture the recogniser
+   * infers. Hold-then-drag was tried and is wrong: a finger that rests before
+   * it moves is the ordinary way a thumb pans a map -- the comment on the
+   * hold-to-pan branch below records that it is "most of the time on a phone,
+   * and every time under a remote test harness" -- so inferring a marquee
+   * from it took panning away. Measured: the pan test moved the camera 0px.
    */
   canStartBoxSelect?: (screenX: number, screenY: number) => boolean;
   /** Marquee corners in screen (CSS pixel) space. */
@@ -91,6 +91,13 @@ export class TouchController {
   /** Marquee anchor, in screen space, while the state is `box`. */
   private boxFromX = 0;
   private boxFromY = 0;
+  /**
+   * Whether the press landed with the marquee tool armed. Decided once, at
+   * press time, for the same reason `orderCandidate` is: asking again after
+   * the finger has moved would consult a state the player may have changed
+   * mid-gesture.
+   */
+  private boxCandidate = false;
 
   private history: { t: number; x: number; y: number }[] = [];
   private detachFns: (() => void)[] = [];
@@ -182,6 +189,7 @@ export class TouchController {
       this.orderCandidate = this.cb.canStartOrderDrag?.(
         this.camera.screenToWorldX(x), this.camera.screenToWorldY(y),
       ) ?? false;
+      this.boxCandidate = this.cb.canStartBoxSelect?.(x, y) ?? false;
       this.clearHold();
       // The timer only records that the press became a hold. The action fires
       // on release, so a press that turns into a drag never triggers it.
@@ -234,17 +242,10 @@ export class TouchController {
         const moved = Math.hypot(x - rec.startX, y - rec.startY);
         if (moved <= SLOP_PX) return;
         this.clearHold();
-        // A press that waited becomes a marquee rather than a pan. The wait is
-        // what separates the two: a finger that starts moving straight away is
-        // scrolling the map, and one that stops first has decided to do
-        // something to what is under it.
-        //
-        // Not over a stack the player has already selected: dragging off one
-        // of those is how an order is given, and a finger that rests before
-        // it moves -- which is most fingers on a phone -- must still get the
-        // order it was reaching for rather than a marquee around it.
-        if (this.state === 'hold' && !this.orderCandidate
-            && (this.cb.canStartBoxSelect?.(rec.startX, rec.startY) ?? false)) {
+        // The marquee first, when the player has picked the tool up. It wins
+        // over both of the others: having armed it, the next stroke is the
+        // rectangle, wherever it starts.
+        if (this.boxCandidate) {
           this.state = 'box';
           this.boxFromX = rec.startX;
           this.boxFromY = rec.startY;

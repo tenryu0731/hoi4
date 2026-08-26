@@ -244,6 +244,31 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     modeBar.append(b);
   }
 
+  // --- the marquee tool ----------------------------------------------------
+  // At the foot of the map-mode column, because it is the same kind of thing:
+  // something that changes what the next touch on the map means. Its own
+  // class, so the collapse rule that hides the mode buttons behind one button
+  // when a panel is open leaves it alone -- it is not a mode, and a tool the
+  // player cannot reach with a panel open is a tool for a screen they are not
+  // looking at.
+  const selectTool = el('button', 'hud-select-tool', UI.boxSelectTool);
+  selectTool.setAttribute('aria-label', UI.boxSelectToolLabel);
+  selectTool.addEventListener('click', () => {
+    game.boxSelectArmed = !game.boxSelectArmed;
+    syncSelectTool();
+  });
+  modeBar.append(selectTool);
+
+  function syncSelectTool(): void {
+    selectTool.classList.toggle('is-active', game.boxSelectArmed);
+    selectTool.setAttribute('aria-pressed', String(game.boxSelectArmed));
+    armedHint.classList.toggle('is-on', game.boxSelectArmed);
+  }
+
+  // Says what the armed tool will do. The button alone cannot: two Japanese
+  // characters in a corner do not explain a gesture nobody has made yet.
+  const armedHint = el('div', 'hud-armed', UI.boxSelectArmed);
+
   // --- order bar -----------------------------------------------------------
   // One gesture has to do two jobs on a touch screen: reading the map and
   // commanding the army. This says which job the next tap will do, and gives
@@ -258,7 +283,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const orderRow = el('div', 'hud-order-row');
   const orderText = el('span', 'hud-order-text', '');
   const orderAssign = el('button', 'hud-order-btn', UI.orderAssign);
+  orderAssign.setAttribute('aria-label', UI.orderAssignLabel);
   const orderFront = el('button', 'hud-order-btn', UI.orderDrawFront);
+  orderFront.setAttribute('aria-label', UI.orderDrawFrontLabel);
   const orderCancel = el('button', 'hud-order-cancel', '✕');
   orderCancel.setAttribute('aria-label', UI.cancel);
   orderCancel.addEventListener('click', () => {
@@ -266,18 +293,19 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     game.selectProvince(null);
     syncOrder();
   });
-  // Two rows, not one. Measured on a 412px screen: the caption is about
-  // 160px, each button 80, the dismiss 32 -- 386px of content in the 330 left
-  // once the map-mode column has its corner, and the last button was drawn
-  // off the edge of the phone.
-  orderRow.append(orderText, orderCancel);
-  const orderActs = el('div', 'hud-order-acts');
-  orderActs.append(orderAssign, orderFront);
+  // One row, 40px, exactly as tall as the banner it replaces. A second row of
+  // buttons was tried and it put the bar 84px down the map band -- and the
+  // top bar grows a chip during play, so --hud-top-h pushes the whole thing
+  // lower as the game runs. Measured: a tap aimed at a counter at y=266
+  // landed on the second row's 軍へ編成 button and opened its menu, while
+  // elementFromPoint checked a moment earlier had said CANVAS.
+  orderRow.append(orderText, orderAssign, orderFront, orderCancel);
   const orderMenu = el('div', 'hud-order-menu');
-  orderHint.append(orderRow, orderActs, orderMenu);
+  orderHint.append(orderRow, orderMenu);
 
   /** Which button opened the chip row, so pressing it again closes it. */
   let orderMenuMode: 'army' | 'front' | null = null;
+  let lastOrderSignature = '';
 
   function closeOrderMenu(): void {
     orderMenuMode = null;
@@ -387,6 +415,15 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     if (!on) { closeOrderMenu(); return; }
     setText(orderText, UI.orderHint(live));
     orderFront.classList.toggle('is-dim', selectionArmy() === null);
+
+    // An open chip row covers the map. Anything that changes what is selected
+    // means the player has gone back to the ground, so it stops standing over
+    // the place they are about to press.
+    const signature = `${game.selection.province}:${live}:${game.selection.army}`;
+    if (signature !== lastOrderSignature) {
+      lastOrderSignature = signature;
+      if (orderMenuMode !== null) closeOrderMenu();
+    }
   }
 
   let marqueeOn = false;
@@ -501,7 +538,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // on the glass, and drawing it here costs four style writes a frame instead
   // of a Graphics rebuild.
   const marquee = el('div', 'hud-marquee');
-  root.append(top, modeBar, marquee, orderHint, toasts, sheet, nav, outcome);
+  root.append(top, modeBar, armedHint, marquee, orderHint, toasts, sheet, nav, outcome);
 
   // Everything below the top bar is placed against its measured height rather
   // than a constant. The constant was 78px, chosen when the bar was one row;
@@ -770,6 +807,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
     syncOrder();
     syncMarquee();
+    // The tool disarms itself when a rectangle is finished, and the button has
+    // to stop looking armed at the same moment.
+    if (selectTool.classList.contains('is-active') !== game.boxSelectArmed) syncSelectTool();
 
     if (openPanel !== null) PANELS[openPanel].refresh?.(game, sheetBody);
 

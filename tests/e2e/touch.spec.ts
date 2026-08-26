@@ -620,7 +620,7 @@ test.describe('touch input', () => {
     expect(picked.divisions).toBeGreaterThan(0);
   });
 
-  test('holding then dragging boxes every division inside the marquee', async ({ page }) => {
+  test('the marquee tool boxes every division inside the rectangle', async ({ page }) => {
     await bootGame(page);
 
     const setup = await page.evaluate(() => {
@@ -663,8 +663,11 @@ test.describe('touch input', () => {
     });
     expect(setup, 'fewer than two of the player’s counters were framed').not.toBeNull();
 
-    // The hold is the gesture. A finger that starts moving straight away pans.
-    await swipe(page, setup!.from, setup!.to, 16, 700);
+    // The tool has to be picked up first: an unarmed stroke pans the map, and
+    // that is the whole reason the marquee is a button rather than a timing.
+    await page.locator('.hud-select-tool').click();
+    await expect(page.locator('.hud-select-tool')).toHaveClass(/is-active/);
+    await swipe(page, setup!.from, setup!.to, 16, 60);
 
     await page.waitForFunction(
       (n) => window.__game!.selection.divisions.length >= n,
@@ -679,6 +682,24 @@ test.describe('touch input', () => {
     expect(picked.ordering).toBe(true);
     expect(picked.marquee).toBeNull();
     for (const id of setup!.expected) expect(picked.divisions).toContain(id);
+    // One rectangle, then the tool puts itself down.
+    await expect(page.locator('.hud-select-tool')).not.toHaveClass(/is-active/);
+  });
+
+  test('an unarmed drag still pans, however long the finger rests first', async ({ page }) => {
+    await bootGame(page);
+    await setCamera(page, 0, 0, 0.2);
+    const before = await cameraState(page);
+    const c = await canvasCentre(page);
+
+    // 700ms of stillness before the stroke. This is what a thumb does on a
+    // phone, and it is what a loaded test harness does whether the thumb
+    // meant to or not; reading it as a marquee moved the camera 0px.
+    await swipe(page, { x: c.x + 90, y: c.y + 90 }, { x: c.x - 90, y: c.y - 90 }, 14, 700);
+    await page.waitForTimeout(400);
+    const after = await cameraState(page);
+    expect(after.x).toBeGreaterThan(before.x + 100);
+    expect(after.y).toBeGreaterThan(before.y + 100);
   });
 
   test('the order bar raises an army from a selection and gives it a front', async ({ page }) => {
@@ -700,7 +721,7 @@ test.describe('touch input', () => {
     const bar = page.locator('.hud-order');
     await expect(bar).toHaveClass(/is-on/);
 
-    await page.locator('.hud-order-btn', { hasText: '軍へ編成' }).click();
+    await page.getByRole('button', { name: '軍へ編成' }).click();
     await page.locator('.hud-order-chip').last().click();
 
     const raised = await page.evaluate(() => {
@@ -714,7 +735,7 @@ test.describe('touch input', () => {
     expect(raised.owner).toBe(raised.me);
     expect(raised.held).toBeGreaterThanOrEqual(chosen.length);
 
-    await page.locator('.hud-order-btn', { hasText: '戦線を引く' }).click();
+    await page.getByRole('button', { name: '戦線を引く' }).click();
     await page.locator('.hud-order-chip').first().click();
 
     // A day of the battle-plan tick is what turns the order into a line.

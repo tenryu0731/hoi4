@@ -1459,8 +1459,8 @@ export const commandPanel: Panel = {
     );
     root.append(head);
 
-    // The marquee is the one gesture on the map with nothing on screen to
-    // announce it, and it is the gesture this panel exists to make useful.
+    // The marquee tool is a two-character button in a corner of the map, and
+    // this panel is what it is for.
     root.append(el('div', 'panel-row-sub', UI.boxSelectHint));
 
     const label = el('div', 'panel-label', UI.armies);

@@ -96,6 +96,21 @@ export class Game {
    */
   boxSelect: { x0: number; y0: number; x1: number; y1: number } | null = null;
 
+  /**
+   * Whether the next stroke on the map draws a marquee instead of panning.
+   *
+   * A tool the player picks up, not a gesture inferred from timing. The first
+   * attempt read a press that had become a hold and then moved as a marquee,
+   * which is the same shape as the ordinary way a thumb pans -- rest, then
+   * drag -- and it took panning away outright: measured, a drag that should
+   * have moved the camera 100px moved it 0. There is no modifier key on a
+   * phone, so the modifier has to be a button.
+   *
+   * It disarms itself after one rectangle. A mode the player has to remember
+   * to leave is a mode they will be stuck in.
+   */
+  boxSelectArmed = false;
+
   private constructor(index: ProvinceIndex, renderer: MapRenderer, state: GameState) {
     this.index = index;
     this.renderer = renderer;
@@ -108,10 +123,7 @@ export class Game {
       onLongPress: (wx, wy, sx, sy) => this.handleTap(wx, wy, sx, sy),
       canStartOrderDrag: (wx, wy) => this.canDragFrom(wx, wy),
       onOrderDrag: (phase, fx, fy, tx, ty) => this.handleOrderDrag(phase, fx, fy, tx, ty),
-      // Always, on the map. Nothing else claims a hold-then-drag, and a
-      // gesture that works in some places and silently pans in others is one
-      // the player never learns.
-      canStartBoxSelect: () => true,
+      canStartBoxSelect: () => this.boxSelectArmed,
       onBoxSelect: (phase, x0, y0, x1, y1) => this.handleBoxSelect(phase, x0, y0, x1, y1),
       onCameraChange: () => { /* camera is read every frame; nothing to invalidate */ },
     });
@@ -501,11 +513,13 @@ export class Game {
   ): void {
     if (phase === 'cancel') {
       this.boxSelect = null;
+      this.boxSelectArmed = false;
       return;
     }
     this.boxSelect = { x0, y0, x1, y1 };
     if (phase !== 'end') return;
     this.boxSelect = null;
+    this.boxSelectArmed = false;
 
     const divisions = this.divisionsInRect(x0, y0, x1, y1);
     if (divisions.length === 0) {

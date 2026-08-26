@@ -245,6 +245,40 @@ export const HUD_CSS = `
   border-color: #6d5730;
 }
 
+/* The marquee tool sits under the mode column with a gap, so it reads as a
+   different kind of control rather than a seventh map mode. Deliberately not
+   a .hud-mode: the collapse rule above must not hide it when a panel opens. */
+.hud-select-tool {
+  min-width: 58px; min-height: 44px; padding: 0 7px; margin-top: 7px;
+  font-size: 11px; letter-spacing: 0.05em;
+  background: linear-gradient(180deg, rgba(48,46,41,0.94) 0%, rgba(29,28,24,0.94) 100%);
+  color: var(--ink-dim);
+  border: 1px solid #100f0d; border-radius: 2px;
+  box-shadow: var(--bevel); cursor: pointer;
+}
+.hud-select-tool.is-active {
+  color: #1a1811; font-weight: 700;
+  background: linear-gradient(180deg, #e0bd7c 0%, #b08f4e 100%);
+  border-color: #6d5730;
+}
+/* What the armed tool will do, along the foot of the map band where it cannot
+   sit over the ground the player is about to draw on. */
+.hud-armed {
+  position: absolute; left: 8px; right: 8px;
+  bottom: calc(var(--safe-bottom) + 64px);
+  /* The order bar wants this spot too, but never at the same time: the tool
+     is armed before anything is selected, and disarms the moment a rectangle
+     names something. */
+  display: none; pointer-events: none;
+  padding: 7px 10px; border-radius: 3px;
+  background: rgba(24,22,18,0.94); border: 1px solid #0f0e0c;
+  box-shadow: var(--bevel);
+  color: var(--ink); font-size: 12px; text-align: center;
+}
+.hud-armed.is-on { display: block; }
+/* With a panel open the foot of the map band is the sheet. */
+.is-panel-open .hud-armed { display: none; }
+
 /* --- alerts -------------------------------------------------------------- */
 .hud-toasts {
   position: absolute; top: calc(var(--hud-top-h, 88px) + 6px); left: 10px;
@@ -269,14 +303,19 @@ export const HUD_CSS = `
    army there -- are indistinguishable, and the gold ring on the counter says
    only "selected", which it also says when nothing has been ordered. */
 .hud-order {
-  /* Directly under the top bar, and left of the map-mode column: it was above
-     the sheet first, which put it exactly over the stack it was describing --
-     the selected counter sat behind the banner announcing that it was
-     selected. Anchored to both edges rather than centred, because centring a
-     box whose width depends on a division count means it moves whenever the
-     count changes. */
-  position: absolute; left: 8px; right: 74px; transform: translateY(-8px);
-  top: calc(var(--hud-top-h, 200px) + 8px);
+  /* At the foot of the map band, not under the top bar.
+     It has lived in both places. Under the top bar it sat on the ground the
+     player was aiming at, and it moved while they aimed: --hud-top-h grows as
+     the top bar gains an alert chip during play, so the bar slid down the map
+     as the game ran. Measured with three buttons on it: a tap aimed at a
+     province at y=174 opened the 軍へ編成 menu, after elementFromPoint a
+     moment earlier had answered CANVAS.
+     Down here it is clear of both. This only works because putting a stack
+     under orders no longer opens the province sheet -- with the sheet shut,
+     the foot of the band is the foot of the screen. With a panel open it goes
+     back up top, where the rule below puts it. */
+  position: absolute; left: 8px; right: 8px; transform: translateY(8px);
+  bottom: calc(var(--safe-bottom) + 64px);
   display: none; flex-direction: column; align-items: stretch; gap: 4px;
   /* Transparent to touch except for its own controls. It sits over the map
      band, and a banner that eats taps is exactly the bug the horizontal
@@ -285,6 +324,17 @@ export const HUD_CSS = `
   transition: opacity 160ms ease, transform 160ms ease;
 }
 .hud-order.is-on { display: flex; opacity: 1; transform: translateY(0); }
+/* A panel takes the foot of the screen, so the bar returns to the corner it
+   used to live in -- clear of the map-mode column, and with the band that
+   small the player is not aiming at counters anyway. */
+.is-panel-open .hud-order {
+  bottom: auto; top: calc(var(--hud-top-h, 200px) + 8px); right: 74px;
+}
+/* The chip row hangs off the bottom edge normally; with the bar up top it has
+   to hang off the other way round. Column-reverse keeps the row against the
+   bar in both directions without a second copy of the markup. */
+.hud-order { flex-direction: column-reverse; }
+.is-panel-open .hud-order { flex-direction: column; }
 .hud-order-row {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;
   padding: 0 4px 0 12px; min-height: 40px;
@@ -293,17 +343,13 @@ export const HUD_CSS = `
   box-shadow: var(--bevel), 0 4px 14px rgba(0,0,0,0.55);
   color: var(--ink); font-size: 13px;
 }
-.hud-order-acts { display: flex; gap: 4px; justify-content: flex-end; }
 .hud-order-text {
   color: #f0e4c4;
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .hud-order-btn {
   pointer-events: auto;
-  /* These are the only way to reach the chain of command from the map, so
-     they get the same 40px a nav button gets rather than the 32 a dismiss
-     affordance can live with. */
-  min-height: 40px; padding: 0 12px;
+  min-height: 36px; padding: 0 9px;
   background: linear-gradient(180deg, #3b352a 0%, #2a2620 100%);
   border: 1px solid #0f0e0c; border-radius: 2px;
   box-shadow: var(--bevel);
