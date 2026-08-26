@@ -25,8 +25,33 @@ import type { ProvinceIndex } from '../map/ProvinceIndex';
 
 /** How much a fully developed rail network extends reach. */
 const INFRA_BONUS = 0.55;
-/** Supply lost per province crossed. */
-const DECAY_PER_STEP = 0.13;
+
+/**
+ * How far a supply head reaches, in world units, over undeveloped ground.
+ *
+ * Distance, not province hops. It used to be a flat 0.13 lost per province
+ * crossed, which made supply range a function of how finely the map happened
+ * to be cut: the subdivision pass took the map from 323 provinces to 1,266,
+ * roughly doubling the hops across the same ground, and this constant was
+ * never re-tuned. Measured at that setting, seven years into a campaign:
+ *
+ *   GER  front 16 steps from Berlin, supply there 0.00
+ *   SOV  median division 11 steps from Moscow, supply there 0.20
+ *
+ * -- and organisation recovery scales with supply, so 17 of Germany's 23
+ * divisions and 24 of the Soviet Union's 32 sat permanently below the
+ * quarter-organisation mark at which the AI classes a division as spent and
+ * tells it to hold. That is why the war stopped: from 1943 the whole map had
+ * zero division-days of combat and no province changed hands, with 656
+ * divisions standing on it.
+ *
+ * The map's own edges are 66 to 185 units long, so charging every hop the
+ * same was wrong twice over. Berlin to Paris is 874 units, which is the
+ * yardstick this is set against: a base-infrastructure line supplies an
+ * offensive that far and no further, and a fully railed one a little over
+ * twice that.
+ */
+export const SUPPLY_RANGE = 1200;
 /** Extra cost of pushing supply across a strait. */
 const SEA_STEP_MULTIPLIER = 3;
 
@@ -158,11 +183,12 @@ export function computeSupply(
 
     const geo = index.get(cur);
     const infra = state.states[geo.stateId]?.infrastructure ?? 1;
-    const step = DECAY_PER_STEP * (1 - ((infra - 1) / 4) * INFRA_BONUS);
+    // Cost per world unit, cheaper where the railways are good.
+    const rate = (1 / SUPPLY_RANGE) * (1 - ((infra - 1) / 4) * INFRA_BONUS);
 
     for (const nb of geo.neighbors) {
       if (!friendly(nb)) continue;
-      const candidate = here - step;
+      const candidate = here - rate * index.distance(cur, nb);
       if (candidate > levels[nb] + 1e-6) {
         levels[nb] = candidate;
         queue.push(nb);
@@ -170,7 +196,7 @@ export function computeSupply(
     }
     for (const nb of geo.seaNeighbors) {
       if (!friendly(nb)) continue;
-      const candidate = here - step * SEA_STEP_MULTIPLIER;
+      const candidate = here - rate * index.distance(cur, nb) * SEA_STEP_MULTIPLIER;
       if (candidate > levels[nb] + 1e-6) {
         levels[nb] = candidate;
         queue.push(nb);

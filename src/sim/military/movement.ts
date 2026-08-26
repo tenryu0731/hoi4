@@ -225,7 +225,19 @@ export function tickMilitaryHourly(state: GameState, ctx: MilitaryContext): void
   }
 
   // 3. Prune finished battles.
-  if (state.combats.length > 64) {
+  //
+  // Every hour, not once the list passes some length. The threshold version
+  // only swept at more than 64 open records, which never happens once a war
+  // winds down, so ended battles accumulated and stayed: measured at the end
+  // of a ten-year campaign, five combats had been sitting closed since 1942
+  // with no live participant on either side, and mid-war the list carried
+  // about thirty-three of them on any given day. Nothing reads an ended
+  // combat -- findCombatAt and the invariants both skip them -- so this cost
+  // no correctness, but it made state.combats useless as a measure of how
+  // much fighting was going on, which is exactly what it was reached for.
+  let live = 0;
+  for (const c of state.combats) if (!c.ended) live++;
+  if (live !== state.combats.length) {
     state.combats = state.combats.filter((c) => !c.ended);
   }
 }

@@ -11,7 +11,7 @@ import {
   retreat, sealiftCapacity, tickMilitaryHourly, tickReinforcementDaily,
 } from '../../src/sim/military/movement';
 import {
-  computeSupply, encircledProvinces, supplySources, tickSupplyDaily,
+  SUPPLY_RANGE, computeSupply, encircledProvinces, supplySources, tickSupplyDaily,
 } from '../../src/sim/military/supply';
 import {
   deriveTemplate, spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY,
@@ -576,6 +576,81 @@ describe('supply', () => {
     }
     const levels = computeSupply(f.state, f.index, hun.id, supplySources(f.state, f.index, hun.id));
     expect(Math.max(...levels)).toBe(0);
+  });
+
+  it('carries as far in world distance however finely the map is cut', () => {
+    // The property none of the other supply tests covered, and the one that
+    // broke. They check the shape of the network -- the capital is full, an
+    // ally is inside it, infrastructure helps, a step costs something -- and
+    // not one of them checks how far it reaches in the units the map is drawn
+    // in. Supply used to lose a flat 0.13 per province crossed, so when the
+    // build was changed to subdivide the map from 323 provinces to 1,266, the
+    // same ground cost twice as much to cross and every front in the game
+    // ended up beyond supply range. Every structural test still passed.
+    //
+    // Walking a corridor and comparing supply against the distance actually
+    // travelled is what catches it: under a flat per-hop charge the two come
+    // apart the moment the hops are short.
+    const f = makeFixture();
+    const sov = f.country('SOV');
+    const other = f.country('TUR').id;
+    for (const st of f.state.states) st.infrastructure = 1;
+
+    // Moscow keeps its capital and nothing else, so the corridor dug below is
+    // the only way supply can travel. Without this the surrounding Soviet
+    // territory offers a shorter route and the corridor is never actually
+    // walked -- which is how the first version of this test came to pass on
+    // the very code it was written to catch.
+    for (let i = 0; i < f.state.provinces.length; i++) {
+      if (i === sov.capital) continue;
+      if (f.state.provinces[i].controller === sov.id) f.state.provinces[i].controller = other;
+    }
+
+    // A long corridor out from Moscow, so the walk crosses edges of many
+    // different lengths -- the map's are 66 to 185 units.
+    let cur = sov.capital;
+    const chain = [cur];
+    let travelled = 0;
+    // Bounded by ground covered, not by hop count: the distance is the
+    // quantity under test, and a fixed number of hops walks a different
+    // distance on every map.
+    // Always the *shortest* unused neighbour. This is what separates the two
+    // formulas: over an average-length edge they charge about the same, and
+    // it is a run of short hops -- exactly what subdividing a map produces --
+    // where a flat per-hop charge drains a line that has barely moved.
+    const target = SUPPLY_RANGE * 0.7;
+    for (let i = 0; i < 40; i++) {
+      let next: number | undefined;
+      let shortest = Infinity;
+      for (const n of f.index.get(cur).neighbors) {
+        if (chain.includes(n)) continue;
+        const leg = f.index.distance(cur, n);
+        if (leg < shortest) { shortest = leg; next = n; }
+      }
+      if (next === undefined || travelled + shortest > target) break;
+      f.state.provinces[next].controller = sov.id;
+      travelled += shortest;
+      chain.push(next);
+      cur = next;
+    }
+    // Enough hops that a flat 0.13 per hop would have spent the whole line
+    // before the end of it -- nine of them is 1.17 against a full tank of 1.
+    expect(chain.length).toBeGreaterThan(8);
+
+    const levels = computeSupply(f.state, f.index, sov.id, supplySources(f.state, f.index, sov.id));
+    const spent = 1 - levels[cur];
+    expect(travelled).toBeLessThan(SUPPLY_RANGE);
+
+    // It has to arrive. Nine hops at the old flat 0.13 is 1.17 spent against
+    // a full tank of 1, so the line ran dry inside a corridor that had
+    // covered barely half the range.
+    expect(levels[cur], `after ${chain.length - 1} hops over ${travelled.toFixed(0)} units`)
+      .toBeGreaterThan(0);
+    // And it must never cost more than the ground actually covered. Not an
+    // equality: the search is best-first over the whole friendly network, so
+    // it is free to find a shorter way round than the corridor this test dug,
+    // and it does.
+    expect(spent).toBeLessThanOrEqual(travelled / SUPPLY_RANGE + 1e-6);
   });
 
   it('leaves peacetime countries fully supplied', () => {
