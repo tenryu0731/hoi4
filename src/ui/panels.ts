@@ -25,7 +25,7 @@ import { airStrength } from '../sim/military/air';
 import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
 import { availableFocuses } from '../sim/focus';
 import {
-  BRANCH_LIST, researchSummary, researchView, techTree, type TechBranch,
+  BRANCH_LIST, researchSummary, researchView, techTree,
 } from '../sim/research';
 import {
   ARMY_GROUP_LIMIT, COMMAND_LIMIT, MAX_ARMIES, armyById, commandLimit, commanderById,
@@ -1739,8 +1739,17 @@ export const focusPanel: Panel = {
 // Research
 // ---------------------------------------------------------------------------
 
-let researchBranch: TechBranch = 'industry';
 let researchSlot = 0;
+/** The technology the detail card is showing, remembered across rebuilds. */
+let researchPicked: string | null = null;
+
+/** Grid metrics for the technology tree, in CSS pixels. */
+const TECH_W = 88;
+const TECH_H = 50;
+const TECH_COL = 98;
+const TECH_ROW = 58;
+/** Room for the year headings across the top of the grid. */
+const TECH_HEAD_H = 20;
 
 export const researchPanel: Panel = {
   id: 'research',
@@ -1806,41 +1815,161 @@ export const researchPanel: Panel = {
     }
 
     // --- the tree for the selected slot ---
+    //
+    // A grid, the way HOI4 draws one: the year across, the branch down, the
+    // generations of one weapon joined by a line. This was a branch chooser
+    // over a flat list, which tells a player what a technology costs but not
+    // that it is three steps down a chain they have not started, nor that the
+    // 1944 entries are a decade of research away.
     root.append(el('div', 'panel-label', `${UI.slot}${researchSlot + 1} — ${UI.chooseTech}`));
-    const chips = el('div', 'panel-chips');
-    for (const b of BRANCH_LIST) {
-      const chip = el('button', 'panel-chip', b.name);
-      chip.classList.toggle('is-on', b.id === researchBranch);
-      chip.addEventListener('click', () => {
-        researchBranch = b.id;
-        researchPanel.build(game, root);
-      });
-      chips.append(chip);
-    }
-    root.append(chips);
 
-    const list = el('div', 'panel-list');
-    for (const t of techTree(state, me.id, researchBranch)) {
-      const row = el('button', 'panel-row wide-row');
-      row.disabled = !t.researchable;
-      row.classList.toggle('is-blocked', !t.researchable);
-      const main = el('div', 'panel-row-main');
-      main.append(
-        el('div', 'panel-row-title', `${t.completed ? '✔ ' : ''}${t.name}`),
-        el('div', 'panel-row-sub',
-          `${t.year}年 · ${t.requiredDays}${UI.days}` +
-          (t.researchable ? '' : ` · ${t.reasonText}`)),
-      );
-      row.append(main, el('span', 'panel-row-tag', t.researchable ? '▶' : ''));
-      row.addEventListener('click', () => {
-        game.issue({
-          t: 'startResearch', country: me.id, slot: researchSlot, tech: t.id,
+    const rows = BRANCH_LIST.map((b) => ({ branch: b, techs: techTree(state, me.id, b.id) }))
+      .filter((r) => r.techs.length > 0);
+    const allTechs = rows.flatMap((r) => r.techs);
+    const years = [...new Set(allTechs.map((t) => t.year))].sort((a, b) => a - b);
+    const yearAt = new Map(years.map((y, i) => [y, i] as const));
+    const byId = new Map(allTechs.map((t) => [t.id, t] as const));
+
+    // Where every technology sits, and how deep each branch band has to be.
+    const place = new Map<string, { x: number; y: number }>();
+    const bandTop: number[] = [];
+    let cursor = TECH_HEAD_H;
+    for (const r of rows) {
+      const cells = new Map<number, number>();
+      let depth = 1;
+      for (const t of r.techs) {
+        const n = cells.get(t.year) ?? 0;
+        cells.set(t.year, n + 1);
+        depth = Math.max(depth, n + 1);
+        place.set(t.id, {
+          x: (yearAt.get(t.year) ?? 0) * TECH_COL,
+          y: cursor + n * TECH_ROW,
         });
-        researchPanel.build(game, root);
-      });
-      list.append(row);
+      }
+      bandTop.push(cursor);
+      cursor += depth * TECH_ROW;
     }
-    root.append(list);
+    const gridW = Math.max(1, years.length) * TECH_COL;
+    const gridH = cursor;
+
+    const scroller = el('div', 'panel-tree-scroll');
+    const grid = el('div', 'panel-tree');
+    grid.style.width = `${gridW}px`;
+    grid.style.height = `${gridH}px`;
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'panel-tree-links');
+    svg.setAttribute('width', String(gridW));
+    svg.setAttribute('height', String(gridH));
+    for (const t of allTechs) {
+      const to = place.get(t.id);
+      if (!to) continue;
+      for (const pid of t.prerequisites) {
+        const from = place.get(pid);
+        if (!from) continue;
+        // Generations run left to right along a row, so the elbow goes out of
+        // the parent's right edge and into the child's left.
+        const x0 = from.x + TECH_W;
+        const x1 = to.x;
+        const y0 = from.y + TECH_H / 2;
+        const y1 = to.y + TECH_H / 2;
+        const mid = x0 + (x1 - x0) / 2;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', `M${x0} ${y0} H${mid} V${y1} H${x1}`);
+        path.setAttribute(
+          'class',
+          `panel-tree-link${byId.get(pid)?.completed ? ' is-open' : ''}`,
+        );
+        svg.append(path);
+      }
+    }
+    grid.append(svg);
+
+    for (const y of years) {
+      const head = el('div', 'panel-tech-year', String(y));
+      head.style.left = `${(yearAt.get(y) ?? 0) * TECH_COL}px`;
+      grid.append(head);
+    }
+    // The branch names sit outside the scroller, on a rail that does not pan.
+    // Inside it they slid off the left edge the moment the player looked at
+    // 1940, which is the one place a row label is actually needed.
+    const rail = el('div', 'panel-tech-rail');
+    rail.style.height = `${gridH}px`;
+    rows.forEach((r, i) => {
+      const head = el('div', 'panel-tech-branch', r.branch.name);
+      head.style.top = `${bandTop[i]}px`;
+      rail.append(head);
+    });
+
+    const detail = el('div', 'panel-focus-detail');
+    const drawDetail = (): void => {
+      detail.innerHTML = '';
+      const t = researchPicked === null ? null : byId.get(researchPicked);
+      if (!t) {
+        detail.append(el('div', 'panel-focus-desc', UI.pickTech));
+        return;
+      }
+      detail.append(el('div', 'panel-focus-name', t.name));
+      detail.append(el('div', 'panel-focus-desc',
+        `${t.branchName} · ${t.year}${UI.year} · ${t.requiredDays}${UI.days}`
+        + (t.aheadPenaltyDays > 0 ? ` (${UI.aheadPenalty} +${t.aheadPenaltyDays}${UI.days})` : '')));
+      if (t.effects.length > 0) {
+        detail.append(el('div', 'panel-focus-effect',
+          t.effects.map((e) => `${e.label} ${e.value}`).join(' · ')));
+      }
+      if (t.completed) {
+        detail.append(el('div', 'panel-focus-meta', UI.researchedAlready));
+      } else if (t.researchable) {
+        const go = el('button', 'panel-btn wide primary',
+          `${UI.slot}${researchSlot + 1}${UI.researchHere}`);
+        go.addEventListener('click', () => {
+          game.issue({ t: 'startResearch', country: me.id, slot: researchSlot, tech: t.id });
+          researchPanel.build(game, root);
+        });
+        detail.append(go);
+      } else {
+        detail.append(el('div', 'panel-focus-block', t.reasonText));
+      }
+    };
+
+    const nodes = new Map<string, HTMLElement>();
+    for (const t of allTechs) {
+      const at = place.get(t.id);
+      if (!at) continue;
+      const node = el('button', 'panel-tech-node');
+      node.style.left = `${at.x}px`;
+      node.style.top = `${at.y}px`;
+      node.classList.toggle('is-done', t.completed);
+      node.classList.toggle('is-current', t.slot !== null);
+      node.classList.toggle('is-locked', !t.researchable && !t.completed && t.slot === null);
+      node.append(el('span', 'panel-tech-node-name', t.name));
+      if (t.slot !== null) {
+        const bar = el('i', 'panel-focus-node-bar');
+        const fill = el('i', '');
+        fill.style.width = `${((slots[t.slot]?.percent ?? 0) * 100).toFixed(1)}%`;
+        bar.append(fill);
+        node.append(bar);
+      }
+      node.addEventListener('click', () => {
+        researchPicked = t.id;
+        for (const [id, n] of nodes) n.classList.toggle('is-picked', id === t.id);
+        drawDetail();
+      });
+      nodes.set(t.id, node);
+      grid.append(node);
+    }
+    if (researchPicked !== null) nodes.get(researchPicked)?.classList.add('is-picked');
+
+    scroller.append(grid);
+    const frame = el('div', 'panel-tech-frame');
+    frame.append(rail, scroller);
+    drawDetail();
+    root.append(detail, frame);
+
+    // Open on the year the country is actually working in, not on 1936.
+    const now = state.clock.year;
+    const col = yearAt.get(years.find((y) => y >= now) ?? years[0]) ?? 0;
+    scroller.scrollLeft = Math.max(0, col * TECH_COL - TECH_COL);
   },
   refresh(game, root) {
     const bars = root.querySelectorAll<HTMLElement>('.panel-bar-fill');

@@ -358,7 +358,13 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     markOverflow();
   }
 
-  top.append(topRow, stats, resStrip, alertRow);
+  // The two figure rows share a wrapper so a landscape phone can lay them out
+  // side by side. On its side the screen is 412px tall and the bar was taking
+  // 171 of them -- 41.5%, leaving 184px of map -- while each row used less than
+  // half of the 853px it had.
+  const figures = el('div', 'hud-figures');
+  figures.append(stats, resStrip);
+  top.append(topRow, figures, alertRow);
 
   root.append(top, modeBar, orderHint, toasts, sheet, nav, outcome);
 

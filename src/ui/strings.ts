@@ -51,6 +51,11 @@ export const UI = {
   mapMode: '地図モード',
   // --- the market --------------------------------------------------------
   navTrade: '貿易',
+  // --- the technology grid ------------------------------------------------
+  pickTech: '技術を選ぶと、ここに内容が出ます。',
+  year: '年',
+  researchedAlready: '研究済み',
+  researchHere: 'で研究する',
   tradeLaw: '貿易法',
   tradeExportShare: '輸出割合',
   researchSpeedLabel: '研究速度',

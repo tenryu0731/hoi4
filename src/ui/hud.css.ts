@@ -63,6 +63,7 @@ export const HUD_CSS = `
    but measured on Chromium it does not: a swipe scrolls these rows to 287px
    with the body rule in force and with it removed alike. So these are an
    explicit statement of intent, not a fix for anything. */
+.hud-figures { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .hud-stats, .hud-resources {
   display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
   touch-action: pan-x;
@@ -613,6 +614,15 @@ export const HUD_CSS = `
   /* The map modes would sit on top of the docked panel. */
   .hud-modes { top: auto; bottom: calc(var(--safe-bottom) + 62px); flex-direction: row; }
   .hud-toasts { max-width: 34%; left: auto; right: 10px; }
+  /* The figures go side by side. Measured on its side: 395px of stats and
+     320px of resources, each stacked in its own 853px row, so the bar spent
+     32px of a 412px screen saying nothing. */
+  .hud-figures { flex-direction: row; align-items: flex-start; }
+  .hud-figures > * { flex: 0 1 auto; min-width: 0; }
+  /* Every pixel of bar is a pixel of map. */
+  .hud-top { gap: 3px; padding-bottom: 5px; }
+  .hud-stats > .hud-stat, .hud-resources > .hud-res { padding: 1px 6px 2px; }
+  .hud-chip-c { line-height: 10px; }
 }
 
 button { transition: background 90ms ease, transform 90ms ease, color 90ms ease; }
@@ -787,6 +797,58 @@ button:active { transform: scale(0.96); }
 }
 .panel-focus-detail .panel-btn.wide { margin-top: 9px; width: 100%; min-height: 46px; }
 .panel-focus-detail .panel-bar { margin-top: 7px; }
+
+/* --- the technology grid -------------------------------------------------- */
+/* The year across, the branch down, the generations of one weapon joined by a
+   line -- which is how HOI4 draws it, and how the data was already shaped. A
+   branch chooser over a flat list told a player what a technology cost but not
+   that it sat three steps down a chain they had not started. */
+.panel-tech-node {
+  position: absolute; width: 88px; height: 50px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 4px 5px;
+  background: linear-gradient(180deg, #3a352c 0%, #2a261f 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--ink); font: inherit; text-align: center; cursor: pointer;
+}
+.panel-tech-node-name {
+  font-size: 10px; line-height: 1.25;
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.panel-tech-node.is-done {
+  border-color: #4d6b30;
+  background: linear-gradient(180deg, #313a26 0%, #232a1b 100%);
+}
+.panel-tech-node.is-current {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, #3f3722 0%, #2a2416 100%);
+}
+.panel-tech-node.is-locked {
+  background: linear-gradient(180deg, #262420 0%, #1c1b18 100%);
+}
+.panel-tech-node.is-locked .panel-tech-node-name { color: #8b8371; }
+.panel-tech-node.is-picked { box-shadow: var(--bevel), 0 0 0 2px var(--accent); }
+.panel-tech-node .panel-focus-node-bar { margin-top: 4px; }
+
+/* Headings live inside the scrolled grid so they travel with their column and
+   row rather than drifting off the technologies they name. */
+.panel-tech-year {
+  position: absolute; top: 0; width: 88px; height: 18px;
+  font-size: 11px; color: var(--ink-dim); letter-spacing: var(--track);
+  text-align: center;
+}
+/* The rail does not pan with the grid: inside it, the row labels slid off the
+   left edge the moment the player looked at 1940, which is the one place a row
+   label is needed. */
+.panel-tech-frame { display: flex; align-items: stretch; margin: 0 -12px; padding-left: 12px; }
+.panel-tech-rail { position: relative; flex: 0 0 46px; }
+.panel-tech-frame > .panel-tree-scroll { flex: 1 1 auto; min-width: 0; margin: 0; padding-left: 0; }
+.panel-tech-branch {
+  position: absolute; left: 0; width: 46px; height: 50px;
+  display: flex; align-items: center;
+  font-size: 11px; color: var(--accent); letter-spacing: 0;
+}
 
 /* --- chain of command ---------------------------------------------------- */
 /* The whole card header is the control that opens it, so it is a button with
