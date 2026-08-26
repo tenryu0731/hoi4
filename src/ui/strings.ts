@@ -95,7 +95,23 @@ export const UI = {
     `${law} · 産出の ${share}% を市場へ · 民需工場 1 基につき ${perFactory}／日`,
   cancel: '選択解除',
   /** Shown while a stack is under orders and the next tap sets its objective. */
-  orderHint: (n: number): string => `${n}個師団を選択中 — 移動先をタップ`,
+  orderHint: (n: number): string => `${n}個師団 — 移動先をタップ`,
+  /* The order bar's own buttons, on the map rather than in a panel. Two
+     characters each: the bar hangs over the map band, and every row it grows
+     is a row of counters the player can no longer press. The chips that open
+     underneath say the rest, and the aria-labels carry the full wording. */
+  orderAssign: '編成',
+  orderAssignLabel: '軍へ編成',
+  orderDrawFront: '戦線',
+  orderDrawFrontLabel: '戦線を引く',
+  orderNewArmy: '＋新しい軍',
+  orderNeedsArmy: 'まず軍に編成してください',
+  orderNoEnemy: '接する国がありません',
+  /** The marquee tool: a button, because a phone has no modifier key. */
+  boxSelectTool: '範囲',
+  boxSelectToolLabel: '範囲選択',
+  boxSelectArmed: '地図をなぞると、その範囲の師団をまとめて選びます',
+  boxSelectHint: '「範囲選択」を押してから地図をなぞると、師団をまとめて選べます',
   airStrength: '航空戦力',
   resistance: '抵抗運動',
   priorityNames: ['低', '並', '高', '最'] as const,

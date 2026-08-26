@@ -5,9 +5,10 @@ import { Simulation } from '../sim/Simulation';
 import { TimeEngine, type Speed } from '../sim/time/TimeEngine';
 import { CommandQueue, type Command } from '../sim/core/commands';
 import type { GameState, ProvinceId } from '../sim/core/types';
-import { MapRenderer, type SelectionScope } from '../render/MapRenderer';
+import { MapRenderer, type PlanLine, type SelectionScope } from '../render/MapRenderer';
 import type { MapMode } from '../render/palette';
 import { TouchController } from '../input/TouchController';
+import { ZOOM_AGGREGATE_STATES } from '../render/layers/UnitLayer';
 
 /**
  * Composition root. Owns the loop and wires the three halves of the program
@@ -86,6 +87,30 @@ export class Game {
     target: ProvinceId | null;
   } | null = null;
 
+  /**
+   * The marquee being dragged, in screen space, so the HUD can draw it.
+   *
+   * Screen space rather than world: it is a rubber band on the glass, not a
+   * region of the map, and a band drawn in world coordinates would stretch and
+   * shear if the camera moved under the finger.
+   */
+  boxSelect: { x0: number; y0: number; x1: number; y1: number } | null = null;
+
+  /**
+   * Whether the next stroke on the map draws a marquee instead of panning.
+   *
+   * A tool the player picks up, not a gesture inferred from timing. The first
+   * attempt read a press that had become a hold and then moved as a marquee,
+   * which is the same shape as the ordinary way a thumb pans -- rest, then
+   * drag -- and it took panning away outright: measured, a drag that should
+   * have moved the camera 100px moved it 0. There is no modifier key on a
+   * phone, so the modifier has to be a button.
+   *
+   * It disarms itself after one rectangle. A mode the player has to remember
+   * to leave is a mode they will be stuck in.
+   */
+  boxSelectArmed = false;
+
   private constructor(index: ProvinceIndex, renderer: MapRenderer, state: GameState) {
     this.index = index;
     this.renderer = renderer;
@@ -98,6 +123,8 @@ export class Game {
       onLongPress: (wx, wy, sx, sy) => this.handleTap(wx, wy, sx, sy),
       canStartOrderDrag: (wx, wy) => this.canDragFrom(wx, wy),
       onOrderDrag: (phase, fx, fy, tx, ty) => this.handleOrderDrag(phase, fx, fy, tx, ty),
+      canStartBoxSelect: () => this.boxSelectArmed,
+      onBoxSelect: (phase, x0, y0, x1, y1) => this.handleBoxSelect(phase, x0, y0, x1, y1),
       onCameraChange: () => { /* camera is read every frame; nothing to invalidate */ },
     });
     this.input.attach(renderer.canvas);
@@ -187,6 +214,7 @@ export class Game {
     this.time.advance(dtMs);
     this.input.update(dtMs);
     this.renderer.setDragOrder(this.dragOrder);
+    this.renderer.setPlans(this.planLines());
     this.renderer.update(dtMs, this.state);
     for (const fn of this.listeners) fn();
   }
@@ -282,6 +310,48 @@ export class Game {
     this.renderer.resize(w, h);
   }
 
+  /**
+   * A colour per formation, so two armies on one border are two lines.
+   *
+   * Not the national colour: every one of these plans belongs to the same
+   * nation, and drawing them all in it would answer a question nobody asked
+   * while hiding the one that was. Assigned by position in the country's own
+   * list rather than by army id, so disbanding the second army does not
+   * recolour the third.
+   *
+   * None of them is near the pale gold of a movement arrow (0xf2d98a). An
+   * amber in this list read as the same object as the arrows converging on
+   * it, and a front line the player cannot tell from the marching orders
+   * heading toward it is not showing them anything.
+   */
+  private static readonly PLAN_COLORS = [
+    0x5ec8ff, 0xff7a5c, 0x7fe07f, 0xc79bff, 0x2fd6c0, 0xff5ca8,
+  ];
+
+  /** The player's standing orders, as lines the map can draw. */
+  private planLines(): PlanLine[] {
+    const me = this.state.meta.playerCountry;
+    const armies = (this.state.armies ?? []).filter(
+      (a) => a.owner === me && !a.isArmyGroup,
+    );
+    const out: PlanLine[] = [];
+    for (let i = 0; i < armies.length; i++) {
+      const army = armies[i];
+      if (army.frontProvinces.length === 0) continue;
+      out.push({
+        owner: me,
+        provinces: army.frontProvinces,
+        targets: army.order?.kind === 'offensive' ? army.order.targets : [],
+        color: Game.PLAN_COLORS[i % Game.PLAN_COLORS.length],
+        // With nothing selected every plan is drawn at full strength: the
+        // player is looking at the whole board. Selecting one is what pushes
+        // the others back.
+        selected: this.selection.army === null || this.selection.army === army.id,
+      });
+    }
+    return out;
+  }
+
   // -------------------------------------------------------------------------
   // Selection
   // -------------------------------------------------------------------------
@@ -305,13 +375,22 @@ export class Game {
 
     // Counter or ground? Both are under the same finger -- a counter is drawn
     // lifted above its province centre, so its box overhangs its neighbours --
-    // and the nearer of the two in screen space is the one being aimed at.
-    // Testing the counter first instead made its box win every tap inside
-    // 18px of it, which at map scale spans three provinces: with a stack
-    // selected there was then no way to name a destination next to it,
+    // and outside the plate the nearer of the two in screen space is the one
+    // being aimed at. Testing the counter first instead made its box win every
+    // tap inside 18px of it, which at map scale spans three provinces: with a
+    // stack selected there was then no way to name a destination next to it,
     // because the tap kept landing back on the stack.
+    //
+    // A tap on the counter's own box is exempt from that arbitration, and has
+    // to be. The counter is 20 to 27 pixels tall and is lifted roughly its own
+    // height above its province centre, so the province centre is the nearer
+    // of the two over most of the counter's lower half: the player pressed the
+    // unit, saw the province sheet open instead, and pressed harder. Measured
+    // on a lattice over every one of the player's drawn counters, at the zoom
+    // the game opens at, 41% of taps that landed on a counter selected the
+    // ground. That was the whole of "the divisions are hard to tap".
     let takeCounter = hit !== null && hit.owner === mine;
-    if (takeCounter && id !== null && id !== hit!.province) {
+    if (takeCounter && !hit!.inside && id !== null && id !== hit!.province) {
       const p = this.index.get(id);
       const dx = this.renderer.camera.worldToScreenX(p.centerX) - screenX;
       const dy = this.renderer.camera.worldToScreenY(p.centerY) - screenY;
@@ -417,6 +496,81 @@ export class Game {
     }
     this.ordering = live.length > 0;
     this.pushSelection();
+  }
+
+  /**
+   * Rubber-band selection.
+   *
+   * The counters are what is picked, not the provinces: the player is drawing
+   * a box around units they can see, and a province with nothing in it inside
+   * the same box is not part of what they meant. Everything the box catches
+   * that is theirs goes under orders at once, which is the difference between
+   * moving an army and tapping nineteen counters.
+   */
+  private handleBoxSelect(
+    phase: 'start' | 'move' | 'end' | 'cancel',
+    x0: number, y0: number, x1: number, y1: number,
+  ): void {
+    if (phase === 'cancel') {
+      this.boxSelect = null;
+      this.boxSelectArmed = false;
+      return;
+    }
+    this.boxSelect = { x0, y0, x1, y1 };
+    if (phase !== 'end') return;
+    this.boxSelect = null;
+    this.boxSelectArmed = false;
+
+    const divisions = this.divisionsInRect(x0, y0, x1, y1);
+    if (divisions.length === 0) {
+      // An empty box is a deselect, not a no-op: it is how the player puts
+      // everything down without hunting for the cancel button.
+      this.unitSelected = false;
+      this.selectProvince(null);
+      return;
+    }
+    // The camera stays where the player put it. Centring on the first
+    // division would move the map out from under a box they just finished
+    // drawing, which is the one moment they are certain where things are.
+    this.selectDivisions(divisions, { army: this.armyOf(divisions), centre: false });
+  }
+
+  /** The player's divisions whose counters fall inside a screen rectangle. */
+  private divisionsInRect(x0: number, y0: number, x1: number, y1: number): number[] {
+    const minX = Math.min(x0, x1), maxX = Math.max(x0, x1);
+    const minY = Math.min(y0, y1), maxY = Math.max(y0, y1);
+    const mine = this.state.meta.playerCountry;
+    const out: number[] = [];
+    // Below the aggregation zoom one counter stands for a whole state, so what
+    // the box caught is the state, not the province the counter is anchored
+    // in. Reading only the anchor here selected one province's garrison out of
+    // a plate the player had drawn a box around because it represented five.
+    const aggregated = this.renderer.camera.zoom < ZOOM_AGGREGATE_STATES;
+    for (const box of this.renderer.units.hitBoxes) {
+      if (box.owner !== mine) continue;
+      if (box.x < minX || box.x > maxX || box.y < minY || box.y > maxY) continue;
+      const members = aggregated
+        ? (this.index.data.states[this.index.get(box.province).stateId]?.provinces
+          ?? [box.province])
+        : [box.province];
+      for (const province of members) {
+        for (const id of this.garrisonOf(province)) out.push(id);
+      }
+    }
+    return out;
+  }
+
+  /** The army every one of these divisions belongs to, or null if they differ. */
+  armyOf(divisions: readonly number[]): number | null {
+    let army: number | null = null;
+    for (const id of divisions) {
+      const div = this.state.divisions[id];
+      if (!div) continue;
+      if (div.armyId === null) return null;
+      if (army === null) army = div.armyId;
+      else if (army !== div.armyId) return null;
+    }
+    return army;
   }
 
   private canDragFrom(worldX: number, worldY: number): boolean {

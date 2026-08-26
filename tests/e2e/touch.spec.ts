@@ -546,4 +546,206 @@ test.describe('touch input', () => {
     expect(scroll.y).toBe(0);
     expect(scroll.visualScale).toBeCloseTo(1, 2);
   });
+  /**
+   * The counter is 10 to 17 CSS pixels tall and is drawn about that far above
+   * its province centre, so before the plate was made to win outright the
+   * province centre was nearer than the counter centre over the bottom half of
+   * every counter. Measured on a lattice over every one of the player's drawn
+   * plates: at the zoom the game opens at, 41% of taps that landed on a
+   * counter selected the ground instead.
+   */
+  test('a tap anywhere on a drawn counter takes the unit, not the ground', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const home = g.index.provinces.find(
+        (q) => s.provinces[q.id].divisions.some((d) => s.divisions[d].owner === me),
+      )!;
+      g.renderer.camera.centerOn(home.centerX, home.centerY);
+      g.renderer.camera.zoom = 0.22;
+      g.tickFrame(16);
+      g.selectProvince(null);
+      g.tickFrame(16);
+
+      const rect = g.renderer.canvas.getBoundingClientRect();
+      // The worst case for the old rule: the counter whose own province centre
+      // sits closest to the bottom edge of its plate.
+      let worst: { x: number; y: number; province: number } | null = null;
+      let bestGap = Infinity;
+      for (const b of g.renderer.units.hitBoxes) {
+        if (b.owner !== me) continue;
+        if (b.x < 40 || b.x > rect.width - 80) continue;
+        if (b.y < 260 || b.y > rect.height - 220) continue;
+        const p = g.index.get(b.province);
+        const gap = Math.abs(g.renderer.camera.worldToScreenY(p.centerY) - (b.y + b.h / 2));
+        if (gap < bestGap) {
+          bestGap = gap;
+          worst = {
+            x: Math.round(rect.left + b.x),
+            y: Math.round(rect.top + b.y + b.h / 2 - 2),
+            province: b.province,
+          };
+        }
+      }
+      return worst;
+    });
+    expect(setup, 'no counter of the player’s was framed').not.toBeNull();
+
+    await tapAt(page, setup!.x, setup!.y);
+    const picked = await page.evaluate((at) => {
+      const g = window.__game!;
+      const rect = g.renderer.canvas.getBoundingClientRect();
+      const chosen = g.renderer.units.hitBoxes.find(
+        (b) => b.province === g.selection.province,
+      );
+      // Which counter won is the nearest-centre rule's business and is
+      // allowed to be a neighbour whose plate also covers the point. What is
+      // asserted is that the tap did not fall through to the ground, and that
+      // whatever it did pick is drawn under the finger.
+      const onPlate = chosen !== undefined
+        && Math.abs(rect.left + chosen.x - at.x) <= chosen.w / 2 + 1
+        && Math.abs(rect.top + chosen.y - at.y) <= chosen.h / 2 + 1;
+      return {
+        ordering: g.unitSelected,
+        divisions: g.selection.divisions.length,
+        onPlate,
+      };
+    }, { x: setup!.x, y: setup!.y });
+    expect(picked.ordering).toBe(true);
+    expect(picked.onPlate).toBe(true);
+    expect(picked.divisions).toBeGreaterThan(0);
+  });
+
+  test('the marquee tool boxes every division inside the rectangle', async ({ page }) => {
+    await bootGame(page);
+
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const home = g.index.provinces.find(
+        (q) => s.provinces[q.id].divisions.some((d) => s.divisions[d].owner === me),
+      )!;
+      g.renderer.camera.centerOn(home.centerX, home.centerY);
+      g.renderer.camera.zoom = 0.3;
+      for (let i = 0; i < 4; i++) g.tickFrame(16);
+      g.selectProvince(null);
+      g.tickFrame(16);
+
+      const rect = g.renderer.canvas.getBoundingClientRect();
+      const top = document.querySelector('.hud-top')!.getBoundingClientRect().bottom;
+      const nav = document.querySelector('.hud-nav')!.getBoundingClientRect().top;
+      const own = g.renderer.units.hitBoxes.filter(
+        (b) => b.owner === me
+          && b.x > 40 && b.x < rect.width - 90
+          && rect.top + b.y > top + 70 && rect.top + b.y < nav - 70,
+      );
+      if (own.length < 2) return null;
+      own.sort((a, b) => a.y - b.y || a.x - b.x);
+      const pick = own.slice(0, Math.min(4, own.length));
+      const xs = pick.map((b) => b.x);
+      const ys = pick.map((b) => b.y);
+      const expected = new Set<number>();
+      for (const b of pick) {
+        for (const d of s.provinces[b.province].divisions) {
+          if (s.divisions[d] && !s.divisions[d].dead && s.divisions[d].owner === me) expected.add(d);
+        }
+      }
+      return {
+        from: { x: Math.round(rect.left + Math.min(...xs) - 12), y: Math.round(rect.top + Math.min(...ys) - 12) },
+        to: { x: Math.round(rect.left + Math.max(...xs) + 12), y: Math.round(rect.top + Math.max(...ys) + 12) },
+        expected: [...expected].sort((a, b) => a - b),
+      };
+    });
+    expect(setup, 'fewer than two of the player’s counters were framed').not.toBeNull();
+
+    // The tool has to be picked up first: an unarmed stroke pans the map, and
+    // that is the whole reason the marquee is a button rather than a timing.
+    await page.locator('.hud-select-tool').click();
+    await expect(page.locator('.hud-select-tool')).toHaveClass(/is-active/);
+    await swipe(page, setup!.from, setup!.to, 16, 60);
+
+    await page.waitForFunction(
+      (n) => window.__game!.selection.divisions.length >= n,
+      setup!.expected.length,
+      { timeout: 10_000 },
+    );
+    const picked = await page.evaluate(() => ({
+      ordering: window.__game!.unitSelected,
+      divisions: [...window.__game!.selection.divisions].sort((a, b) => a - b),
+      marquee: window.__game!.boxSelect,
+    }));
+    expect(picked.ordering).toBe(true);
+    expect(picked.marquee).toBeNull();
+    for (const id of setup!.expected) expect(picked.divisions).toContain(id);
+    // One rectangle, then the tool puts itself down.
+    await expect(page.locator('.hud-select-tool')).not.toHaveClass(/is-active/);
+  });
+
+  test('an unarmed drag still pans, however long the finger rests first', async ({ page }) => {
+    await bootGame(page);
+    await setCamera(page, 0, 0, 0.2);
+    const before = await cameraState(page);
+    const c = await canvasCentre(page);
+
+    // 700ms of stillness before the stroke. This is what a thumb does on a
+    // phone, and it is what a loaded test harness does whether the thumb
+    // meant to or not; reading it as a marquee moved the camera 0px.
+    await swipe(page, { x: c.x + 90, y: c.y + 90 }, { x: c.x - 90, y: c.y - 90 }, 14, 700);
+    await page.waitForTimeout(400);
+    const after = await cameraState(page);
+    expect(after.x).toBeGreaterThan(before.x + 100);
+    expect(after.y).toBeGreaterThan(before.y + 100);
+  });
+
+  test('the order bar raises an army from a selection and gives it a front', async ({ page }) => {
+    await bootGame(page);
+
+    const chosen = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const held = s.divisions
+        .filter((d) => d.owner === me && !d.dead)
+        .slice(0, 3)
+        .map((d) => d.id);
+      g.selectDivisions(held, { centre: false });
+      return held;
+    });
+    expect(chosen.length).toBeGreaterThan(0);
+
+    const bar = page.locator('.hud-order');
+    await expect(bar).toHaveClass(/is-on/);
+
+    await page.getByRole('button', { name: '軍へ編成' }).click();
+    await page.locator('.hud-order-chip').last().click();
+
+    const raised = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const army = g.selection.army;
+      const found = (g.state.armies ?? []).find((a) => a.id === army);
+      return { army, owner: found?.owner, held: found?.divisions.length ?? 0, me };
+    });
+    expect(raised.army).not.toBeNull();
+    expect(raised.owner).toBe(raised.me);
+    expect(raised.held).toBeGreaterThanOrEqual(chosen.length);
+
+    await page.getByRole('button', { name: '戦線を引く' }).click();
+    await page.locator('.hud-order-chip').first().click();
+
+    // A day of the battle-plan tick is what turns the order into a line.
+    await page.evaluate(() => { window.__game!.stepHours(26); window.__game!.tickFrame(16); });
+    const plan = await page.evaluate(() => {
+      const g = window.__game!;
+      const army = (g.state.armies ?? []).find((a) => a.id === g.selection.army);
+      return { kind: army?.order?.kind, front: army?.frontProvinces.length ?? 0 };
+    });
+    expect(plan.kind).toBe('front');
+    expect(plan.front).toBeGreaterThan(0);
+  });
 });

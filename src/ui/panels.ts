@@ -1332,12 +1332,7 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
   const me = game.state.countries[game.state.meta.playerCountry];
   const box = el('div', 'panel-chips');
 
-  const enemies = me.atWarWith
-    .map((id) => game.state.countries[id])
-    .filter((c) => c && !c.capitulated);
-  const neighbours = enemies.length > 0 ? enemies : borderingCountries(game, me.id);
-
-  for (const enemy of neighbours.slice(0, 5)) {
+  for (const enemy of frontCandidates(game).slice(0, 5)) {
     const chip = el('button', 'panel-chip', `${UI.setOrderFront}: ${country(enemy.tag)}`);
     chip.classList.toggle(
       'is-on', army.order?.kind === 'front' && army.order.against === enemy.id,
@@ -1390,6 +1385,22 @@ function objectivesAgainst(game: Game, enemy: CountryId): number[] {
     .sort((a, b) => b.vp - a.vp || a.id - b.id)
     .slice(0, 4)
     .map((p) => p.id);
+}
+
+/**
+ * Who an army could be told to face.
+ *
+ * Whoever we are already at war with, and failing that whoever we touch: a
+ * front drawn before the war is the whole point of drawing one early, and an
+ * empty list would leave the control a dead end in peacetime. Exported
+ * because the order bar on the map asks the same question the panel does.
+ */
+export function frontCandidates(game: Game): Country[] {
+  const me = game.state.countries[game.state.meta.playerCountry];
+  const enemies = me.atWarWith
+    .map((id) => game.state.countries[id])
+    .filter((c) => c && !c.capitulated);
+  return enemies.length > 0 ? enemies : borderingCountries(game, me.id);
 }
 
 /** Countries whose territory touches ours; the ones a front could face. */
@@ -1447,6 +1458,10 @@ export const commandPanel: Panel = {
       stat(UI.airStrength, formatNumber(Math.round(airStrength(state, me.id)))),
     );
     root.append(head);
+
+    // The marquee tool is a two-character button in a corner of the map, and
+    // this panel is what it is for.
+    root.append(el('div', 'panel-row-sub', UI.boxSelectHint));
 
     const label = el('div', 'panel-label', UI.armies);
     root.append(label);

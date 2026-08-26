@@ -12,6 +12,7 @@ import type { Camera } from '../render/Camera';
  *                       └──up, still──────────▶ tap
  *   PENDING/PAN ──down(2)──▶ PINCH ──one up──▶ PAN
  *   PENDING over a unit stack ──moved──▶ DRAG_ORDER ──up──▶ issue move order
+ *   PENDING with the marquee armed ──moved──▶ BOX ──up──▶ select what is inside
  */
 
 export type GesturePhase = 'start' | 'move' | 'end' | 'cancel';
@@ -27,6 +28,23 @@ export interface TouchCallbacks {
     fromX: number, fromY: number,
     toX: number, toY: number,
   ) => void;
+  /**
+   * Whether a marquee may start here.
+   *
+   * This has to be a tool the player picks up, not a gesture the recogniser
+   * infers. Hold-then-drag was tried and is wrong: a finger that rests before
+   * it moves is the ordinary way a thumb pans a map -- the comment on the
+   * hold-to-pan branch below records that it is "most of the time on a phone,
+   * and every time under a remote test harness" -- so inferring a marquee
+   * from it took panning away. Measured: the pan test moved the camera 0px.
+   */
+  canStartBoxSelect?: (screenX: number, screenY: number) => boolean;
+  /** Marquee corners in screen (CSS pixel) space. */
+  onBoxSelect?: (
+    phase: GesturePhase,
+    x0: number, y0: number,
+    x1: number, y1: number,
+  ) => void;
   /** Fired whenever the camera moved, so the app can mark itself dirty. */
   onCameraChange?: () => void;
 }
@@ -37,7 +55,7 @@ const HOLD_MS = 480;
 /** Velocity is averaged over this window so a flick is not judged on one frame. */
 const VELOCITY_WINDOW_MS = 90;
 
-type State = 'idle' | 'pending' | 'pan' | 'pinch' | 'order' | 'hold';
+type State = 'idle' | 'pending' | 'pan' | 'pinch' | 'order' | 'hold' | 'box';
 
 interface PointerRec {
   id: number;
@@ -69,6 +87,17 @@ export class TouchController {
    * selection changed mid-gesture.
    */
   private orderCandidate = false;
+
+  /** Marquee anchor, in screen space, while the state is `box`. */
+  private boxFromX = 0;
+  private boxFromY = 0;
+  /**
+   * Whether the press landed with the marquee tool armed. Decided once, at
+   * press time, for the same reason `orderCandidate` is: asking again after
+   * the finger has moved would consult a state the player may have changed
+   * mid-gesture.
+   */
+  private boxCandidate = false;
 
   private history: { t: number; x: number; y: number }[] = [];
   private detachFns: (() => void)[] = [];
@@ -160,6 +189,7 @@ export class TouchController {
       this.orderCandidate = this.cb.canStartOrderDrag?.(
         this.camera.screenToWorldX(x), this.camera.screenToWorldY(y),
       ) ?? false;
+      this.boxCandidate = this.cb.canStartBoxSelect?.(x, y) ?? false;
       this.clearHold();
       // The timer only records that the press became a hold. The action fires
       // on release, so a press that turns into a drag never triggers it.
@@ -171,6 +201,9 @@ export class TouchController {
       // A second finger always wins: abandon whatever the first was doing.
       if (this.state === 'order') {
         this.cb.onOrderDrag?.('cancel', this.orderFromX, this.orderFromY, this.orderFromX, this.orderFromY);
+      }
+      if (this.state === 'box') {
+        this.cb.onBoxSelect?.('cancel', this.boxFromX, this.boxFromY, this.boxFromX, this.boxFromY);
       }
       this.beginPinch();
     }
@@ -209,6 +242,16 @@ export class TouchController {
         const moved = Math.hypot(x - rec.startX, y - rec.startY);
         if (moved <= SLOP_PX) return;
         this.clearHold();
+        // The marquee first, when the player has picked the tool up. It wins
+        // over both of the others: having armed it, the next stroke is the
+        // rectangle, wherever it starts.
+        if (this.boxCandidate) {
+          this.state = 'box';
+          this.boxFromX = rec.startX;
+          this.boxFromY = rec.startY;
+          this.cb.onBoxSelect?.('start', rec.startX, rec.startY, x, y);
+          return;
+        }
         const wx = this.camera.screenToWorldX(rec.startX);
         const wy = this.camera.screenToWorldY(rec.startY);
         if (this.orderCandidate) {
@@ -235,6 +278,10 @@ export class TouchController {
           'move', this.orderFromX, this.orderFromY,
           this.camera.screenToWorldX(x), this.camera.screenToWorldY(y),
         );
+        return;
+      }
+      case 'box': {
+        this.cb.onBoxSelect?.('move', this.boxFromX, this.boxFromY, x, y);
         return;
       }
       case 'pinch': {
@@ -295,6 +342,9 @@ export class TouchController {
           this.camera.screenToWorldX(x), this.camera.screenToWorldY(y),
         );
         break;
+      case 'box':
+        this.cb.onBoxSelect?.('end', this.boxFromX, this.boxFromY, x, y);
+        break;
       default:
         break;
     }
@@ -321,6 +371,9 @@ export class TouchController {
     this.clearHold();
     if (this.state === 'order') {
       this.cb.onOrderDrag?.('cancel', this.orderFromX, this.orderFromY, this.orderFromX, this.orderFromY);
+    }
+    if (this.state === 'box') {
+      this.cb.onBoxSelect?.('cancel', this.boxFromX, this.boxFromY, this.boxFromX, this.boxFromY);
     }
     if (this.pointers.size === 0) this.state = 'idle';
   };
@@ -353,7 +406,10 @@ export class TouchController {
 
   /** Called once per frame to run inertia and the out-of-bounds spring. */
   update(dtMs: number): void {
-    const dragging = this.state === 'pan' || this.state === 'pinch' || this.state === 'pending';
+    // A marquee counts as dragging: the spring must not slide the map out
+    // from under a rectangle the player is still drawing on it.
+    const dragging = this.state === 'pan' || this.state === 'pinch'
+      || this.state === 'pending' || this.state === 'box';
     const beforeX = this.camera.x;
     const beforeY = this.camera.y;
     this.camera.update(dtMs, dragging);
