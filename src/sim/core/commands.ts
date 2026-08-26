@@ -1,6 +1,6 @@
 import type {
   ArmyId, ArmyOrder, BattalionType, BuildingType, CommanderId, CountryId, DivisionId,
-  EquipmentType, ProvinceId, ResourceType, StateId, SupportType, TechId,
+  EquipmentType, ProvinceId, ResourceType, StateId, SupportType, TechId, VariantModule,
 } from './types';
 import type { LawKind } from '../politics/politics';
 
@@ -25,6 +25,15 @@ export type Command =
   | { t: 'removeProductionLine'; country: CountryId; line: number }
   | { t: 'setLineFactories'; country: CountryId; line: number; factories: number }
   | { t: 'setLinePriority'; country: CountryId; line: number; priority: 0 | 1 | 2 | 3 }
+  /**
+   * Raises or lowers one module of one equipment type's mark. Stepping up
+   * costs army experience, which is only earned in combat; stepping down is
+   * free and refunds nothing.
+   */
+  | {
+      t: 'upgradeVariant'; country: CountryId; equipment: EquipmentType;
+      module: VariantModule; step: 1 | -1;
+    }
   | { t: 'queueConstruction'; country: CountryId; kind: BuildingType; state: StateId }
   | { t: 'cancelConstruction'; country: CountryId; item: number }
   | { t: 'reorderConstruction'; country: CountryId; item: number; toIndex: number }

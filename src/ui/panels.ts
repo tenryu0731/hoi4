@@ -1,4 +1,5 @@
 import type { Game } from '../app/Game';
+import type { VariantModule } from '../sim/core/types';
 import {
   BUILDING_COST, EQUIPMENT, FACTORY_OUTPUT,
 } from '../sim/core/data';
@@ -35,6 +36,10 @@ import { maxPlanning } from '../sim/military/frontline';
 import {
   divisionsPerBattle, equipmentShortfall, terrainProfile,
 } from '../sim/military/combat';
+import {
+  MAX_VARIANT_LEVEL, VARIANT_LEVEL_XP, VARIANT_MODULES, baseStats, canUpgrade, variantMark,
+  variantOf, variantStats,
+} from '../sim/economy/variants';
 import { MAX_BATTALIONS, MAX_SUPPORTS } from '../sim/core/data';
 import {
   BATTALION, BUILDING, EQUIPMENT as EQUIPMENT_NAME, IDEOLOGY, RESOURCE,
@@ -51,7 +56,7 @@ import {
 
 export type PanelId =
   | 'focus' | 'research' | 'production' | 'construction' | 'army' | 'command'
-  | 'diplomacy' | 'province' | 'designer' | 'politics' | 'trade';
+  | 'diplomacy' | 'province' | 'designer' | 'politics' | 'trade' | 'variant';
 
 export interface Panel {
   id: PanelId;
@@ -176,6 +181,7 @@ export const productionPanel: Panel = {
       stat(UI.militaryFactories, `${assigned}/${me.economy.militaryFactories}`),
       stat(UI.dockyards, String(me.economy.dockyards)),
       stat(UI.lines, String(me.productionLines.length)),
+      stat(UI.armyExperience, String(Math.floor(me.armyExperience ?? 0))),
     );
     root.append(head);
 
@@ -229,6 +235,16 @@ export const productionPanel: Panel = {
       });
       top.append(drop);
       row.append(top);
+
+      // The way to the mark. On the row rather than in a menu because the row
+      // is where a player is already looking at what this line produces.
+      const upgrade = el('button', 'panel-btn', UI.variantOpen);
+      upgrade.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.variantTitle}`);
+      upgrade.addEventListener('click', () => {
+        openVariant = line.equipment;
+        game.openPanel?.('variant');
+      });
+      top.insertBefore(upgrade, prio);
 
       // --- body: silhouette, figures, blocks -------------------------------
       const body = el('div', 'panel-line-body');
@@ -359,6 +375,141 @@ export const productionPanel: Panel = {
         stock.classList.toggle('is-short', short > 0);
       }
     }
+  },
+};
+
+/** Which equipment the variant sheet is showing. */
+let openVariant: EquipmentType = 'infantry_equipment';
+
+/** Opens the variant sheet on a particular type. */
+export function editVariant(eq: EquipmentType): void {
+  openVariant = eq;
+}
+
+const MODULE_LABEL: Record<VariantModule, string> = {
+  armor: UI.moduleArmor,
+  gun: UI.moduleGun,
+  reliability: UI.moduleReliability,
+  engine: UI.moduleEngine,
+};
+
+/**
+ * One stat line with what the mark has done to it.
+ *
+ * `lowerIsBetter` is not a nicety. Two of these seven rows are supply
+ * consumption and production cost, and on both of them the number going down
+ * is the good news; colouring by the sign of the change alone would paint a
+ * reliability upgrade red and a cost increase green.
+ */
+function variantStat(
+  label: string, base: number, now: number, digits: number, lowerIsBetter = false,
+): HTMLElement | null {
+  // A rifle has no armour and never will: a row reading 装甲 0.0 says the
+  // design space has something in it that it does not.
+  if (base === 0 && now === 0) return null;
+  const row = el('div', 'panel-statline');
+  row.append(el('span', 'panel-statline-k', label));
+  row.append(el('span', 'panel-statline-v', now.toFixed(digits)));
+  const change = now - base;
+  if (Math.abs(change) > 0.0005) {
+    const arrow = change > 0 ? '▲' : '▼';
+    const mark = el('span', 'panel-delta', `${arrow}${Math.abs(change).toFixed(digits)}`);
+    const better = lowerIsBetter ? change < 0 : change > 0;
+    mark.classList.add(better ? 'is-up' : 'is-down');
+    row.append(mark);
+  }
+  return row;
+}
+
+/**
+ * The variant sheet: what this country's factories have been told to build.
+ *
+ * The reference's Create Variant window, with its four steppers, its
+ * silhouette and its readout of what each change costs. The numbers shown are
+ * the equipment's own rather than a division's, as the reference shows them:
+ * a mark is a decision about a machine, and it is the same machine whichever
+ * formation ends up holding it.
+ */
+export const variantPanel: Panel = {
+  id: 'variant',
+  title: UI.variantTitle,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const eq = openVariant;
+    const rebuild = (): void => { variantPanel.build(game, root); };
+
+    const head = el('div', 'panel-head');
+    head.append(
+      stat(UI.armyExperience, String(Math.floor(me.armyExperience ?? 0))),
+      stat(UI.variantMark, String(variantMark(me, eq))),
+      stat(UI.statCost, variantStats(me, eq).cost.toFixed(1)),
+    );
+    root.append(head);
+
+    const title = el('div', 'panel-line-top');
+    const art = el('div', 'panel-line-art');
+    const icon = el('img', 'panel-line-icon');
+    icon.alt = '';
+    icon.src = iconUrl(`equipment-${eq}`);
+    icon.addEventListener('error', () => { icon.removeAttribute('src'); });
+    art.append(icon);
+    title.append(art, el('span', 'panel-line-name', EQUIPMENT_LABEL[eq]));
+    root.append(title);
+
+    // Experience is only earned in combat, so at peace this whole sheet is
+    // read-only. Saying so once is better than four disabled buttons.
+    if ((me.armyExperience ?? 0) < VARIANT_LEVEL_XP) {
+      root.append(el('div', 'panel-note', UI.variantNoExperience(VARIANT_LEVEL_XP)));
+    }
+
+    for (const module of VARIANT_MODULES[eq]) {
+      const level = variantOf(me, eq)[module];
+      const row = el('div', 'panel-row');
+      const main = el('div', 'panel-row-main');
+      main.append(el('div', 'panel-row-title', MODULE_LABEL[module]));
+      main.append(el('div', 'panel-row-sub', UI.variantLevel(level, MAX_VARIANT_LEVEL)));
+      const controls = el('div', 'panel-row-controls');
+      const minus = el('button', 'panel-btn', '−');
+      minus.disabled = !canUpgrade(me, eq, module, -1);
+      minus.setAttribute('aria-label', `${MODULE_LABEL[module]} −`);
+      minus.addEventListener('click', () => {
+        game.issue({ t: 'upgradeVariant', country: me.id, equipment: eq, module, step: -1 });
+        rebuild();
+      });
+      const count = el('span', 'panel-count', String(level));
+      const plus = el('button', 'panel-btn', '+');
+      plus.disabled = !canUpgrade(me, eq, module, 1);
+      plus.setAttribute('aria-label', `${MODULE_LABEL[module]} +`);
+      plus.addEventListener('click', () => {
+        game.issue({ t: 'upgradeVariant', country: me.id, equipment: eq, module, step: 1 });
+        rebuild();
+      });
+      controls.append(minus, count, plus);
+      row.append(main, controls);
+      root.append(row);
+    }
+
+    const now = variantStats(me, eq);
+    const base = baseStats(eq);
+    const table = el('div', 'panel-statcol');
+    table.append(el('div', 'panel-statcol-h', UI.statsCombat));
+    const rows = [
+      variantStat(UI.statSoftAttack, base.softAttack, now.softAttack, 1),
+      variantStat(UI.statHardAttack, base.hardAttack, now.hardAttack, 1),
+      variantStat(UI.statArmor, base.armor, now.armor, 1),
+      variantStat(UI.statPiercing, base.piercing, now.piercing, 1),
+      variantStat(UI.statSpeed, base.maxSpeedKmh, now.maxSpeedKmh, 1),
+      variantStat(UI.statSupply, base.supplyUse, now.supplyUse, 3, true),
+      variantStat(UI.statCost, base.cost, now.cost, 1, true),
+    ].filter((r): r is HTMLElement => r !== null);
+    table.append(...rows);
+    root.append(table);
+
+    const back = el('button', 'panel-btn wide', UI.back);
+    back.addEventListener('click', () => game.openPanel?.('production'));
+    root.append(back);
   },
 };
 
@@ -1458,6 +1609,7 @@ export const PANELS: Record<PanelId, Panel> = {
   diplomacy: diplomacyPanel,
   province: provincePanel,
   designer: designerPanel,
+  variant: variantPanel,
   get politics() { return politicsPanel; },
   get trade() { return tradePanel; },
 } as Record<PanelId, Panel>;

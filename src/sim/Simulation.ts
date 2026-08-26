@@ -35,6 +35,7 @@ import {
 } from './military/command';
 import { tickBattlePlansDaily } from './military/frontline';
 import { MAX_BATTALIONS, MAX_SUPPORTS } from './core/data';
+import { tickArmyExperienceDaily, upgradeVariant } from './economy/variants';
 import { tickAIDaily } from './ai/ai';
 import { cancelResearch, startResearch, tickResearchDaily } from './research';
 import { closeTrade, openTrade, tickTradeDaily } from './economy/trade';
@@ -165,6 +166,10 @@ export class Simulation {
         const held = armiesOf(state, cmd.country).filter((a) => a.isArmyGroup === group);
         if (held.length >= MAX_ARMIES) return;
         createArmy(state, cmd.country, cmd.name, group);
+        return;
+      }
+      case 'upgradeVariant': {
+        upgradeVariant(state, cmd.country, cmd.equipment, cmd.module, cmd.step);
         return;
       }
       case 'changeLaw': {
@@ -308,6 +313,7 @@ export class Simulation {
       tickCommandReinforcementDaily(state);
       tickBattlePlansDaily(state, this.ctx);
       tickCommanderExperienceDaily(state);
+      tickArmyExperienceDaily(state);
       tickSupplyDaily(state, this.index);
       // Before the economy, so a deal broken by yesterday's declaration of war
       // is already gone when today's resource supply is added up.

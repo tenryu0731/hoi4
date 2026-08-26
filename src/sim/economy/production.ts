@@ -1,5 +1,6 @@
 import { techModifiers } from '../research';
 import { occupiedOutput } from './occupation';
+import { variantCostMultiplier } from './variants';
 // Mutually recursive with trade.ts, which needs computeResourceOutput to know
 // what a seller has to sell. Both sides are function declarations called long
 // after module evaluation, so the cycle never bites.
@@ -239,7 +240,11 @@ function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): 
     const output = factories * FACTORY_OUTPUT * line.efficiency * outputBonus * shortagePenalty;
     line.progress += output;
 
-    const cost = EQUIPMENT[line.equipment].cost;
+    // What the mark costs to build, not what the base pattern costs. This is
+    // the whole trade a variant makes: a better tank comes off the line more
+    // slowly, and a player who upgrades everything discovers they have fewer
+    // of everything.
+    const cost = EQUIPMENT[line.equipment].cost * variantCostMultiplier(c, line.equipment);
     if (cost > 0 && line.progress >= cost) {
       const made = Math.floor(line.progress / cost);
       line.progress -= made * cost;

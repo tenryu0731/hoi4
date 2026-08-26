@@ -1,8 +1,10 @@
 import { HOURS_PER_DAY, daysInYear, hoursFromDate } from '../time/calendar';
 import { lawEffects } from '../politics/politics';
 import type {
-  Country, CountryId, DivisionTemplate, GameState, ResearchSlot, ResearchState, TechId,
+  Country, CountryId, DivisionTemplate, EquipmentType, GameState, ResearchSlot,
+  ResearchState, TechId,
 } from '../core/types';
+import { variantDelta, variantMark } from '../economy/variants';
 import {
   BLOCK_REASON_TEXT, BRANCH_NAME, IDLE_SLOT_NAME, MODIFIER_KEYS, MODIFIER_KIND,
   MODIFIER_LABEL, TECHS, TECH_BRANCHES, formatModifier, techDef, techsInBranch,
@@ -111,42 +113,64 @@ export function techModifiers(state: GameState, country: CountryId): TechModifie
 }
 
 /**
- * A division template with this country's technology folded in.
+ * A division template with this country's technology and equipment marks
+ * folded in.
  *
  * Combat, movement and supply all want the same nine numbers scaled the same
- * way, so this is the one place that does it. Results are cached per template
- * object and invalidated whenever the country completes anything; templates are
- * replaced wholesale when the player edits one, so identity is a safe key.
+ * way, so this is the one place that does it -- and it is the one place the
+ * two axes of equipment quality meet. Research decides what a country's
+ * industry *can* build; a mark decides what it has been told to build.
+ *
+ * Results are cached per template object and invalidated whenever either axis
+ * moves. The stamp has to carry both: keyed on the completed-technology count
+ * alone, raising a mark left every division fighting with the numbers it had
+ * before the retooling, for the rest of the game or until the next technology
+ * landed.
  */
 const templateCache = new WeakMap<
-  DivisionTemplate, { country: CountryId; n: number; tpl: DivisionTemplate }
+  DivisionTemplate, { country: CountryId; n: number; marks: number; tpl: DivisionTemplate }
 >();
+
+/** Total levels a country has put into every equipment type; the mark stamp. */
+function markStamp(c: Country | undefined): number {
+  if (!c?.variants) return 0;
+  let total = 0;
+  for (const eq of Object.keys(c.variants) as EquipmentType[]) {
+    total += variantMark(c, eq);
+  }
+  return total;
+}
 
 export function effectiveTemplate(
   state: GameState, country: CountryId, tpl: DivisionTemplate,
 ): DivisionTemplate {
   const c = state.countries[country];
   const n = c?.research.completed?.length ?? 0;
-  if (n === 0) return tpl;
+  const marks = markStamp(c);
+  if (n === 0 && marks === 0) return tpl;
 
   const hit = templateCache.get(tpl);
-  if (hit && hit.country === country && hit.n === n) return hit.tpl;
+  if (hit && hit.country === country && hit.n === n && hit.marks === marks) return hit.tpl;
 
   const m = techModifiers(state, country);
-  const r2 = (v: number) => Math.round(v * 100) / 100;
+  // Marks are applied before technology multiplies, because that is the order
+  // they happen in: a factory builds the mark, and the doctrine and training
+  // technology multiplies what the troops holding it manage to do with it.
+  const v = c ? variantDelta(c, tpl) : null;
+  const r2 = (value: number) => Math.round(value * 100) / 100;
   const out: DivisionTemplate = {
     ...tpl,
     maxOrg: r2(tpl.maxOrg * m.maxOrg),
-    softAttack: r2(tpl.softAttack * m.softAttack),
-    hardAttack: r2(tpl.hardAttack * m.hardAttack),
+    softAttack: r2((tpl.softAttack + (v?.softAttack ?? 0)) * m.softAttack),
+    hardAttack: r2((tpl.hardAttack + (v?.hardAttack ?? 0)) * m.hardAttack),
     defense: r2(tpl.defense * m.defense),
     breakthrough: r2(tpl.breakthrough * m.breakthrough),
-    armor: r2(tpl.armor * m.armor),
-    piercing: r2(tpl.piercing * m.piercing),
-    speedKmh: r2(tpl.speedKmh * m.speedKmh),
-    supplyUse: r2(tpl.supplyUse * m.supplyUse),
+    armor: r2((tpl.armor + (v?.armor ?? 0)) * m.armor),
+    piercing: r2((tpl.piercing + (v?.piercing ?? 0)) * m.piercing),
+    speedKmh: r2(tpl.speedKmh * (v?.speed ?? 1) * m.speedKmh),
+    supplyUse: r2((tpl.supplyUse + (v?.supplyUse ?? 0)) * m.supplyUse),
   };
-  templateCache.set(tpl, { country, n, tpl: out });
+  templateCache.set(tpl, { country, n, marks, tpl: out });
   return out;
 }
 

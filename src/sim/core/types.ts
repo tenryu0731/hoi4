@@ -177,6 +177,16 @@ export interface DivisionTemplate {
   buildCost: number;
 }
 
+/**
+ * The four things a country can change about a piece of equipment.
+ *
+ * Not every type has all four: a rifle has no engine. See VARIANT_MODULES.
+ */
+export type VariantModule = 'armor' | 'gun' | 'reliability' | 'engine';
+
+/** How many levels a country has put into each module of one equipment type. */
+export type EquipmentVariant = Record<VariantModule, number>;
+
 export type UnitOrder =
   | { kind: 'move'; target: ProvinceId }
   | { kind: 'attack'; target: ProvinceId }
@@ -544,6 +554,20 @@ export interface Country {
    * which is what a formation number is for.
    */
   divisionOrdinals?: Partial<Record<number, number>>;
+  /**
+   * The mark each equipment type is currently built to; see sim/economy/variants.
+   *
+   * Optional because the 1936 scenario table predates it, and absent means
+   * every type is at its base mark.
+   */
+  variants?: Partial<Record<EquipmentType, EquipmentVariant>>;
+  /**
+   * Lessons paid for in blood, spent on equipment marks.
+   *
+   * Earned only by divisions in combat, so a country at peace has none. That
+   * is the pressure that makes the opening years about industry.
+   */
+  armyExperience?: number;
   research: ResearchState;
   /** National focus state. Created on first use by sim/focus. */
   focus?: CountryFocus;

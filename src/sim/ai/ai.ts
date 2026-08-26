@@ -3,7 +3,8 @@ import { rand } from '../core/rng';
 import {
   RESOURCE_TYPES,
   type Country, type CountryId, type Division, type EquipmentType, type GameState,
-  type Ideology, type ProvinceId, type ResourceType,
+  type Ideology, type ProductionLine, type ProvinceId, type ResourceType,
+  type VariantModule,
 } from '../core/types';
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 import {
@@ -20,6 +21,7 @@ import { fuelRatio } from '../economy/fuel';
 import {
   availableToAI, canTradeWith, openTrade, RESOURCE_PER_FACTORY,
 } from '../economy/trade';
+import { VARIANT_LEVEL_XP, canUpgrade, upgradeVariant } from '../economy/variants';
 import { LAW_COST } from '../politics/lawData';
 import { spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY } from '../scenario/europe1936';
 import {
@@ -1082,6 +1084,45 @@ export function tickAIDaily(state: GameState, ctx: AIContext): void {
     }
     if (c.id % 7 === dayOfWeek) {
       runDiplomacyAI(state, ctx, c);
+    }
+    runVariantAI(state, c);
+  }
+}
+
+/**
+ * Spending the lessons of the last battle.
+ *
+ * Without this the AI banks army experience for twelve years and never
+ * touches it, which would make equipment marks a mechanic only the human
+ * player has -- the same asymmetry the mobilisation AI exists to prevent, and
+ * a decisive one, because a marked-up division beats an unmarked one at equal
+ * numbers.
+ *
+ * It upgrades what it is actually building, in the order that matters most in
+ * a fight, and only above a reserve. The reserve is what stops it spending
+ * every lesson the moment it is learned and never accumulating enough to lift
+ * a whole design.
+ */
+const AI_VARIANT_RESERVE = VARIANT_LEVEL_XP * 2;
+const AI_MODULE_ORDER: readonly VariantModule[] = ['gun', 'armor', 'reliability', 'engine'];
+
+function runVariantAI(state: GameState, c: Country): void {
+  if ((c.armyExperience ?? 0) < AI_VARIANT_RESERVE + VARIANT_LEVEL_XP) return;
+  // Down the production list in order of effort, not just the largest line.
+  // Taking only the biggest, every AI maxed its rifles -- ten levels, the
+  // whole design -- and then sat on the rest of its experience for the next
+  // six years: measured, Germany finished 1945 with 553 banked and one
+  // upgraded equipment type. A country with lessons to spend and a tank line
+  // open should be spending them on the tanks.
+  const lines: ProductionLine[] = [...c.productionLines]
+    .filter((l) => l.assignedFactories > 0)
+    .sort((a, b) => b.assignedFactories - a.assignedFactories || a.id - b.id);
+
+  for (const line of lines) {
+    for (const module of AI_MODULE_ORDER) {
+      if (!canUpgrade(c, line.equipment, module, 1)) continue;
+      upgradeVariant(state, c.id, line.equipment, module, 1);
+      return;
     }
   }
 }

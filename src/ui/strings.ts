@@ -97,6 +97,19 @@ export const UI = {
   /* Production, as the reference lays it out: what a line makes a day, how
      efficient it has become, and the depot against what the army is short. */
   lines: '生産ライン',
+  /* Equipment marks. The reference calls the window Create Variant; here it is
+     one mark per type, so 「改良」 rather than 「バリアント」. */
+  armyExperience: '陸軍経験',
+  variantOpen: '改良',
+  variantTitle: '装備の改良',
+  variantMark: '改良段階',
+  moduleArmor: '装甲',
+  moduleGun: '主砲',
+  moduleReliability: '信頼性',
+  moduleEngine: '機関',
+  variantLevel: (level: number, max: number): string => `${level} / ${max}`,
+  variantNoExperience: (cost: number): string =>
+    `改良には陸軍経験が ${cost} 必要です。経験は戦闘中の師団からしか得られません。`,
   noFactories: '工場未割当',
   closeLine: 'ラインを閉じる',
   stockHeld: (held: string): string => `在庫 ${held}`,

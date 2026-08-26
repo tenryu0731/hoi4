@@ -864,6 +864,12 @@ button:active { transform: scale(0.96); }
    follows everywhere and the one that makes a dense table readable. */
 .panel-statline-v { color: var(--ink); font-weight: 600; }
 .panel-statline-v.is-short { color: var(--bad, #d8574a); }
+/* What a mark has changed, beside the number it changed. The reference puts a
+   green triangle here and it is the only reason the window is worth opening
+   twice: the second visit is to see what the last decision bought. */
+.panel-delta { font-size: 10px; min-width: 42px; text-align: right; }
+.panel-delta.is-up { color: #7fe07f; }
+.panel-delta.is-down { color: #d8574a; }
 
 /* The Adjusters box. */
 .panel-adjusters {
