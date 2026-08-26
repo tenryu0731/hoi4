@@ -288,19 +288,42 @@ function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): 
  */
 const MAX_FACTORIES_PER_ITEM = 15;
 
-export function tickConstruction(state: GameState, c: Country): void {
+/**
+ * Which factories go to which item, in queue order.
+ *
+ * Split out of the tick because the panel has to show it. Queue position is a
+ * real decision -- the first items take fifteen factories each and whatever is
+ * past the end of the budget gets nothing at all -- and it was invisible: the
+ * queue drew an identical progress bar for the project being built and the
+ * three behind it that were not being built.
+ */
+export function constructionAllocation(
+  state: GameState, c: Country,
+): Map<number, number> {
+  const out = new Map<number, number>();
   let available = c.economy.freeCivilianFactories;
-  if (available <= 0 || c.constructionQueue.length === 0) return;
-
-  const finished: number[] = [];
   for (const item of c.constructionQueue) {
     if (available <= 0) break;
     const st = state.states[item.stateId];
     // A state lost to the enemy stops building.
     if (!st || st.controller !== c.id) continue;
-
     const used = Math.min(available, MAX_FACTORIES_PER_ITEM);
     available -= used;
+    out.set(item.id, used);
+  }
+  return out;
+}
+
+export function tickConstruction(state: GameState, c: Country): void {
+  if (c.economy.freeCivilianFactories <= 0 || c.constructionQueue.length === 0) return;
+  const allocation = constructionAllocation(state, c);
+
+  const finished: number[] = [];
+  for (const item of c.constructionQueue) {
+    const used = allocation.get(item.id) ?? 0;
+    if (used <= 0) continue;
+    const st = state.states[item.stateId];
+    if (!st) continue;
     const infraBonus = 1 + (st.infrastructure - 1) * 0.1;
     item.progress += used * FACTORY_OUTPUT * infraBonus
       * techModifiers(state, c.id).constructionSpeed

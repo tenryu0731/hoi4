@@ -829,4 +829,161 @@ test.describe('touch input', () => {
     expect(plan.kind).toBe('front');
     expect(plan.front).toBeGreaterThan(0);
   });
+
+  test('a minor can be courted into the faction from the diplomacy panel', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    // Political power accrues over months, and the point of this test is the
+    // sequence of actions, not the wait. Everything else -- the opinion, the
+    // thresholds, the spending -- runs for real.
+    const start = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.countries[s.meta.playerCountry];
+      me.economy.politicalPower = 400;
+      const hun = s.countries.find((c) => c.tag === 'HUN')!;
+      return { me: me.id, hun: hun.id, faction: me.factionId };
+    });
+    expect(start.faction).not.toBeNull();
+
+    await page.evaluate(() => window.__game!.openPanel!('diplomacy'));
+    const row = page.locator('.panel-row[data-country]', { hasText: 'ハンガリー' }).first();
+    await expect(row).toBeVisible();
+    await row.click();
+
+    // The sheet is titled with the country whose relations it is showing.
+    await expect(page.locator('.hud-sheet-title')).toHaveText('ハンガリーとの関係');
+
+    // Nobody joins a bloc on day one: the invitation names the number it is
+    // waiting on rather than being a dead grey control.
+    const invite = page.locator('.panel-row.wide-row', { hasText: '陣営に招待' }).first();
+    await expect(invite).toBeDisabled();
+    await expect(invite.locator('.panel-row-tag')).toContainText('好感度');
+
+    const opinion = (): Promise<number> => page.evaluate((ids) => {
+      const c = window.__game!.state.countries[ids.hun];
+      return Math.round(c.diplomacy.opinion[ids.me] ?? 0);
+    }, start);
+    const before = await opinion();
+
+    // The advertised path, taken entirely through the panel.
+    await page.locator('.panel-row.wide-row', { hasText: '独立保障' }).first().click();
+    for (let i = 0; i < 4; i++) {
+      const improve = page.locator('.panel-row.wide-row', { hasText: '関係改善' }).first();
+      await expect(improve).toBeEnabled();
+      await improve.click();
+    }
+    expect(await opinion()).toBeGreaterThan(before);
+
+    await expect(invite).toBeEnabled();
+    await invite.click();
+
+    const after = await page.evaluate((ids) => {
+      const s = window.__game!.state;
+      const me = s.countries[ids.me];
+      return {
+        faction: s.countries[ids.hun].factionId,
+        mine: me.factionId,
+        listed: me.factionId !== null
+          ? s.factions[me.factionId].members.includes(ids.hun)
+          : false,
+        power: Math.round(me.economy.politicalPower),
+      };
+    }, start);
+    expect(after.faction).toBe(after.mine);
+    expect(after.listed).toBe(true);
+    // Every action was paid for: a guarantee, four rounds of diplomacy and the
+    // invitation itself.
+    expect(after.power).toBeLessThan(400 - 25 - 4 * 10);
+  });
+
+
+  test('a starved project can be pulled to the head of the build queue', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    // Three projects is past the end of any 1936 budget: each takes up to
+    // fifteen factories and the third gets none.
+    const queued = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.countries[s.meta.playerCountry];
+      me.constructionQueue.length = 0;
+      for (let id = 0; id < s.states.length && me.constructionQueue.length < 3; id++) {
+        const st = s.states[id];
+        if (!st || st.controller !== me.id) continue;
+        g.issue({
+          t: 'queueConstruction', country: me.id, kind: 'civilian_factory', state: id,
+        });
+      }
+      return me.constructionQueue.map((x) => x.id);
+    });
+    expect(queued.length).toBe(3);
+
+    await page.evaluate(() => window.__game!.openPanel!('construction'));
+    const rows = page.locator('[data-role="queue"] .panel-row[data-item]');
+    await expect(rows).toHaveCount(3);
+
+    // The panel says which of them the factories have actually reached, which
+    // is the reason to move one.
+    await expect(rows.nth(0)).not.toHaveClass(/is-idle/);
+    await expect(rows.last()).toHaveClass(/is-idle/);
+    await expect(rows.last().locator('.panel-row-sub')).toContainText('順番待ち');
+
+    // The head of the queue has nowhere to go, so its control is off.
+    await expect(rows.nth(0).getByRole('button', { name: /優先する$/ })).toBeDisabled();
+
+    // Two presses take the last project to the front.
+    await rows.last().getByRole('button', { name: /優先する$/ }).click();
+    await page.locator(`[data-role="queue"] [data-item="${queued[2]}"]`)
+      .getByRole('button', { name: /優先する$/ }).click();
+
+    const after = await page.evaluate(() => {
+      const me = window.__game!.state.countries[window.__game!.state.meta.playerCountry];
+      return me.constructionQueue.map((x) => x.id);
+    });
+    expect(after).toEqual([queued[2], queued[0], queued[1]]);
+
+    // And the list now draws in the order the factories will work down it.
+    const drawn = await rows.evaluateAll(
+      (nodes) => nodes.map((n) => Number((n as HTMLElement).dataset.item)),
+    );
+    expect(drawn).toEqual(after);
+    await expect(rows.nth(0)).not.toHaveClass(/is-idle/);
+  });
+
+
+  test('an army can be given a name of its own', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    const army = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const a = (g.state.armies ?? []).find((x) => x.owner === me && !x.isArmyGroup)!;
+      return { id: a.id, name: a.name };
+    });
+
+    await page.evaluate(() => window.__game!.openPanel!('command'));
+    const card = page.locator(`.panel-focus[data-army="${army.id}"]`);
+    await expect(card).toBeVisible();
+    // The field lives inside the expanded card.
+    await card.locator('.panel-army-head').click();
+
+    const field = card.locator('.panel-input');
+    await expect(field).toHaveValue(army.name);
+    await field.fill('南方軍集団');
+    await card.getByRole('button', { name: '名称変更' }).click();
+
+    const after = await page.evaluate((id) => {
+      const a = (window.__game!.state.armies ?? []).find((x) => x.id === id)!;
+      return a.name;
+    }, army.id);
+    expect(after).toBe('南方軍集団');
+    expect(after).not.toBe(army.name);
+    // And the card is relabelled, not just the state.
+    await expect(card.locator('.panel-focus-name').first()).toContainText('南方軍集団');
+  });
+
 });

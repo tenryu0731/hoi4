@@ -88,7 +88,10 @@ export type Command =
    * working abandons its progress, as it does in the real game.
    */
   | { t: 'startResearch'; country: CountryId; slot: number; tech: TechId }
-  | { t: 'cancelResearch'; country: CountryId; slot: number }
+  // `cancelResearch` used to sit here and nothing ever sent it. Emptying a
+  // slot is strictly worse than putting something else in it -- and
+  // `startResearch` already replaces a working slot outright -- so the only
+  // thing it could do for a player was waste a slot they had paid for.
 
   // --- national focus -------------------------------------------------------
   /** Cannot be changed once started; cancelling throws the progress away. */

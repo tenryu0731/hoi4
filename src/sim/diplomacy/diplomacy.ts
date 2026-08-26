@@ -26,6 +26,21 @@ export const GUARANTEE_COST = 25;
 /** Political power spent improving relations. */
 export const IMPROVE_COST = 10;
 
+/** Political power spent asking a country to follow you into your wars. */
+export const INVITE_COST = 30;
+/**
+ * How well a country must think of you before it accepts.
+ *
+ * The scenario opens every pair at ideology alone -- +25 for a match, -40
+ * between fascist and communist -- so nobody clears this on day one and no
+ * ideological enemy ever clears it at all. The way through is the two cheap
+ * instruments that had no use before: a guarantee is worth +20 to the country
+ * it protects, and each improvement is +12, so courting a minor is a
+ * guarantee and two rounds of diplomacy, or four rounds without one. That is
+ * a season of political power for one ally, which is about what it should be.
+ */
+export const INVITE_OPINION = 60;
+
 /** World tension added by a declaration of war. */
 export const TENSION_PER_WAR = 12;
 /** World tension added when a country is annexed. */
@@ -323,6 +338,67 @@ export function leaveFaction(state: GameState, country: CountryId): void {
   const i = faction.members.indexOf(country);
   if (i >= 0) faction.members.splice(i, 1);
   c.factionId = null;
+}
+
+/**
+ * Why an invitation would be refused, or `null` when it would be accepted.
+ *
+ * A reason rather than a boolean because the panel shows it: a greyed-out
+ * button that will not say what is wrong with it is the worst of both, and
+ * every one of these five conditions is something the player can act on.
+ */
+export type InviteBlock =
+  | 'gone' | 'notLeader' | 'alreadyIn' | 'otherFaction' | 'targetAtWar' | 'opinion' | 'power';
+
+export function inviteBlock(
+  state: GameState, inviter: CountryId, target: CountryId,
+): InviteBlock | null {
+  const a = state.countries[inviter];
+  const t = state.countries[target];
+  if (t.capitulated || inviter === target) return 'gone';
+  // Only the leader speaks for the bloc, which is also why a leader may not
+  // leave it: there would be nobody left to hold the door.
+  if (a.factionId === null || state.factions[a.factionId].leader !== inviter) return 'notLeader';
+  if (t.factionId === a.factionId) return 'alreadyIn';
+  if (t.factionId !== null) return 'otherFaction';
+  if (t.atWarWith.length > 0) return 'targetAtWar';
+  if (opinionOf(state, target, inviter) < INVITE_OPINION) return 'opinion';
+  if (a.economy.politicalPower < INVITE_COST) return 'power';
+  return null;
+}
+
+/**
+ * Asks a country into your faction.
+ *
+ * Charged only once the country is actually in: `inviteBlock` covers every
+ * condition `joinFaction` itself checks, so the two can only disagree if one
+ * of them changes, and the failure mode of that should not be political power
+ * disappearing for nothing.
+ */
+export function inviteToFaction(
+  state: GameState, inviter: CountryId, target: CountryId,
+): boolean {
+  if (inviteBlock(state, inviter, target) !== null) return false;
+  const a = state.countries[inviter];
+  if (!joinFaction(state, target, a.factionId as number)) return false;
+  a.economy.politicalPower -= INVITE_COST;
+  return true;
+}
+
+/** A bloc's leader cannot walk out of its own bloc. */
+export function canLeaveFaction(state: GameState, country: CountryId): boolean {
+  const c = state.countries[country];
+  if (c.factionId === null || c.capitulated) return false;
+  return state.factions[c.factionId].leader !== country;
+}
+
+/** The blocs whose leader thinks well enough of this country to take it in. */
+export function joinableFactions(state: GameState, country: CountryId): number[] {
+  const c = state.countries[country];
+  if (c.factionId !== null || c.capitulated || c.atWarWith.length > 0) return [];
+  return state.factions
+    .filter((f) => opinionOf(state, f.leader, country) >= INVITE_OPINION)
+    .map((f) => f.id);
 }
 
 // ---------------------------------------------------------------------------

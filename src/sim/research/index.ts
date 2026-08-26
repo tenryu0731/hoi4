@@ -17,7 +17,7 @@ export {
 
 export {
   AHEAD_PENALTY_PER_YEAR, MAX_RESEARCH_SLOTS, NO_MODIFIERS,
-  aheadPenalty, autoSelectResearch, availableTechs, canResearch, cancelResearch,
+  aheadPenalty, autoSelectResearch, availableTechs, canResearch,
   completedTechs, effectiveSlotCount, effectiveTemplate, ensureSlots,
   isResearched, missingPrerequisites, requiredDays, researchBlock,
   researchSpeed, researchSummary, researchView, slotResearching, startResearch,

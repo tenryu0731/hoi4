@@ -12,6 +12,7 @@ import { NATIONS, NATION_BY_TAG, type NationDef } from './nations';
 import { commandersFor } from '../military/commanderData';
 import { ECONOMY, startingLaws } from '../politics/lawData';
 import { templateFuelUse } from '../economy/fuel';
+import { freeCivilianFactories } from '../economy/production';
 import {
   appointCommander, ARMY_GROUP_LIMIT, ARMY_GROUP_NAME, assignDivisions, COMMAND_LIMIT,
   createArmy, nextArmyName, setArmyParent,
@@ -173,6 +174,7 @@ function emptyEconomy(n: NationDef): Economy {
     // Everyone begins with tanks in the sheds and a tank's worth of fuel.
     fuel: 600,
     fuelRatio: 1,
+    // Seeded below, once the economy object exists to measure.
     freeCivilianFactories: 0,
   };
 }
@@ -366,6 +368,16 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
 
   raiseArmies(state);
   recomputeCountryStats(state);
+  // The running construction budget. The daily tick refills it and trade
+  // spends out of it, so it has to be right before the first tick as well:
+  // the trade layer reads it on day one, and the construction panel reads it
+  // to say which queued projects the factories have actually reached -- a
+  // zero there reported the whole queue as waiting on a game that had not
+  // started yet.
+  for (const c of state.countries) {
+    c.economy.freeCivilianFactories = freeCivilianFactories(c);
+  }
+
   return state;
 }
 

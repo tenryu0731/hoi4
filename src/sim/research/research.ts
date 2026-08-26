@@ -347,16 +347,6 @@ export function startResearch(
   return true;
 }
 
-/** Empties a slot, losing its progress. */
-export function cancelResearch(state: GameState, country: CountryId, slot: number): boolean {
-  const c = state.countries[country];
-  if (!c) return false;
-  const slots = ensureSlots(state, c);
-  if (slot < 0 || slot >= slots.length || slots[slot].tech === null) return false;
-  slots[slot] = idleSlot();
-  return true;
-}
-
 // ---------------------------------------------------------------------------
 // Automatic selection
 // ---------------------------------------------------------------------------

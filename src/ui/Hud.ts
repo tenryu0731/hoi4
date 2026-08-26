@@ -2,7 +2,9 @@ import type { Game } from '../app/Game';
 import type { MapMode } from '../render/palette';
 import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
-import { PANELS, formatNumber, frontCandidates, setSheetCloser, type PanelId } from './panels';
+import {
+  PANELS, formatNumber, frontCandidates, openNationId, setSheetCloser, type PanelId,
+} from './panels';
 import { HUD_CSS } from './hud.css';
 import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
@@ -616,6 +618,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       setText(sheetTitle, panelTitle(panel.id));
       panel.build(game, sheetBody);
       panel.refresh?.(game, sheetBody);
+      // A new panel starts at its own top. The body is one scrolling element
+      // reused by every panel, so opening the relations sheet from a country
+      // three screens down the diplomacy list used to land halfway through the
+      // action list, with the flag and the name above the fold.
+      sheetBody.scrollTop = 0;
       sheet.classList.add('is-open');
     }
     for (const b of navButtons) b.classList.toggle('is-active', b.dataset.panel === openPanel);
@@ -628,8 +635,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // designer from the army list, the province sheet from a tap on the map.
   game.openPanel = (id) => togglePanel(id as PanelId | null);
 
-  /** The province panel is titled with the place it is showing. */
+  /** Two panels are titled with the thing they are showing. */
   function panelTitle(id: PanelId): string {
+    if (id === 'nation') {
+      return UI.relationsWith(country(game.state.countries[openNationId()].tag));
+    }
     if (id !== 'province') return PANELS[id].title;
     const sel = game.selection.province;
     return sel === null ? PANELS.province.title : game.index.get(sel).name;

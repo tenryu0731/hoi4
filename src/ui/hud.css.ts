@@ -501,6 +501,11 @@ export const HUD_CSS = `
   border-color: #1a0d0b;
 }
 .panel-row.is-dead { opacity: 0.45; }
+/* A queued project the factories have not reached. Dimmed rather than hidden:
+   it is still in the queue, and moving it up is the point. */
+.panel-row.is-idle .panel-row-title,
+.panel-row.is-idle .panel-row-sub { color: var(--ink-dim); }
+.panel-row.is-idle .panel-bar-fill { filter: grayscale(1) brightness(0.7); }
 .panel-row-main { flex: 1 1 auto; min-width: 0; }
 .panel-row-title {
   font-size: 13px; font-weight: 700;
@@ -551,6 +556,18 @@ export const HUD_CSS = `
   background: linear-gradient(180deg, #e2c184 0%, #a8853f 100%);
 }
 .panel-empty { font-size: 11px; color: var(--ink-dim); padding: 8px 0; }
+/* An editable field on a card. Sized as a control rather than as text: a
+   44px target and 16px type, which is also the size Safari stops zooming the
+   page in on focus. */
+.panel-rename { display: flex; gap: 5px; align-items: center; margin-top: 6px; }
+.panel-input {
+  flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0 8px;
+  background: #191713; color: var(--ink);
+  border: 1px solid #100f0d; border-radius: 2px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.7);
+  font-size: 16px; font-family: inherit;
+}
+.panel-input:focus { outline: 1px solid var(--accent); }
 .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
 .panel-build {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
@@ -910,6 +927,33 @@ button:active { transform: scale(0.96); }
 .panel-row.wide-row.is-blocked { color: #8b8371; }
 .panel-row-tag { font-size: 12px; color: var(--accent); flex: none; }
 .panel-row.wide-row.is-blocked .panel-row-tag { color: var(--ink-dim); }
+/* Declaring war is the one row on the relations sheet that cannot be undone,
+   so it is coloured the way the button that used to carry it was. */
+.panel-row.wide-row.is-danger .panel-row-title { color: #f0a49a; }
+/* A country at war with the player, in the list. The is-hostile plate above
+   cannot be used here: wide-row declares a transparent background at the same
+   specificity and later in the sheet, so it wins and the enemies stopped
+   standing out. A marker down the edge works on a borderless row and does not
+   fight the plate rules at all. */
+.panel-row.wide-row.is-hostile { box-shadow: inset 2px 0 0 #b4544a; }
+.panel-row.wide-row.is-hostile .panel-row-title { color: #f0a49a; }
+/* The country card at the head of the relations sheet: the flag at a size
+   that can actually be recognised, which the 26px list swatch cannot. */
+.panel-nation {
+  display: flex; align-items: flex-start; gap: 10px; padding: 9px 8px;
+  background: linear-gradient(180deg, #35312a 0%, #272420 100%);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 2px;
+}
+.panel-nation-flag {
+  width: 64px; height: 42px; flex: 0 0 auto; object-fit: cover;
+  border: 1px solid #8a7f6a;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.75);
+}
+.panel-nation-body { flex: 1 1 auto; min-width: 0; }
+.panel-nation-name {
+  font-size: 16px; font-weight: 700; letter-spacing: var(--track);
+  overflow-wrap: anywhere;
+}
 
 /* A section heading that opens and closes. Sized as a full-width control,
    because it is one. */

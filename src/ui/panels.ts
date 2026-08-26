@@ -10,7 +10,9 @@ import {
   type StateRuntime, type SupportType,
 } from '../sim/core/types';
 import { deriveTemplate } from '../sim/scenario/europe1936';
-import { canQueueBuilding, computeResourceOutput } from '../sim/economy/production';
+import {
+  canQueueBuilding, computeResourceOutput, constructionAllocation,
+} from '../sim/economy/production';
 import {
   availableFrom, canTradeWith, exportShare, factoriesCommitted, factoriesEarned,
   maxPurchase, RESOURCE_PER_FACTORY, tradeFlow, tradeLawOf,
@@ -23,7 +25,11 @@ import { CONSCRIPTION_NAME, ECONOMY_NAME } from './lawNames';
 import { ENTRENCHMENT_PER_LEVEL } from '../sim/military/movement';
 import { winterSeverity } from '../sim/military/weather';
 import { airStrength } from '../sim/military/air';
-import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
+import {
+  DEMAND_COST, GUARANTEE_COST, IMPROVE_COST, INVITE_COST, INVITE_OPINION, JUSTIFY_COST,
+  areAllied, atWar, canDemand, canLeaveFaction, inviteBlock, joinableFactions,
+  occupationRatio, opinionOf, type InviteBlock,
+} from '../sim/diplomacy/diplomacy';
 import { availableFocuses } from '../sim/focus';
 import {
   BRANCH_LIST, researchSummary, researchView, techTree,
@@ -56,7 +62,7 @@ import {
 
 export type PanelId =
   | 'focus' | 'research' | 'production' | 'construction' | 'army' | 'command'
-  | 'diplomacy' | 'province' | 'designer' | 'politics' | 'trade' | 'variant';
+  | 'diplomacy' | 'nation' | 'province' | 'designer' | 'politics' | 'trade' | 'variant';
 
 export interface Panel {
   id: PanelId;
@@ -627,16 +633,32 @@ function slotsFree(st: StateRuntime): number {
   return st.buildingSlots - slotsUsed(st);
 }
 
+/**
+ * The queue, in the order the factories work down it.
+ *
+ * Position in this list is the only lever the player has over what gets built
+ * first, and until now there was no way to pull one -- `reorderConstruction`
+ * had existed in the command bus since the beginning with nothing anywhere
+ * that could send it. So a project queued behind four others waited for all
+ * four, and the panel did not even say that was what was happening: every row
+ * carried the same progress bar whether it was being built or not.
+ */
 function renderQueue(game: Game, host: HTMLElement): void {
-  const me = game.state.countries[game.state.meta.playerCountry];
+  const state = game.state;
+  const me = state.countries[state.meta.playerCountry];
   const items = me.constructionQueue;
-  if (host.childElementCount !== items.length || items.length === 0) {
+  // Rebuilt on any change of order, not only of length: a reorder leaves the
+  // count alone, and a list that reorders itself without redrawing is a list
+  // that lies.
+  const order = items.map((i) => i.id).join(',');
+  if (host.dataset.order !== order) {
+    host.dataset.order = order;
     host.innerHTML = '';
     if (items.length === 0) {
       host.append(el('div', 'panel-empty', UI.nothingUnderConstruction));
       return;
     }
-    for (const item of items) {
+    items.forEach((item, index) => {
       const row = el('div', 'panel-row');
       row.dataset.item = String(item.id);
       const main = el('div', 'panel-row-main');
@@ -649,15 +671,28 @@ function renderQueue(game: Game, host: HTMLElement): void {
       bar.append(el('i', 'panel-bar-fill'));
       main.append(bar);
 
+      const controls = el('div', 'panel-row-controls');
+      const up = el('button', 'panel-btn', '▲');
+      up.disabled = index === 0;
+      up.setAttribute('aria-label', `${BUILDING[item.kind]}を優先する`);
+      up.addEventListener('click', () => {
+        game.issue({
+          t: 'reorderConstruction', country: me.id, item: item.id, toIndex: index - 1,
+        });
+        renderQueue(game, host);
+      });
       const cancel = el('button', 'panel-btn', '×');
       cancel.setAttribute('aria-label', '建設を中止');
       cancel.addEventListener('click', () => {
         game.issue({ t: 'cancelConstruction', country: me.id, item: item.id });
+        renderQueue(game, host);
       });
-      row.append(main, cancel);
+      controls.append(up, cancel);
+      row.append(main, controls);
       host.append(row);
-    }
+    });
   }
+  const allocation = constructionAllocation(state, me);
   for (const item of items) {
     const row = host.querySelector<HTMLElement>(`[data-item="${item.id}"]`);
     if (!row) continue;
@@ -665,7 +700,14 @@ function renderQueue(game: Game, host: HTMLElement): void {
     const fill = row.querySelector<HTMLElement>('.panel-bar-fill');
     if (fill) fill.style.width = `${(pct * 100).toFixed(1)}%`;
     const sub = row.querySelector<HTMLElement>('.panel-row-sub');
-    if (sub) setText(sub, `${Math.round(pct * 100)}% ${UI.complete}`);
+    const factories = allocation.get(item.id) ?? 0;
+    if (sub) {
+      setText(sub, `${Math.round(pct * 100)}% ${UI.complete} · `
+        + (factories > 0 ? `${UI.civFactories} ${factories}` : UI.queueWaiting));
+    }
+    // A row nothing is working on says so by going quiet, which is what makes
+    // the arrow beside it worth pressing.
+    row.classList.toggle('is-idle', factories === 0);
   }
 }
 
@@ -838,6 +880,74 @@ export const armyPanel: Panel = {
 // Diplomacy
 // ---------------------------------------------------------------------------
 
+/** The country whose relations sheet is open. */
+let openNation: CountryId = 0;
+
+/** The HUD titles the nation sheet with the country it is showing. */
+export function openNationId(): CountryId {
+  return openNation;
+}
+
+/**
+ * One diplomatic action, as a row.
+ *
+ * `block` is the reason the action cannot be taken, shown where an available
+ * action shows its price. A greyed control that will not say what is wrong
+ * with it is the worst of both -- and every one of these reasons is something
+ * the player can do something about, which is the entire point of having the
+ * relations sheet at all.
+ */
+function diploAction(
+  label: string, cost: number, block: string | null, onTap: () => void,
+): HTMLElement {
+  const row = el('button', 'panel-row wide-row');
+  row.disabled = block !== null;
+  row.classList.toggle('is-blocked', block !== null);
+  const main = el('div', 'panel-row-main');
+  main.append(el('div', 'panel-row-title', label));
+  // Declaring war is the one action with no price, and an empty subtitle is a
+  // blank line rather than a missing one.
+  if (cost > 0) main.append(el('div', 'panel-row-sub', UI.powerCost(cost)));
+  row.append(main, el('span', 'panel-row-tag', block ?? '›'));
+  row.addEventListener('click', onTap);
+  return row;
+}
+
+/**
+ * Why an invitation is refused, in words.
+ *
+ * `opinion` is missing on purpose and the type says so: that one reason has a
+ * number in it, so it is built at the call site, and leaving it out here means
+ * the compiler catches anyone who drops the special case rather than the
+ * player finding a blank tag where the reason should be.
+ */
+const INVITE_REASON: Record<Exclude<InviteBlock, 'opinion'>, string> = {
+  gone: '降伏',
+  notLeader: UI.blockNotLeader,
+  alreadyIn: UI.blockAlreadyIn,
+  otherFaction: UI.blockOtherFaction,
+  targetAtWar: UI.blockTargetAtWar,
+  power: UI.blockPower,
+};
+
+/** The relation words a country's row and its sheet both carry. */
+function relationParts(game: Game, c: Country): string[] {
+  const state = game.state;
+  const me = state.countries[state.meta.playerCountry];
+  const parts: string[] = [IDEOLOGY[c.ideology]];
+  if (c.capitulated) parts.push('降伏');
+  else if (me.atWarWith.includes(c.id)) parts.push('交戦中');
+  else if (c.factionId !== null && c.factionId === me.factionId) parts.push('同盟');
+  if (me.diplomacy.guarantees.includes(c.id)) parts.push(UI.guarantees);
+  const just = me.diplomacy.justifications.find((j) => j.target === c.id);
+  if (just) {
+    parts.push(just.progress >= just.required
+      ? '開戦事由 準備完了'
+      : `${UI.justifying} ${Math.round((just.progress / just.required) * 100)}%`);
+  }
+  return parts;
+}
+
 export const diplomacyPanel: Panel = {
   id: 'diplomacy',
   title: UI.navDiplomacy,
@@ -845,6 +955,7 @@ export const diplomacyPanel: Panel = {
     root.innerHTML = '';
     const state = game.state;
     const me = state.countries[state.meta.playerCountry];
+    const rebuild = (): void => { diplomacyPanel.build(game, root); };
 
     const head = el('div', 'panel-head');
     head.dataset.role = 'dip-head';
@@ -854,6 +965,45 @@ export const diplomacyPanel: Panel = {
       stat(UI.faction, me.factionId !== null ? state.factions[me.factionId].name : UI.atPeace),
     );
     root.append(head);
+
+    // --- the bloc ------------------------------------------------------------
+    // Membership was a word in the header and nothing else: a player could see
+    // that Germany led the Axis and could neither see who was in it nor do
+    // anything about it.
+    root.append(el('div', 'panel-label', UI.faction));
+    if (me.factionId !== null) {
+      const faction = state.factions[me.factionId];
+      const members = el('div', 'panel-chips');
+      for (const id of faction.members) {
+        const chip = el('span', 'panel-chip');
+        if (faction.leader === id) chip.classList.add('is-on');
+        chip.textContent = country(state.countries[id].tag);
+        members.append(chip);
+      }
+      root.append(members);
+      const leave = el('button', 'panel-btn wide danger', UI.leaveFaction);
+      leave.disabled = !canLeaveFaction(state, me.id);
+      leave.addEventListener('click', () => {
+        game.issue({ t: 'leaveFaction', country: me.id });
+        rebuild();
+      });
+      root.append(leave);
+      if (!canLeaveFaction(state, me.id)) {
+        root.append(el('div', 'panel-note', UI.leaderCannotLeave));
+      }
+    } else {
+      const joinable = joinableFactions(state, me.id);
+      if (joinable.length === 0) {
+        root.append(el('div', 'panel-empty', UI.noFactionActions));
+      }
+      for (const id of joinable) {
+        const row = diploAction(`${UI.joinFaction} — ${state.factions[id].name}`, 0, null, () => {
+          game.issue({ t: 'joinFaction', country: me.id, faction: id });
+          rebuild();
+        });
+        root.append(row);
+      }
+    }
 
     root.append(el('div', 'panel-label', '国家'));
     const list = el('div', 'panel-list');
@@ -867,7 +1017,11 @@ export const diplomacyPanel: Panel = {
         || b.stats.victoryPoints - a.stats.victoryPoints);
 
     for (const c of ordered) {
-      const row = el('div', 'panel-row');
+      // The row is the way in to everything that can be done to this country,
+      // rather than carrying two of six actions itself. Six buttons do not fit
+      // beside a name on a 360px phone, which is why four of them did not
+      // exist -- and the two that did were both ways of starting a war.
+      const row = el('button', 'panel-row wide-row');
       row.dataset.country = String(c.id);
 
       // A framed flag, as HOI4 puts on every country row. Thirty flags ship
@@ -892,28 +1046,11 @@ export const diplomacyPanel: Panel = {
         el('div', 'panel-row-sub', ''),
       );
 
-      const controls = el('div', 'panel-row-controls');
-      const justify = el('button', 'panel-btn wide', UI.justifyWar);
-      justify.addEventListener('click', () => {
-        game.issue({ t: 'justifyWar', country: me.id, target: c.id });
+      row.append(swatch, main, el('span', 'panel-row-tag', '›'));
+      row.addEventListener('click', () => {
+        openNation = c.id;
+        game.openPanel?.('nation');
       });
-      const declare = el('button', 'panel-btn wide danger', UI.declareWar);
-      declare.addEventListener('click', () => {
-        game.issue({ t: 'declareWar', country: me.id, target: c.id });
-      });
-      // Only offered where it could actually be accepted, so the button is not
-      // a lottery ticket the player buys with political power every turn.
-      const controlsList = [justify, declare];
-      if (canDemand(game.state, me.id, c.id)) {
-        const demand = el('button', 'panel-btn wide', UI.demand);
-        demand.addEventListener('click', () => {
-          game.issue({ t: 'demandSubmission', country: me.id, target: c.id });
-        });
-        controlsList.unshift(demand);
-      }
-      controls.append(...controlsList);
-
-      row.append(swatch, main, controls);
       list.append(row);
     }
   },
@@ -934,22 +1071,182 @@ export const diplomacyPanel: Panel = {
       if (!row) continue;
       const sub = row.querySelector<HTMLElement>('.panel-row-sub');
       if (!sub) continue;
-      const parts: string[] = [IDEOLOGY[c.ideology]];
-      if (c.capitulated) parts.push('降伏');
-      else if (me.atWarWith.includes(c.id)) parts.push('交戦中');
-      else if (c.factionId !== null && c.factionId === me.factionId) parts.push('同盟');
-      const just = me.diplomacy.justifications.find((j) => j.target === c.id);
-      if (just) {
-        parts.push(just.progress >= just.required
-          ? '開戦事由 準備完了'
-          : `${UI.justifying} ${Math.round((just.progress / just.required) * 100)}%`);
-      }
+      const parts = relationParts(game, c);
+      // Opinion is on the row because it is the number every remaining action
+      // is gated on, and because improving it is now something the player does
+      // on purpose rather than a stat that only the AI could read.
+      parts.push(`${UI.opinion} ${Math.round(opinionOf(state, c.id, me.id))}`);
       parts.push(`${c.stats.divisionCount}個師団`);
-      parts.push(`勝利点 ${c.stats.victoryPointsHeld}`);
       setText(sub, parts.join(' · '));
       row.classList.toggle('is-hostile', me.atWarWith.includes(c.id));
       row.classList.toggle('is-dead', c.capitulated);
     }
+  },
+};
+
+/**
+ * One country's relations sheet: everything that can be done to it, and the
+ * reason for each thing that cannot.
+ *
+ * Five of the six commands the diplomacy layer has always accepted --
+ * improving relations, guaranteeing independence, inviting into a faction,
+ * joining one, leaving one -- had nothing that could send them. The panel
+ * offered a war goal and a declaration of war, so the only diplomacy the game
+ * had was the kind that ends in an invasion.
+ */
+/**
+ * Everything the action rows are drawn from, as one string.
+ *
+ * Only the flips matter, not the numbers: political power crossing a price,
+ * an invitation becoming possible, a war starting. Comparing those means the
+ * sheet can be rebuilt exactly when it would otherwise start lying, and never
+ * while the player is reading it.
+ */
+function nationSignature(game: Game): string {
+  const state = game.state;
+  const me = state.countries[state.meta.playerCountry];
+  const c = state.countries[openNation];
+  if (!c) return '';
+  const pp = me.economy.politicalPower;
+  return [
+    openNation,
+    pp >= IMPROVE_COST, pp >= GUARANTEE_COST, pp >= INVITE_COST,
+    pp >= JUSTIFY_COST, pp >= DEMAND_COST,
+    inviteBlock(state, me.id, c.id) ?? '-',
+    canDemand(state, me.id, c.id),
+    atWar(state, me.id, c.id),
+    areAllied(state, me.id, c.id),
+    c.capitulated,
+    me.diplomacy.guarantees.includes(c.id),
+    me.diplomacy.justifications.some((j) => j.target === c.id),
+  ].join('|');
+}
+
+export const nationPanel: Panel = {
+  id: 'nation',
+  title: UI.navDiplomacy,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const c = state.countries[openNation] ?? state.countries[0];
+    const rebuild = (): void => { nationPanel.build(game, root); };
+
+    const head = el('div', 'panel-head');
+    head.dataset.role = 'nation-head';
+    head.append(
+      stat(UI.politicalPower, String(Math.round(me.economy.politicalPower))),
+      stat(UI.opinion, String(Math.round(opinionOf(state, c.id, me.id)))),
+      stat(UI.victoryPoints, String(c.stats.victoryPointsHeld)),
+      stat(UI.faction, c.factionId !== null ? state.factions[c.factionId].name : UI.atPeace),
+    );
+    root.append(head);
+
+    const card = el('div', 'panel-nation');
+    const flag = el('img', 'panel-nation-flag');
+    flag.alt = '';
+    flag.src = flagUrl(c.tag);
+    flag.style.background = `rgb(${c.color[0]},${c.color[1]},${c.color[2]})`;
+    flag.addEventListener('error', () => { flag.removeAttribute('src'); });
+    const body = el('div', 'panel-nation-body');
+    body.append(
+      el('div', 'panel-nation-name', country(c.tag)),
+      el('div', 'panel-row-sub', relationParts(game, c).join(' · ')),
+      el('div', 'panel-row-sub',
+        `${c.stats.divisionCount}個師団 · ${UI.civFactories} ${c.economy.civilianFactories}`
+        + ` · ${UI.milFactories} ${c.economy.militaryFactories}`),
+    );
+    card.append(flag, body);
+    root.append(card);
+
+    root.append(el('div', 'panel-label', UI.diplomaticActions));
+
+    const hostile = atWar(state, me.id, c.id);
+    const allied = areAllied(state, me.id, c.id);
+    const dead = c.capitulated;
+    const poor = (cost: number): string | null =>
+      (me.economy.politicalPower < cost ? UI.blockPower : null);
+    const reach = dead ? '降伏' : null;
+
+    root.append(diploAction(
+      UI.improveRelations, IMPROVE_COST,
+      reach ?? (hostile ? UI.blockAtWarWith : null) ?? poor(IMPROVE_COST),
+      () => { game.issue({ t: 'improveRelations', country: me.id, target: c.id }); rebuild(); },
+    ));
+
+    const guaranteed = me.diplomacy.guarantees.includes(c.id);
+    root.append(diploAction(
+      UI.guaranteeIndependence, GUARANTEE_COST,
+      reach ?? (guaranteed ? UI.alreadyGuaranteed : null)
+        ?? (hostile ? UI.blockAtWarWith : null) ?? poor(GUARANTEE_COST),
+      () => { game.issue({ t: 'guarantee', country: me.id, target: c.id }); rebuild(); },
+    ));
+
+    const invite = inviteBlock(state, me.id, c.id);
+    root.append(diploAction(
+      UI.inviteToFaction, INVITE_COST,
+      invite === null ? null
+        : invite === 'opinion'
+          ? UI.blockOpinion(Math.round(opinionOf(state, c.id, me.id)), INVITE_OPINION)
+          : INVITE_REASON[invite],
+      () => { game.issue({ t: 'inviteToFaction', country: me.id, target: c.id }); rebuild(); },
+    ));
+
+    const just = me.diplomacy.justifications.find((j) => j.target === c.id);
+    root.append(diploAction(
+      UI.justifyWar, JUSTIFY_COST,
+      reach ?? (just ? UI.alreadyJustifying : null) ?? (hostile ? UI.blockAtWarWith : null)
+        ?? (allied ? UI.blockAllied : null) ?? poor(JUSTIFY_COST),
+      () => { game.issue({ t: 'justifyWar', country: me.id, target: c.id }); rebuild(); },
+    ));
+
+    // An ultimatum has five separate conditions on it, and the panel has to
+    // name the one that is actually in the way: "cannot" is not a reason, and
+    // the wrong reason is worse than none.
+    const demandBlock = canDemand(state, me.id, c.id) ? poor(DEMAND_COST)
+      : reach
+        ?? (hostile ? UI.blockAtWarWith : null)
+        ?? (allied ? UI.blockAllied : null)
+        ?? (c.factionId !== null ? UI.blockOtherFaction : null)
+        ?? (!me.major || c.major ? UI.blockMajorsOnly : null)
+        ?? (c.atWarWith.length > 0 || me.atWarWith.length > 0 ? UI.blockAtWarWith : null)
+        ?? UI.blockGuaranteed;
+    root.append(diploAction(
+      UI.demand, DEMAND_COST, demandBlock,
+      () => { game.issue({ t: 'demandSubmission', country: me.id, target: c.id }); rebuild(); },
+    ));
+
+    const war = diploAction(
+      UI.declareWar, 0,
+      reach ?? (hostile ? UI.blockAtWarWith : null) ?? (allied ? UI.blockAllied : null),
+      () => { game.issue({ t: 'declareWar', country: me.id, target: c.id }); rebuild(); },
+    );
+    war.classList.add('is-danger');
+    root.append(war);
+
+    const back = el('button', 'panel-btn wide', UI.back);
+    back.addEventListener('click', () => game.openPanel?.('diplomacy'));
+    root.append(back);
+    root.dataset.signature = nationSignature(game);
+  },
+  refresh(game, root) {
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const c = state.countries[openNation];
+    const head = root.querySelector<HTMLElement>('[data-role="nation-head"]');
+    if (!head || !c) return;
+    const values = head.querySelectorAll<HTMLElement>('.hud-stat-v');
+    setText(values[0], String(Math.round(me.economy.politicalPower)));
+    setText(values[1], String(Math.round(opinionOf(state, c.id, me.id))));
+    setText(values[2], String(c.stats.victoryPointsHeld));
+
+    // Every row's reason can go stale while the sheet is open -- political
+    // power accrues past a price, a justification finishes, the country is
+    // invaded -- and a sheet that says 政治力不足 over an amount the player now
+    // has is worse than one that says nothing. Rebuilt only when one of those
+    // actually flips, so the DOM does not churn under a finger.
+    const signature = nationSignature(game);
+    if (root.dataset.signature !== signature) nationPanel.build(game, root);
   },
 };
 
@@ -1610,6 +1907,7 @@ export const PANELS: Record<PanelId, Panel> = {
   province: provincePanel,
   designer: designerPanel,
   variant: variantPanel,
+  nation: nationPanel,
   get politics() { return politicsPanel; },
   get trade() { return tradePanel; },
 } as Record<PanelId, Panel>;
@@ -2003,6 +2301,7 @@ export const commandPanel: Panel = {
       const over = army.divisions.length > limit;
 
       const card = el('div', 'panel-focus');
+      card.dataset.army = String(army.id);
       card.classList.toggle('is-current', openArmy === army.id);
 
       const title = el('button', 'panel-army-head');
@@ -2045,6 +2344,36 @@ export const commandPanel: Panel = {
           }
         }
         card.append(orderControls(game, army, rebuild));
+
+        // The formation's name. HOI4 puts an editable field on the card and
+        // this had an auto-generated 「第N軍」 that could never be changed --
+        // `renameArmy` was the last of the commands nothing had ever sent.
+        // A name is how a player keeps four armies apart at a glance, and
+        // 「南方軍集団」 does that in a way that 「第3軍」 cannot.
+        const naming = el('div', 'panel-rename');
+        const field = el('input', 'panel-input');
+        field.type = 'text';
+        field.value = army.name;
+        field.maxLength = 40;
+        field.setAttribute('aria-label', UI.renameArmy);
+        const apply = (): void => {
+          const name = field.value.trim();
+          if (name === '' || name === army.name) return;
+          game.issue({ t: 'renameArmy', country: me.id, army: army.id, name });
+          rebuild();
+        };
+        // Enter commits from the on-screen keyboard, which is the only way a
+        // phone offers to say "done" without dismissing the field first.
+        field.addEventListener('keydown', (e) => {
+          if ((e as KeyboardEvent).key === 'Enter') {
+            e.preventDefault();
+            apply();
+          }
+        });
+        const rename = el('button', 'panel-btn', UI.renameArmy);
+        rename.addEventListener('click', apply);
+        naming.append(field, rename);
+        card.append(naming);
 
         // Putting an army under an army group. `setArmyParent` has been in the
         // command bus since the chain of command was written and no button has

@@ -21,9 +21,9 @@ import {
   tickEconomyDaily,
 } from './economy/production';
 import {
-  declareWar, demandSubmission, guarantee, improveRelations,
-  joinFaction, leaveFaction, startJustification, tickCapitulationDaily,
-  tickJustificationsDaily, tickTensionMonthly, occupationRatio,
+  canLeaveFaction, declareWar, demandSubmission, guarantee, improveRelations,
+  inviteToFaction, joinFaction, joinableFactions, leaveFaction, startJustification,
+  tickCapitulationDaily, tickJustificationsDaily, tickTensionMonthly, occupationRatio,
 } from './diplomacy/diplomacy';
 import {
   orderMove, stopDivision, tickConditionsDaily, tickMilitaryHourly, tickReinforcementDaily,
@@ -37,7 +37,7 @@ import { tickBattlePlansDaily } from './military/frontline';
 import { MAX_BATTALIONS, MAX_SUPPORTS } from './core/data';
 import { tickArmyExperienceDaily, upgradeVariant } from './economy/variants';
 import { tickAIDaily } from './ai/ai';
-import { cancelResearch, startResearch, tickResearchDaily } from './research';
+import { startResearch, tickResearchDaily } from './research';
 import { closeTrade, openTrade, tickTradeDaily } from './economy/trade';
 import { cancelFocus, startFocus, tickFocusDaily } from './focus';
 import { tickVictoryCheck } from './scenario/victory';
@@ -249,16 +249,19 @@ export class Simulation {
         return;
       }
       case 'inviteToFaction': {
-        const inviter = state.countries[cmd.country];
-        if (inviter.factionId === null) return;
-        joinFaction(state, cmd.target, inviter.factionId);
+        inviteToFaction(state, cmd.country, cmd.target);
         return;
       }
       case 'joinFaction': {
+        // Walking in uninvited is the mirror of being invited: an invitation
+        // asks whether the country thinks well of the bloc, an application
+        // whether the bloc's leader thinks well of the country.
+        if (!joinableFactions(state, cmd.country).includes(cmd.faction)) return;
         joinFaction(state, cmd.country, cmd.faction);
         return;
       }
       case 'leaveFaction': {
+        if (!canLeaveFaction(state, cmd.country)) return;
         leaveFaction(state, cmd.country);
         return;
       }
@@ -266,10 +269,6 @@ export class Simulation {
       // --- research -------------------------------------------------------
       case 'startResearch': {
         startResearch(state, cmd.country, cmd.slot, cmd.tech);
-        return;
-      }
-      case 'cancelResearch': {
-        cancelResearch(state, cmd.country, cmd.slot);
         return;
       }
 
