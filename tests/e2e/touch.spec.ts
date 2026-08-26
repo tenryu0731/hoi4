@@ -247,6 +247,22 @@ test.describe('touch input', () => {
     // Frame a stack of the player's own and find where its counter is drawn.
     // The counter is what the player aims at -- it sits above the province
     // centre, so the province's own position is the wrong place to tap.
+    // Open the sheet once and leave it open while the shot is framed. Its
+    // height is the floor of the visible band, and with it shut the band looks
+    // 450px taller than it will be the moment the counter is tapped -- which
+    // framed the stack at y=399, underneath the sheet header.
+    await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const first = g.index.provinces.find(
+        (q) => s.provinces[q.id].divisions.some((d) => s.divisions[d].owner === me),
+      )!;
+      g.selectProvince(first.id);
+      g.tickFrame(16);
+    });
+    await expect(page.locator('.hud-sheet')).toHaveClass(/is-open/);
+
     const setup = await page.evaluate(() => {
       const g = window.__game!;
       const s = g.state;
@@ -257,13 +273,27 @@ test.describe('touch input', () => {
       g.renderer.camera.centerOn(from.centerX, from.centerY);
       g.renderer.camera.zoom = 1.6;
       g.tickFrame(16);
-      // Lift the stack into the top third. Selecting it opens the province
-      // sheet over the bottom half of the screen, and a counter underneath the
-      // sheet cannot be tapped a second time to put the stack down.
-      const view = g.renderer.canvas.getBoundingClientRect();
-      g.renderer.camera.y += (g.renderer.camera.worldToScreenY(from.centerY)
-        - view.height * 0.3) / g.renderer.camera.zoom;
-      for (let i = 0; i < 5; i++) g.tickFrame(16);
+
+      // Put the counter in the middle of the strip of map that is actually
+      // visible, measured from the HUD rather than guessed as a fraction of
+      // the viewport. The top bar and the sheet both change height as chips
+      // and captions are added to them, and a counter that ends up under
+      // either of them cannot be tapped: framing it at a fixed 30% of the
+      // screen put it at y=148, inside the alert row.
+      const band = () => {
+        const top = document.querySelector('.hud-top')!.getBoundingClientRect();
+        const sheet = document.querySelector('.hud-sheet')!.getBoundingClientRect();
+        return (top.bottom + sheet.top) / 2;
+      };
+      // Twice: moving the camera can change which counters are on screen, and
+      // the second pass lands on the settled layout.
+      for (let pass = 0; pass < 2; pass++) {
+        const drawn = g.renderer.units.hitBoxes.find((b) => b.province === from.id);
+        const at = drawn ? drawn.y : g.renderer.camera.worldToScreenY(from.centerY);
+        g.renderer.camera.y += (at - band()) / g.renderer.camera.zoom;
+        for (let i = 0; i < 3; i++) g.tickFrame(16);
+      }
+
       const box = g.renderer.canvas.getBoundingClientRect();
       const boxes = g.renderer.units.hitBoxes;
       const own = boxes.find((b) => b.province === from.id)!;
@@ -277,6 +307,9 @@ test.describe('touch input', () => {
       };
       const to = g.index.get(from.id).neighbors.find((n) => s.provinces[n] && clear(n))!;
       const t = g.index.get(to);
+      // Put the map back the way the player would find it: nothing selected.
+      g.selectProvince(null);
+      g.tickFrame(16);
       return {
         from: from.id,
         to,
