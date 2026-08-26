@@ -707,6 +707,87 @@ button:active { transform: scale(0.96); }
 .panel-focus-meta { margin-top: 4px; font-size: 11px; color: var(--ink-dim); }
 .panel-focus .panel-btn.wide { margin-top: 9px; width: 100%; min-height: 46px; }
 
+/* --- the focus tree ------------------------------------------------------ */
+/* A grid of icons joined by lines, which is what a focus tree is. Three
+   collapsible lists carried the same facts with the shape removed, and the
+   shape is the point: from a list a player cannot see that the one focus they
+   may start leads to the sixteen they may not. */
+.panel-tree-scroll {
+  overflow: auto; scrollbar-width: none;
+  /* The tree is 590px wide on a 412px screen, so it pans in both axes; the
+     sheet under it owns the vertical scroll, so say so explicitly or the two
+     fight over every drag. */
+  touch-action: pan-x pan-y;
+  margin: 0 -12px; padding: 0 12px 4px;
+  background:
+    linear-gradient(180deg, rgba(10,10,9,0.5) 0%, rgba(10,10,9,0.22) 100%);
+  border-top: 1px solid #100f0d; border-bottom: 1px solid #100f0d;
+  box-shadow: inset 0 1px 0 var(--edge-hi);
+}
+.panel-tree-scroll::-webkit-scrollbar { display: none; }
+.panel-tree { position: relative; }
+.panel-tree-links { position: absolute; inset: 0; pointer-events: none; }
+/* Locked branches are drawn, not hidden: seeing where a path goes before it
+   opens is the reason to look at a tree at all. */
+.panel-tree-link { fill: none; stroke: #4a453b; stroke-width: 2; }
+.panel-tree-link.is-open { stroke: var(--good); stroke-width: 2.4; }
+.panel-tree-link.is-exclusive {
+  stroke: var(--danger); stroke-width: 2; stroke-dasharray: 4 4;
+}
+
+.panel-focus-node {
+  position: absolute; width: 84px; height: 72px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 3px; padding: 6px 4px 4px;
+  background: linear-gradient(180deg, #3a352c 0%, #2a261f 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--ink); font: inherit; text-align: center; cursor: pointer;
+}
+.panel-focus-node-icon {
+  display: block; width: 22px; height: 22px; flex: 0 0 auto;
+  background-color: var(--accent);
+  -webkit-mask: var(--icon) center / contain no-repeat;
+          mask: var(--icon) center / contain no-repeat;
+}
+.panel-focus-node-name {
+  font-size: 9px; line-height: 1.25; color: var(--ink);
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.panel-focus-node.is-done { border-color: #4d6b30; }
+.panel-focus-node.is-done .panel-focus-node-icon { background-color: var(--good); }
+.panel-focus-node.is-current {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, #3f3722 0%, #2a2416 100%);
+}
+/* Dimmed by token, not opacity: at the 1936 start every focus but one is
+   locked, and compositing the whole node at half strength made most of the
+   tree unreadable. */
+.panel-focus-node.is-locked {
+  background: linear-gradient(180deg, #262420 0%, #1c1b18 100%);
+}
+.panel-focus-node.is-locked .panel-focus-node-name { color: #8b8371; }
+.panel-focus-node.is-locked .panel-focus-node-icon { background-color: #6d6656; }
+.panel-focus-node.is-picked {
+  box-shadow: var(--bevel), 0 0 0 2px var(--accent);
+}
+.panel-focus-node-bar {
+  display: block; width: 100%; height: 3px; margin-top: auto;
+  background: #16150f; border: 1px solid #100f0d;
+}
+.panel-focus-node-bar > i { display: block; height: 100%; background: var(--accent); }
+
+/* The card under the tree, which is where a focus is actually read and
+   started. A popover over a tree this size would cover the thing it is
+   describing. */
+.panel-focus-detail {
+  padding: 11px 12px; margin-top: 10px;
+  background: linear-gradient(180deg, #3a352c 0%, #2a261f 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+}
+.panel-focus-detail .panel-btn.wide { margin-top: 9px; width: 100%; min-height: 46px; }
+.panel-focus-detail .panel-bar { margin-top: 7px; }
+
 /* --- chain of command ---------------------------------------------------- */
 /* The whole card header is the control that opens it, so it is a button with
    the title's typography rather than a title with a button beside it. */

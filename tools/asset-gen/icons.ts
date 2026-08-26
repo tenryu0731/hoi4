@@ -199,6 +199,21 @@ export const UI_ICONS: Record<string, string> = {
     'M14.6 11.4h2.8v8.4h-2.8z' +
     'M14.6 21.6h2.8v3h-2.8z"/>',
   ),
+  // Crossed sabres: a focus that hands over a war goal. Distinct from the
+  // army tab's chevrons, which mean a formation rather than an intention.
+  wargoal: solid(
+    '<path d="M4.4 3.2l4.2.5 17 17-3.7 3.7-17-17z' +
+    'M27.6 3.2l-.5 4.2-17 17 3.7 3.7 17-17z' +
+    'M3.6 24.4l4.4 4.4 3.2-3.2-4.4-4.4z' +
+    'M28.4 24.4L24 28.8l-3.2-3.2 4.4-4.4z"/>',
+  ),
+  // A flag planted on ground that has just changed hands: annexation and
+  // cession, which are the same gesture at two scales.
+  annex: solid(
+    '<path d="M7.6 2.4h3v27.2h-3z' +
+    'M12 3.6h15.6l-3.6 5.2 3.6 5.2H12z"/>' +
+    '<path d="M2.4 26.4h27.2v3.2H2.4z"/>',
+  ),
 };
 
 // ---------------------------------------------------------------------------

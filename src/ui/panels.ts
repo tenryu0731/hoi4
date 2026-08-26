@@ -88,6 +88,10 @@ function flagUrl(tag: string): string {
   return `${import.meta.env.BASE_URL}assets/flags/${tag}.svg`;
 }
 
+function iconUrl(name: string): string {
+  return `${import.meta.env.BASE_URL}assets/icons/${name}.svg`;
+}
+
 export function formatNumber(n: number): string {
   const v = Math.round(n);
   if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
@@ -1478,6 +1482,75 @@ export const commandPanel: Panel = {
  * historical order, so a column reads as a chronology: what is running, what
  * can be started now, and what is waiting and on what.
  */
+/**
+ * The focus tree.
+ *
+ * HOI4's national focus screen is a tree: icons on a grid, joined by lines
+ * that show what unlocks what. This was three collapsible lists -- available,
+ * locked, done -- which is the same information with the shape taken out of
+ * it, and the shape is the whole point. A player cannot plan two focuses ahead
+ * from a list, because a list does not say which of the sixteen locked entries
+ * the one available entry leads to.
+ *
+ * `FocusView` already carried `x`, `y`, `prerequisites` and `exclusive`; the
+ * panel simply was not reading them.
+ */
+
+/** Node box and grid pitch, in CSS pixels. */
+const FOCUS_W = 84;
+const FOCUS_H = 72;
+const FOCUS_COL = 96;
+const FOCUS_ROW = 86;
+const FOCUS_PAD = 10;
+
+/**
+ * Which icon a focus wears.
+ *
+ * HOI4 draws a bespoke illustration for every focus; there are 82 here and
+ * bespoke art for each is not on the table. The next most useful thing an
+ * icon can say is what the focus *does*, so it is chosen from the effect that
+ * dominates it -- and that is information the list form never showed at all.
+ */
+const FOCUS_EFFECT_ICON: Record<string, string> = {
+  annex: 'ui-annex',
+  cede: 'ui-annex',
+  wargoal: 'ui-wargoal',
+  guarantee: 'ui-diplomacy',
+  opinion: 'ui-diplomacy',
+  factory: 'ui-factory',
+  warEconomy: 'ui-factory',
+  buildingSlots: 'ui-construction',
+  infrastructure: 'ui-construction',
+  constructionSpeed: 'ui-construction',
+  fort: 'ui-construction',
+  research: 'ui-research',
+  researchSpeed: 'ui-research',
+  researchSlot: 'ui-research',
+  equipment: 'ui-production',
+  manpower: 'ui-manpower',
+  worldTension: 'ui-warning',
+  politicalPower: 'ui-political_power',
+  dailyPoliticalPower: 'ui-political_power',
+};
+
+/** Effects in the order they best describe a focus, most telling first. */
+const FOCUS_ICON_ORDER = [
+  'annex', 'cede', 'wargoal', 'guarantee', 'factory', 'equipment', 'research',
+  'researchSlot', 'researchSpeed', 'manpower', 'buildingSlots', 'infrastructure',
+  'constructionSpeed', 'fort', 'warEconomy', 'opinion', 'worldTension',
+  'politicalPower', 'dailyPoliticalPower',
+];
+
+function focusIcon(v: { effects: { k: string }[] }): string {
+  for (const kind of FOCUS_ICON_ORDER) {
+    if (v.effects.some((e) => e.k === kind)) return FOCUS_EFFECT_ICON[kind];
+  }
+  return 'ui-political_power';
+}
+
+/** The focus the detail card is showing, remembered across rebuilds. */
+let focusSelected: string | null = null;
+
 export const focusPanel: Panel = {
   id: 'focus',
   title: UI.navFocus,
@@ -1487,6 +1560,7 @@ export const focusPanel: Panel = {
     const me = state.countries[state.meta.playerCountry];
     const views = availableFocuses(state, me.id);
     const current = views.find((v) => v.current) ?? null;
+    const byId = new Map(views.map((v) => [v.id, v] as const));
 
     const head = el('div', 'panel-head');
     head.append(
@@ -1496,78 +1570,168 @@ export const focusPanel: Panel = {
     );
     root.append(head);
 
-    if (current) {
-      root.append(el('div', 'panel-label', UI.currentFocus));
-      const row = el('div', 'panel-focus is-current');
-      row.append(
-        el('div', 'panel-focus-name', current.name),
-        el('div', 'panel-focus-desc', current.desc),
-      );
-      const bar = el('div', 'panel-bar');
-      const fill = el('i', 'panel-bar-fill');
-      fill.style.width = `${(current.fraction * 100).toFixed(1)}%`;
-      bar.append(fill);
-      row.append(bar);
-      row.append(el('div', 'panel-focus-meta',
-        `${Math.round(current.progress)} / ${current.days}${UI.days}`));
-      const stop = el('button', 'panel-btn wide', UI.cancelFocus);
-      stop.addEventListener('click', () => {
-        game.issue({ t: 'cancelFocus', country: me.id });
-        focusPanel.build(game, root);
-      });
-      row.append(stop);
-      root.append(row);
+    // Default to whatever the player is most likely to want to read: the focus
+    // under way, else the first one they could start.
+    if (focusSelected === null || !byId.has(focusSelected)) {
+      focusSelected = current?.id
+        ?? views.find((v) => v.selectable && !v.completed)?.id
+        ?? views[0]?.id
+        ?? null;
     }
 
-    const open = views.filter((v) => !v.current && !v.completed && v.selectable);
-    const locked = views.filter((v) => !v.current && !v.completed && !v.selectable);
-    const done = views.filter((v) => v.completed);
+    const cols = Math.max(1, ...views.map((v) => v.x + 1));
+    const rows = Math.max(1, ...views.map((v) => v.y + 1));
+    const width = FOCUS_PAD * 2 + (cols - 1) * FOCUS_COL + FOCUS_W;
+    const height = FOCUS_PAD * 2 + (rows - 1) * FOCUS_ROW + FOCUS_H;
 
-    const card = (v: (typeof views)[number]): HTMLElement => {
-      const row = el('div', 'panel-focus');
-      row.classList.toggle('is-done', v.completed);
-      row.classList.toggle('is-locked', !v.selectable && !v.completed);
-      row.append(
-        el('div', 'panel-focus-name', `${v.completed ? '✔ ' : ''}${v.name}`),
-        el('div', 'panel-focus-desc', v.desc),
-      );
-      if (v.effectText.length > 0) {
-        row.append(el('div', 'panel-focus-effect', v.effectText.join(' · ')));
+    const scroller = el('div', 'panel-tree-scroll');
+    const tree = el('div', 'panel-tree');
+    tree.style.width = `${width}px`;
+    tree.style.height = `${height}px`;
+
+    const cx = (v: { x: number }): number => FOCUS_PAD + v.x * FOCUS_COL + FOCUS_W / 2;
+    const top = (v: { y: number }): number => FOCUS_PAD + v.y * FOCUS_ROW;
+    const bottom = (v: { y: number }): number => top(v) + FOCUS_H;
+
+    // --- the lines ---------------------------------------------------------
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'panel-tree-links');
+    svg.setAttribute('width', String(width));
+    svg.setAttribute('height', String(height));
+    const line = (d: string, cls: string): void => {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('class', cls);
+      svg.append(path);
+    };
+
+    for (const v of views) {
+      for (const group of v.prerequisites) {
+        for (const id of group) {
+          const from = byId.get(id);
+          if (!from) continue;
+          // An elbow, as the real tree draws it: down out of the parent, across
+          // at the midpoint, then down into the child.
+          const y0 = bottom(from);
+          const y1 = top(v);
+          const mid = y0 + (y1 - y0) / 2;
+          const done = from.completed;
+          line(
+            `M${cx(from)} ${y0} V${mid} H${cx(v)} V${y1}`,
+            `panel-tree-link${done ? ' is-open' : ''}`,
+          );
+        }
       }
-      if (v.completed) {
-        // Nothing more to say; the tick and the effect line are the record.
+      // Exclusives are drawn once, from the lower id, so the pair gets one line.
+      for (const other of v.exclusive) {
+        if (other <= v.id) continue;
+        const o = byId.get(other);
+        if (!o) continue;
+        line(`M${cx(v)} ${top(v) + FOCUS_H / 2} H${cx(o)}`, 'panel-tree-link is-exclusive');
+      }
+    }
+    tree.append(svg);
+
+    // --- the nodes ---------------------------------------------------------
+    const detail = el('div', 'panel-focus-detail');
+
+    const drawDetail = (): void => {
+      detail.innerHTML = '';
+      const v = focusSelected === null ? null : byId.get(focusSelected);
+      if (!v) return;
+      detail.append(el('div', 'panel-focus-name', v.name));
+      detail.append(el('div', 'panel-focus-desc', v.desc));
+      if (v.effectText.length > 0) {
+        detail.append(el('div', 'panel-focus-effect', v.effectText.join(' · ')));
+      }
+      if (v.current) {
+        const bar = el('div', 'panel-bar');
+        const fill = el('i', 'panel-bar-fill');
+        fill.style.width = `${(v.fraction * 100).toFixed(1)}%`;
+        bar.append(fill);
+        detail.append(bar);
+        detail.append(el('div', 'panel-focus-meta',
+          `${Math.round(v.progress)} / ${v.days}${UI.days}`));
+        const stop = el('button', 'panel-btn wide', UI.cancelFocus);
+        stop.addEventListener('click', () => {
+          game.issue({ t: 'cancelFocus', country: me.id });
+          focusPanel.build(game, root);
+        });
+        detail.append(stop);
+      } else if (v.completed) {
+        detail.append(el('div', 'panel-focus-meta', UI.focusCompleted));
       } else if (v.selectable) {
-        const go = el('button', 'panel-btn wide', `${UI.startFocus}（${v.days}${UI.days}）`);
+        const go = el('button', 'panel-btn wide primary',
+          `${UI.startFocus}（${v.days}${UI.days}）`);
         go.addEventListener('click', () => {
           game.issue({ t: 'startFocus', country: me.id, focus: v.id });
           focusPanel.build(game, root);
         });
-        row.append(go);
+        detail.append(go);
       } else {
-        row.append(el('div', 'panel-focus-block', v.blockText ?? UI.locked));
+        detail.append(el('div', 'panel-focus-block', v.blockText ?? UI.locked));
       }
-      return row;
     };
 
-    for (const [key, label, items, byDefault] of [
-      ['focus.open', UI.focusAvailable, open, true],
-      ['focus.locked', UI.focusLocked, locked, false],
-      ['focus.done', UI.focusCompleted, done, false],
-    ] as const) {
-      if (items.length === 0) continue;
-      const sec = section(key, label, items.length, byDefault);
-      for (const v of items) sec.body.append(card(v));
-      root.append(sec.head, sec.body);
+    const nodes = new Map<string, HTMLElement>();
+    for (const v of views) {
+      const node = el('button', 'panel-focus-node');
+      node.dataset.focus = v.id;
+      node.style.left = `${FOCUS_PAD + v.x * FOCUS_COL}px`;
+      node.style.top = `${top(v)}px`;
+      node.classList.toggle('is-done', v.completed);
+      node.classList.toggle('is-current', v.current);
+      node.classList.toggle('is-locked', !v.selectable && !v.completed && !v.current);
+      const icon = el('i', 'panel-focus-node-icon');
+      icon.style.setProperty('--icon', `url("${iconUrl(focusIcon(v))}")`);
+      node.append(icon, el('span', 'panel-focus-node-name', v.name));
+      if (v.current) {
+        const bar = el('i', 'panel-focus-node-bar');
+        const fill = el('i', '');
+        fill.style.width = `${(v.fraction * 100).toFixed(1)}%`;
+        bar.append(fill);
+        node.append(bar);
+      }
+      node.addEventListener('click', () => {
+        focusSelected = v.id;
+        for (const [id, n] of nodes) n.classList.toggle('is-picked', id === v.id);
+        drawDetail();
+      });
+      nodes.set(v.id, node);
+      tree.append(node);
+    }
+    if (focusSelected !== null) nodes.get(focusSelected)?.classList.add('is-picked');
+
+    scroller.append(tree);
+    // The card goes above the tree, not below it. Below, reading a focus meant
+    // scrolling past all six rows to reach the text describing the node you
+    // had just tapped -- and then scrolling back to tap the next one.
+    drawDetail();
+    root.append(detail, scroller);
+
+    // Bring the interesting part of the tree into view rather than the corner:
+    // on a 412px screen a six-column tree is 590px wide, and the focus that
+    // matters is rarely the top-left one. Snapped to the column pitch, so the
+    // left edge never lands halfway through a node.
+    const focusNode = focusSelected === null ? null : nodes.get(focusSelected);
+    if (focusNode) {
+      const want = focusNode.offsetLeft - scroller.clientWidth / 2 + FOCUS_W / 2;
+      scroller.scrollLeft = Math.max(0, Math.round(want / FOCUS_COL) * FOCUS_COL);
     }
   },
   refresh(game, root) {
     // The tree only changes on a completion or a command, both of which rebuild.
-    const bar = root.querySelector<HTMLElement>('.panel-focus.is-current .panel-bar-fill');
-    if (!bar) return;
     const me = game.state.countries[game.state.meta.playerCountry];
     const cur = availableFocuses(game.state, me.id).find((v) => v.current);
-    if (!cur) { focusPanel.build(game, root); return; }
-    bar.style.width = `${(cur.fraction * 100).toFixed(1)}%`;
+    const nodeBar = root.querySelector<HTMLElement>('.panel-focus-node.is-current > .panel-focus-node-bar > i');
+    const detailBar = root.querySelector<HTMLElement>('.panel-focus-detail .panel-bar-fill');
+    if (!cur) {
+      if (nodeBar || detailBar) focusPanel.build(game, root);
+      return;
+    }
+    const width = `${(cur.fraction * 100).toFixed(1)}%`;
+    if (nodeBar) nodeBar.style.width = width;
+    if (detailBar) detailBar.style.width = width;
   },
 };
 
