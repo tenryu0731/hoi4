@@ -62,9 +62,21 @@ export const UI = {
   alertIdleProduction: '軍需工場が生産ラインに割り当てられていません',
   alertUnderEquipped: '装備の足りない師団があります',
   alertNoCommander: '指揮官のいない軍があります',
+  /* Captions for the top bar. Two to four characters: they sit under a figure
+     in a chip 45 to 72px wide, and the point of them is that a number with a
+     symbol over it says nothing about what it counts. */
+  alertShortFuel: '燃料不足',
+  alertShortIdleFactories: '遊休工場',
+  alertShortIdleResearch: '研究枠',
+  alertShortNoFocus: '国家方針',
+  alertShortIdleProduction: '軍需遊休',
+  alertShortUnderEquipped: '装備不足',
+  alertShortNoCommander: '指揮官',
   effects: '現在の効果',
   stability: '安定度',
   warSupport: '戦争支持率',
+  /** Five characters do not fit under a 56px chip; four do. */
+  warSupportShort: '戦争支持',
   conscriptionLaw: '徴兵法',
   economyLaw: '経済法',
   lawMobilise: '強化',

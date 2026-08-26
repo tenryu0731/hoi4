@@ -130,12 +130,18 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // five figures plus six resources across 412px.
   const stats = el('div', 'hud-stats');
   const statNodes: Record<string, HTMLElement> = {};
-  const addStat = (key: string, label: string, icon: string) => {
+  const addStat = (key: string, label: string, icon: string, caption = label) => {
     const box = el('div', 'hud-stat');
     const v = el('span', 'hud-stat-v', '0');
     box.title = label;
     box.setAttribute('aria-label', label);
-    box.append(iconNode('hud-res-icon', `icons/${icon}.svg`), v);
+    const line = el('span', 'hud-chip-line');
+    line.append(iconNode('hud-res-icon', `icons/${icon}.svg`), v);
+    // The caption is the point of this row. A symbol over a number says what
+    // kind of thing it is at best -- 「記号しかなく何か分からない」 -- and two
+    // of these icons are a bank and a pair of scales, which is not a reading
+    // anyone can be expected to arrive at.
+    box.append(line, el('span', 'hud-chip-c', caption));
     stats.append(box);
     statNodes[key] = v;
   };
@@ -143,12 +149,14 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // Stability and war support sit next to political power in the real game's
   // top bar, because all three are the same decision seen from three sides.
   addStat('stab', UI.stability, 'ui-stability');
-  addStat('ws', UI.warSupport, 'ui-war_support');
+  addStat('ws', UI.warSupport, 'ui-war_support', UI.warSupportShort);
   addStat('mp', UI.manpower, 'ui-manpower');
   addStat('fuel', UI.fuel, 'ui-fuel');
   addStat('civ', UI.civFactories, 'ui-factory');
   addStat('mil', UI.milFactories, 'ui-military_factory');
-  addStat('div', UI.divisions, 'ui-army');
+  // No division count. HOI4's top bar does not carry one, the army panel does,
+  // and with the captions on it was the eighth chip in seven chips of room --
+  // measured at 446px of content in a 396px strip.
 
   // The clock is a cluster of real buttons, not a row of hairlines. The speed
   // used to be five 8px pips two pixels apart: a target no thumb can hit, in a
@@ -197,7 +205,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     // label for anyone who needs it.
     chip.title = RESOURCE_SHORT[r];
     chip.setAttribute('aria-label', RESOURCE_SHORT[r]);
-    chip.append(icon, v);
+    const line = el('span', 'hud-chip-line');
+    line.append(icon, v);
+    chip.append(line, el('span', 'hud-chip-c', RESOURCE_SHORT[r]));
     resStrip.append(chip);
     resNodes[r] = v;
   }
@@ -332,11 +342,14 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       chip.classList.toggle('is-urgent', a.urgent);
       chip.title = a.title;
       chip.setAttribute('aria-label', a.title);
-      chip.append(iconNode('hud-res-icon', `icons/${a.icon}.svg`));
-      if (a.text !== '') chip.append(el('span', 'hud-alert-v', a.text));
+      const line = el('span', 'hud-chip-line');
+      line.append(iconNode('hud-res-icon', `icons/${a.icon}.svg`));
+      if (a.text !== '') line.append(el('span', 'hud-alert-v', a.text));
+      chip.append(line, el('span', 'hud-chip-c', a.caption));
       chip.addEventListener('click', () => togglePanel(a.panel));
       alertRow.append(chip);
     }
+    markOverflow();
   }
 
   top.append(topRow, stats, resStrip, alertRow);
@@ -360,10 +373,23 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     root.style.setProperty('--map-band', `${Math.max(60, Math.round(sheetTop - topH))}px`);
   }
 
-  const topObserver = new ResizeObserver(() => { measureTop(); measureBand(); });
+  /**
+   * The fade at the trailing edge belongs on a row that continues off-screen,
+   * and nowhere else. The stats row is 395px of content in 396px of space, so
+   * a mask that starts at 94% was greying out the last chip on a row that fits.
+   */
+  const scrollRows = [stats, resStrip, alertRow];
+  function markOverflow(): void {
+    for (const row of scrollRows) {
+      row.classList.toggle('is-clipped', row.scrollWidth > row.clientWidth + 1);
+    }
+  }
+
+  const topObserver = new ResizeObserver(() => { measureTop(); measureBand(); markOverflow(); });
   topObserver.observe(top);
   measureTop();
   measureBand();
+  markOverflow();
 
   // -------------------------------------------------------------------------
   // Behaviour
@@ -490,15 +516,30 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     while (toasts.childElementCount > 4) toasts.firstElementChild?.remove();
   }
 
+  /**
+   * Fails here rather than sixty times a second.
+   *
+   * `statNodes` is keyed by string, so dropping a chip from the top bar and
+   * leaving its tween behind type-checks perfectly and then throws inside the
+   * frame loop, where it takes the whole HUD down every frame and shows up as
+   * eight unrelated browser tests failing. Once, at mount, is where a missing
+   * figure should be found -- the boot guard reports it and the boot test
+   * catches it.
+   */
+  const statNode = (key: string): HTMLElement => {
+    const node = statNodes[key];
+    if (!node) throw new Error(`hud: no top-bar figure "${key}"`);
+    return node;
+  };
+
   const tweens = {
-    pp: new NumberTween(statNodes.pp, formatNumber),
-    mp: new NumberTween(statNodes.mp, formatNumber),
-    civ: new NumberTween(statNodes.civ, (v) => String(Math.round(v))),
-    mil: new NumberTween(statNodes.mil, (v) => String(Math.round(v))),
-    div: new NumberTween(statNodes.div, (v) => String(Math.round(v))),
-    stab: new NumberTween(statNodes.stab, (v) => `${Math.round(v)}%`),
-    ws: new NumberTween(statNodes.ws, (v) => `${Math.round(v)}%`),
-    fuel: new NumberTween(statNodes.fuel, (v) => String(Math.round(v))),
+    pp: new NumberTween(statNode('pp'), formatNumber),
+    mp: new NumberTween(statNode('mp'), formatNumber),
+    civ: new NumberTween(statNode('civ'), (v) => String(Math.round(v))),
+    mil: new NumberTween(statNode('mil'), (v) => String(Math.round(v))),
+    stab: new NumberTween(statNode('stab'), (v) => `${Math.round(v)}%`),
+    ws: new NumberTween(statNode('ws'), (v) => `${Math.round(v)}%`),
+    fuel: new NumberTween(statNode('fuel'), (v) => String(Math.round(v))),
   };
 
   // --- per-frame refresh ---------------------------------------------------
@@ -524,7 +565,6 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     tweens.mp.set(me.economy.manpower * 1000, dt);
     tweens.civ.set(me.economy.civilianFactories, dt);
     tweens.mil.set(me.economy.militaryFactories, dt);
-    tweens.div.set(me.stats.divisionCount, dt);
     syncAlerts();
     tweens.stab.set(me.stability * 100, dt);
     tweens.ws.set(me.warSupport * 100, dt);

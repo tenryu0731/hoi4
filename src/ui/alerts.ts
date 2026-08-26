@@ -28,6 +28,8 @@ export interface Alert {
   icon: string;
   /** Short label; a count when there is one to give. */
   text: string;
+  /** Two to four characters naming the problem, shown under the figure. */
+  caption: string;
   /** Accessible description of the problem. */
   title: string;
   /** Where tapping it takes the player. */
@@ -49,7 +51,8 @@ export function collectAlerts(game: Game): Alert[] {
   if (me.constructionQueue.length === 0 && idleFactories > 0) {
     out.push({
       id: 'construction', icon: 'ui-construction',
-      text: String(Math.round(idleFactories)), title: UI.alertIdleFactories,
+      text: String(Math.round(idleFactories)), caption: UI.alertShortIdleFactories,
+      title: UI.alertIdleFactories,
       panel: 'construction', urgent: true,
     });
   }
@@ -58,7 +61,8 @@ export function collectAlerts(game: Game): Alert[] {
   if (idleSlots > 0) {
     out.push({
       id: 'research', icon: 'ui-research',
-      text: String(idleSlots), title: UI.alertIdleResearch,
+      text: String(idleSlots), caption: UI.alertShortIdleResearch,
+      title: UI.alertIdleResearch,
       panel: 'research', urgent: true,
     });
   }
@@ -67,7 +71,8 @@ export function collectAlerts(game: Game): Alert[] {
   if (!focuses.some((f) => f.current) && focuses.some((f) => f.selectable)) {
     out.push({
       id: 'focus', icon: 'ui-political_power',
-      text: '', title: UI.alertNoFocus, panel: 'focus', urgent: false,
+      text: '', caption: UI.alertShortNoFocus,
+      title: UI.alertNoFocus, panel: 'focus', urgent: false,
     });
   }
 
@@ -78,7 +83,8 @@ export function collectAlerts(game: Game): Alert[] {
   if (idleMil > 0) {
     out.push({
       id: 'production', icon: 'ui-military_factory',
-      text: String(idleMil), title: UI.alertIdleProduction,
+      text: String(idleMil), caption: UI.alertShortIdleProduction,
+      title: UI.alertIdleProduction,
       panel: 'production', urgent: true,
     });
   }
@@ -88,7 +94,8 @@ export function collectAlerts(game: Game): Alert[] {
   if (me.economy.fuelRatio < 0.95) {
     out.push({
       id: 'fuel', icon: 'ui-fuel',
-      text: `${Math.round(me.economy.fuelRatio * 100)}%`, title: UI.alertFuel,
+      text: `${Math.round(me.economy.fuelRatio * 100)}%`, caption: UI.alertShortFuel,
+      title: UI.alertFuel,
       panel: 'production', urgent: true,
     });
   }
@@ -101,7 +108,8 @@ export function collectAlerts(game: Game): Alert[] {
   if (short > 0) {
     out.push({
       id: 'equipment', icon: 'ui-warning',
-      text: String(short), title: UI.alertUnderEquipped,
+      text: String(short), caption: UI.alertShortUnderEquipped,
+      title: UI.alertUnderEquipped,
       panel: 'army', urgent: false,
     });
   }
@@ -112,7 +120,8 @@ export function collectAlerts(game: Game): Alert[] {
   if (leaderless > 0) {
     out.push({
       id: 'command', icon: 'ui-army',
-      text: String(leaderless), title: UI.alertNoCommander,
+      text: String(leaderless), caption: UI.alertShortNoCommander,
+      title: UI.alertNoCommander,
       panel: 'command', urgent: false,
     });
   }

@@ -66,9 +66,12 @@ export const HUD_CSS = `
 .hud-stats, .hud-resources {
   display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
   touch-action: pan-x;
-  /* Should a row still not fit, fading the trailing edge is what tells the
-     player it continues, rather than the last chip being guillotined by the
-     screen edge with no affordance at all. */
+}
+/* Should a row still not fit, fading the trailing edge is what tells the
+   player it continues, rather than the last chip being guillotined by the
+   screen edge with no affordance at all. Applied only when the row actually
+   overflows: unconditionally, it dimmed the last chip of a row that fits. */
+.hud-stats.is-clipped, .hud-resources.is-clipped, .hud-alerts.is-clipped {
   -webkit-mask-image: linear-gradient(90deg, #000 94%, transparent);
           mask-image: linear-gradient(90deg, #000 94%, transparent);
 }
@@ -80,6 +83,20 @@ export const HUD_CSS = `
   border: 1px solid #100f0d; border-radius: 2px;
   box-shadow: var(--bevel);
   padding: 3px 6px; white-space: nowrap;
+}
+/* A caption under every figure in the top bar.
+   Measured before: eight icon-and-number chips, no words anywhere, and two of
+   the icons are a bank and a pair of scales. The caption goes underneath
+   rather than beside because beside costs 21px of width per chip on a strip
+   that already overflows -- 446px of content in 396px -- while underneath
+   costs 11px of height once, for the whole row. */
+.hud-stats > .hud-stat, .hud-resources > .hud-res, .hud-alerts > .hud-alert {
+  flex-direction: column; align-items: center; gap: 0; padding: 2px 6px 3px;
+}
+.hud-chip-line { display: flex; align-items: center; gap: 4px; }
+.hud-chip-c {
+  font-size: 9px; font-weight: 400; line-height: 11px;
+  letter-spacing: 0; color: var(--ink-dim);
 }
 .hud-stat-v {
   font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
