@@ -28,6 +28,72 @@ export const CONSCRIPTION_LAWS = [
 ] as const;
 export type ConscriptionLaw = (typeof CONSCRIPTION_LAWS)[number];
 
+/**
+ * Trade law, from open to closed.
+ *
+ * The ladder runs the same direction as the other two -- one step "up" is one
+ * step further into a war footing -- so free trade is the bottom rung and a
+ * closed economy the top. What it buys is the whole point of the market: an
+ * open economy sells its ore abroad and gets research, construction and the
+ * buyer's factories back for it; a closed one keeps everything and pays for
+ * the privilege.
+ */
+export const TRADE_LAWS = [
+  'free_trade',
+  'export_focus',
+  'limited_exports',
+  'closed_economy',
+] as const;
+export type TradeLaw = (typeof TRADE_LAWS)[number];
+
+export interface TradeDef {
+  id: TradeLaw;
+  /** Fraction of what the country digs up that reaches the world market. */
+  exportShare: number;
+  /** Multipliers, applied the way the economy law's are. */
+  research: number;
+  construction: number;
+  output: number;
+  name: string;
+  desc: string;
+}
+
+/**
+ * Export shares are above HOI4's 50/25/15.
+ *
+ * The same reason RESOURCE_PER_FACTORY is below its 8: this world mines about
+ * a tenth of what that one does, so HOI4's fractions put a handful of units a
+ * day on the whole world's market. Measured at the HOI4 numbers, by February
+ * 1937 the AI had bought every unit of every resource that was for sale and a
+ * player opening the market saw 「売り手がいません」 under all six headings.
+ */
+export const TRADE: Record<TradeLaw, TradeDef> = {
+  free_trade: {
+    id: 'free_trade', exportShare: 0.6,
+    research: 1.15, construction: 1.1, output: 1.05,
+    name: '自由貿易',
+    desc: '産出の半分を市場に出す。見返りは外貨と、それが買う研究と建設である。',
+  },
+  export_focus: {
+    id: 'export_focus', exportShare: 0.4,
+    research: 1.1, construction: 1.05, output: 1.03,
+    name: '輸出重視',
+    desc: '四分の一を輸出に回す。国内産業を飢えさせない範囲で、外との商いを続ける。',
+  },
+  limited_exports: {
+    id: 'limited_exports', exportShare: 0.25,
+    research: 1.05, construction: 1.02, output: 1.015,
+    name: '輸出制限',
+    desc: '戦略物資の流出を絞る。友好国への義理は果たすが、それ以上は出さない。',
+  },
+  closed_economy: {
+    id: 'closed_economy', exportShare: 0,
+    research: 1, construction: 1, output: 1,
+    name: '封鎖経済',
+    desc: '一片たりとも国外へ出さない。自給自足の代償は、技術と建設の遅れとして払う。',
+  },
+};
+
 export const ECONOMY_LAWS = [
   'undisturbed_isolation',
   'isolation',
@@ -138,23 +204,36 @@ export const ECONOMY: Record<EconomyLaw, EconomyDef> = {
  * 1936 start is a race at all.
  */
 export function startingLaws(ideology: Ideology, major: boolean): {
-  conscription: ConscriptionLaw; economy: EconomyLaw;
+  conscription: ConscriptionLaw; economy: EconomyLaw; trade: TradeLaw;
 } {
   switch (ideology) {
     case 'fascist':
       return {
         conscription: major ? 'extensive' : 'limited',
         economy: major ? 'partial_mobilisation' : 'civilian',
+        // Autarky was the doctrine, and Germany's export share in 1936 was
+        // already the smallest of the majors.
+        trade: major ? 'limited_exports' : 'export_focus',
       };
     case 'communist':
       return {
         conscription: major ? 'extensive' : 'limited',
         economy: major ? 'early_mobilisation' : 'civilian',
+        // Not a closed economy, though the doctrine says otherwise. The Soviet
+        // Union holds 64 of the world's 139 oil: shut it out of the market and
+        // 46% of the oil in Europe can never be bought by anyone, which is
+        // both unhistorical -- Moscow sold Berlin oil and grain from 1939 --
+        // and the difference between a market and a shop with nothing in it.
+        trade: major ? 'limited_exports' : 'export_focus',
       };
     case 'democratic':
-      return { conscription: 'volunteer', economy: major ? 'civilian' : 'isolation' };
+      return {
+        conscription: 'volunteer',
+        economy: major ? 'civilian' : 'isolation',
+        trade: 'free_trade',
+      };
     default:
-      return { conscription: 'volunteer', economy: 'isolation' };
+      return { conscription: 'volunteer', economy: 'isolation', trade: 'export_focus' };
   }
 }
 

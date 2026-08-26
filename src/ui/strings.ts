@@ -48,6 +48,33 @@ export const UI = {
   navPolitics: '政治',
   fuel: '燃料',
   priority: '優先度',
+  mapMode: '地図モード',
+  // --- the market --------------------------------------------------------
+  navTrade: '貿易',
+  tradeLaw: '貿易法',
+  tradeExportShare: '輸出割合',
+  researchSpeedLabel: '研究速度',
+  tradeFree: '空き民需',
+  tradeBuying: '購入中',
+  tradeSelling: '売却中',
+  tradeBuy: '購入を増やす',
+  tradeSell: '購入を減らす',
+  tradeNoSellers: '売り手がいません',
+  /** Production, imports, exports and the day's shortfall, in one line. */
+  tradeBalance: (own: number, imported: number, exported: number, short: number): string => {
+    const parts = [`自国 ${own}`];
+    if (imported > 0) parts.push(`輸入 +${imported}`);
+    if (exported > 0) parts.push(`輸出 −${exported}`);
+    if (short > 0) parts.push(`不足 ${short}`);
+    return parts.join(' · ');
+  },
+  tradeOffer: (spare: number, bought: number): string =>
+    bought > 0 ? `売却可能 ${spare}／日 · 工場 ${bought} 基で購入中` : `売却可能 ${spare}／日`,
+  tradeLawLine: (law: string, share: number, perFactory: number): string =>
+    `${law} · 産出の ${share}% を市場へ · 民需工場 1 基につき ${perFactory}／日`,
+  cancel: '選択解除',
+  /** Shown while a stack is under orders and the next tap sets its objective. */
+  orderHint: (n: number): string => `${n}個師団を選択中 — 移動先をタップ`,
   airStrength: '航空戦力',
   resistance: '抵抗運動',
   priorityNames: ['低', '並', '高', '最'] as const,
@@ -58,9 +85,21 @@ export const UI = {
   alertIdleProduction: '軍需工場が生産ラインに割り当てられていません',
   alertUnderEquipped: '装備の足りない師団があります',
   alertNoCommander: '指揮官のいない軍があります',
+  /* Captions for the top bar. Two to four characters: they sit under a figure
+     in a chip 45 to 72px wide, and the point of them is that a number with a
+     symbol over it says nothing about what it counts. */
+  alertShortFuel: '燃料不足',
+  alertShortIdleFactories: '遊休工場',
+  alertShortIdleResearch: '研究枠',
+  alertShortNoFocus: '国家方針',
+  alertShortIdleProduction: '軍需遊休',
+  alertShortUnderEquipped: '装備不足',
+  alertShortNoCommander: '指揮官',
   effects: '現在の効果',
   stability: '安定度',
   warSupport: '戦争支持率',
+  /** Five characters do not fit under a 56px chip; four do. */
+  warSupportShort: '戦争支持',
   conscriptionLaw: '徴兵法',
   economyLaw: '経済法',
   lawMobilise: '強化',
@@ -329,6 +368,8 @@ export function eventText(
       return `${country(body.attacker)}が${country(body.defender)}に宣戦布告`;
     case 'joinedFaction':
       return `${country(body.country)}が${body.faction}に加入`;
+    case 'ceded':
+      return `${country(body.country)}が${country(body.by)}に${body.states}ステートを割譲`;
     case 'capitulated':
       return `${country(body.country)}が降伏 (占領率 ${Math.round(body.occupation * 100)}%)`;
     case 'annexed':

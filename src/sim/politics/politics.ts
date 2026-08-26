@@ -1,6 +1,7 @@
 import {
   CONSCRIPTION, CONSCRIPTION_LAWS, DEMOCRATIC_PEACETIME_CAP, ECONOMY, ECONOMY_LAWS, LAW_COST,
-  type ConscriptionLaw, type EconomyLaw,
+  TRADE, TRADE_LAWS,
+  type ConscriptionLaw, type EconomyLaw, type TradeLaw,
 } from './lawData';
 import type { Country, CountryId, GameState } from '../core/types';
 
@@ -27,7 +28,18 @@ export interface LawEffects {
   output: number;
   /** Multiplier on the factories a country can actually staff. */
   factoryStaffing: number;
+  /** Multiplier on research speed, from the trade law. */
+  research: number;
 }
+
+/**
+ * Where a country starts on the trade ladder.
+ *
+ * Export focus, not free trade: the 1936 scenario table predates the market,
+ * and a world that opens on free trade has every minor dumping half its ore
+ * before the player has seen the panel.
+ */
+export const DEFAULT_TRADE_LAW: TradeLaw = 'export_focus';
 
 /** Political power a day at full stability, and the floor at none of it. */
 const PP_AT_FULL_STABILITY = 1.4;
@@ -38,14 +50,18 @@ const INSTABILITY_CONSUMER_GOODS = 0.15;
 export function lawEffects(c: Country): LawEffects {
   const con = CONSCRIPTION[c.laws.conscription];
   const eco = ECONOMY[c.laws.economy];
+  // An open economy buys research and building capacity with its exports; a
+  // closed one pays for self-sufficiency in exactly that coin.
+  const trade = TRADE[c.laws.trade ?? DEFAULT_TRADE_LAW];
   // An unstable country wastes industry on keeping itself together.
   const unrest = (1 - c.stability) * INSTABILITY_CONSUMER_GOODS;
   return {
     conscriptionFraction: con.fraction,
     consumerGoods: Math.min(0.6, eco.consumerGoods + unrest),
-    construction: eco.construction,
-    output: eco.output,
+    construction: eco.construction * trade.construction,
+    output: eco.output * trade.output,
     factoryStaffing: 1 - con.factoryPenalty,
+    research: trade.research,
   };
 }
 
@@ -78,13 +94,20 @@ export function tension(state: GameState): number {
   return Math.max(0, Math.min(1, state.worldTension / 100));
 }
 
-export type LawKind = 'conscription' | 'economy';
+export type LawKind = 'conscription' | 'economy' | 'trade';
+
+/** The ladder a law kind runs along. */
+export function lawLadder(kind: LawKind): readonly string[] {
+  if (kind === 'conscription') return CONSCRIPTION_LAWS;
+  if (kind === 'economy') return ECONOMY_LAWS;
+  return TRADE_LAWS;
+}
 
 /** Index of the country's current law on the given ladder. */
 export function lawIndex(c: Country, kind: LawKind): number {
-  return kind === 'conscription'
-    ? CONSCRIPTION_LAWS.indexOf(c.laws.conscription)
-    : ECONOMY_LAWS.indexOf(c.laws.economy);
+  if (kind === 'conscription') return CONSCRIPTION_LAWS.indexOf(c.laws.conscription);
+  if (kind === 'economy') return ECONOMY_LAWS.indexOf(c.laws.economy);
+  return TRADE_LAWS.indexOf(c.laws.trade ?? DEFAULT_TRADE_LAW);
 }
 
 export interface LawCheck {
@@ -102,13 +125,17 @@ export interface LawCheck {
 export function canChangeLaw(
   state: GameState, c: Country, kind: LawKind, step: 1 | -1,
 ): LawCheck {
-  const list = kind === 'conscription' ? CONSCRIPTION_LAWS : ECONOMY_LAWS;
+  const list = lawLadder(kind);
   const next = lawIndex(c, kind) + step;
   if (next < 0 || next >= list.length) return { allowed: false, reason: 'end' };
   if (c.economy.politicalPower < LAW_COST) return { allowed: false, reason: 'cost' };
   if (step === -1) return { allowed: true, reason: '' };
 
   const atWar = c.atWarWith.length > 0;
+  // Trade is the one ladder a democracy may climb in peacetime. Closing the
+  // borders is not mobilisation, and no parliament in 1936 needed a war to
+  // vote a tariff.
+  if (kind === 'trade') return { allowed: true, reason: '' };
   if (c.ideology === 'democratic' && !atWar && next > DEMOCRATIC_PEACETIME_CAP[kind]) {
     return { allowed: false, reason: 'democracy' };
   }
@@ -133,8 +160,10 @@ export function changeLaw(
   const next = lawIndex(c, kind) + step;
   if (kind === 'conscription') {
     c.laws.conscription = CONSCRIPTION_LAWS[next] as ConscriptionLaw;
-  } else {
+  } else if (kind === 'economy') {
     c.laws.economy = ECONOMY_LAWS[next] as EconomyLaw;
+  } else {
+    c.laws.trade = TRADE_LAWS[next] as TradeLaw;
   }
   c.economy.politicalPower -= LAW_COST;
   return true;

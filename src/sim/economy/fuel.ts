@@ -121,5 +121,18 @@ export function tickFuelDaily(state: GameState): void {
     const drawn = Math.min(eco.fuel, demand);
     eco.fuel -= drawn;
     eco.fuelRatio = drawn / demand;
+
+    // Book the shortfall against oil.
+    //
+    // Fuel is the only consumer of oil in the game, and it is not a production
+    // line, so `oil.deficit` was structurally zero for every country in every
+    // year -- measured at 0% of days short across a six-year run in which
+    // Germany's mean fuel ratio was 1%. The chip in the top bar therefore
+    // never went red, and nothing that reads a deficit -- the alert row, the
+    // AI deciding what to buy -- could see the one shortage that mattered.
+    if (drawn < demand) {
+      const missing = (demand - drawn) / (FUEL_PER_OIL * Math.max(0.01, refining));
+      oil.deficit = Math.max(oil.deficit, missing);
+    }
   }
 }

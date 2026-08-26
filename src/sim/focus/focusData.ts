@@ -88,6 +88,15 @@ export type FocusEffect =
   | { k: 'equipment'; equipment: EquipmentType; amount: number }
   /** A matured war goal, handed over without the usual justification wait. */
   | { k: 'wargoal'; target: string }
+  /**
+   * An ultimatum the whole government is behind: the Anschluss, not a bought
+   * demand. The target is annexed outright if it folds; if it is protected --
+   * in a faction, guaranteed, or simply too strong -- a war goal is handed
+   * over instead, which is what a refused demand historically left behind.
+   */
+  | { k: 'annex'; target: string }
+  /** The same pressure for a border strip: `states` of the target's, ceded. */
+  | { k: 'cede'; target: string; states: number }
   | { k: 'guarantee'; target: string }
   | { k: 'opinion'; target: string; amount: number; direction?: 'ours' | 'theirs' | 'both' }
   | { k: 'worldTension'; amount: number };
@@ -234,8 +243,8 @@ const GERMANY: FocusTree = {
       prereq: [['GER_rhineland']],
       requires: [{ k: 'date', from: '1938-01' }, { k: 'countryAlive', tag: 'AUS' }],
       effects: [
-        { k: 'wargoal', target: 'AUS' },
         { k: 'opinion', target: 'AUS', amount: 45, direction: 'theirs' },
+        { k: 'annex', target: 'AUS' },
         { k: 'politicalPower', amount: 60 },
         { k: 'worldTension', amount: 2 },
       ],
@@ -248,10 +257,23 @@ const GERMANY: FocusTree = {
       prereq: [['GER_anschluss']],
       requires: [{ k: 'date', from: '1938-08' }, { k: 'countryAlive', tag: 'CZE' }],
       effects: [
-        { k: 'wargoal', target: 'CZE' },
         { k: 'opinion', target: 'CZE', amount: 30, direction: 'theirs' },
+        { k: 'cede', target: 'CZE', states: 3 },
         { k: 'politicalPower', amount: 60 },
         { k: 'worldTension', amount: 4 },
+      ],
+    },
+    {
+      id: 'GER_prague',
+      name: 'チェコスロヴァキアの残余',
+      desc: '国境の要塞線を手放した国に、拒む手立てはもう残っていない。プラハへ入城し、残りを片づける。',
+      days: FOCUS_DAYS_SHORT, x: 4, y: 3,
+      prereq: [['GER_sudetenland']],
+      requires: [{ k: 'date', from: '1939-03' }, { k: 'countryAlive', tag: 'CZE' }],
+      effects: [
+        { k: 'annex', target: 'CZE' },
+        { k: 'politicalPower', amount: 40 },
+        { k: 'worldTension', amount: 6 },
       ],
     },
     {
@@ -446,12 +468,12 @@ const SOVIET: FocusTree = {
       prereq: [['SOV_great_purge', 'SOV_red_army_modernisation']],
       requires: [{ k: 'date', from: '1939-08' }],
       effects: [
-        { k: 'wargoal', target: 'EST' },
-        { k: 'wargoal', target: 'LAT' },
-        { k: 'wargoal', target: 'LIT' },
         { k: 'opinion', target: 'EST', amount: 40, direction: 'theirs' },
         { k: 'opinion', target: 'LAT', amount: 40, direction: 'theirs' },
         { k: 'opinion', target: 'LIT', amount: 40, direction: 'theirs' },
+        { k: 'annex', target: 'EST' },
+        { k: 'annex', target: 'LAT' },
+        { k: 'annex', target: 'LIT' },
         { k: 'politicalPower', amount: 55 },
         { k: 'worldTension', amount: 4 },
       ],
@@ -490,8 +512,8 @@ const SOVIET: FocusTree = {
       prereq: [['SOV_baltic_ultimatum']],
       requires: [{ k: 'date', from: '1940-05' }, { k: 'countryAlive', tag: 'ROM' }],
       effects: [
-        { k: 'wargoal', target: 'ROM' },
         { k: 'opinion', target: 'ROM', amount: 25, direction: 'theirs' },
+        { k: 'cede', target: 'ROM', states: 2 },
         { k: 'politicalPower', amount: 55 },
         { k: 'worldTension', amount: 3 },
       ],
@@ -961,8 +983,8 @@ const ITALY: FocusTree = {
       days: FOCUS_DAYS_SHORT, x: 3, y: 2,
       requires: [{ k: 'date', from: '1939-02' }, { k: 'countryAlive', tag: 'ALB' }],
       effects: [
-        { k: 'wargoal', target: 'ALB' },
         { k: 'opinion', target: 'ALB', amount: 45, direction: 'theirs' },
+        { k: 'annex', target: 'ALB' },
         { k: 'politicalPower', amount: 55 },
         { k: 'worldTension', amount: 3 },
       ],

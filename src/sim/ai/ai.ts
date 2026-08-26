@@ -1,7 +1,9 @@
 import { EQUIPMENT } from '../core/data';
 import { rand } from '../core/rng';
-import type {
-  Country, CountryId, Division, EquipmentType, GameState, Ideology, ProvinceId,
+import {
+  RESOURCE_TYPES,
+  type Country, type CountryId, type Division, type EquipmentType, type GameState,
+  type Ideology, type ProvinceId, type ResourceType,
 } from '../core/types';
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 import {
@@ -15,6 +17,9 @@ import {
 import { orderMove } from '../military/movement';
 import { canChangeLaw, changeLaw } from '../politics/politics';
 import { fuelRatio } from '../economy/fuel';
+import {
+  availableToAI, canTradeWith, openTrade, RESOURCE_PER_FACTORY,
+} from '../economy/trade';
 import { LAW_COST } from '../politics/lawData';
 import { spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY } from '../scenario/europe1936';
 import {
@@ -1067,6 +1072,8 @@ export function tickAIDaily(state: GameState, ctx: AIContext): void {
 
     aiMobilise(state, c);
     runEconomyAI(state, ctx, c);
+    // After the economy, so today's deficits are the ones being shopped for.
+    if (c.id % 7 === dayOfWeek) runTradeAI(state, ctx, c);
     runRecruitmentAI(state, ctx, c);
 
     const atWar = c.atWarWith.length > 0;
@@ -1105,6 +1112,68 @@ const AI_LAW_RESERVE = 60;
  * maximum laws at minimum stability.
  */
 const MANPOWER_COMFORT = 250;
+
+/**
+ * Buying what the ground does not give you.
+ *
+ * Germany's states hold no oil, so without this the largest army in the game
+ * runs its armour dry from 1936 to the end and there is nothing anyone can do
+ * about it. The AI buys the same way a player should: find the shortage, find
+ * somebody not at war with you who has a surplus, and pay in civilian
+ * factories.
+ *
+ * Factories held back for building rather than buying. An AI that spent every
+ * spare factory on ore would never construct anything again, and construction
+ * is the thing that compounds.
+ */
+const AI_TRADE_SHARE = 0.4;
+
+/** Below this many factories spare, buying is not worth what it costs. */
+const AI_TRADE_FLOOR = 2;
+
+export function runTradeAI(state: GameState, ctx: AIContext, c: Country): void {
+  if (c.capitulated) return;
+  const budget = Math.floor(c.economy.freeCivilianFactories * AI_TRADE_SHARE);
+  if (budget < AI_TRADE_FLOOR) return;
+
+  // The worst shortage first. A deficit is what the economy could not serve
+  // yesterday, which is exactly the thing worth paying to fix.
+  const short: { resource: ResourceType; deficit: number }[] = [];
+  for (const r of RESOURCE_TYPES) {
+    const flow = c.economy.resources[r];
+    if (flow.deficit > 0.5) short.push({ resource: r, deficit: flow.deficit });
+  }
+  if (short.length === 0) return;
+  short.sort((a, b) => b.deficit - a.deficit);
+
+  let spend = budget;
+  for (const { resource, deficit } of short) {
+    if (spend <= 0) break;
+    let want = Math.min(spend, Math.ceil(deficit / RESOURCE_PER_FACTORY));
+
+    // Friends first, then anyone who will sell. A pact that keeps the ore
+    // coming is worth more than the last few units from a stranger, and it is
+    // the reason Germany signs with Moscow rather than shopping around.
+    const sellers = state.countries
+      .filter((s) => canTradeWith(state, c.id, s.id))
+      .map((s) => ({
+        id: s.id,
+        available: availableToAI(state, ctx, s.id, resource),
+        favour: areAllied(state, c.id, s.id) ? 2 : 1 + opinionOf(state, s.id, c.id) / 200,
+      }))
+      .filter((s) => s.available >= RESOURCE_PER_FACTORY)
+      .sort((a, b) => b.available * b.favour - a.available * a.favour);
+
+    for (const seller of sellers) {
+      if (want <= 0) break;
+      const take = Math.min(want, Math.floor(seller.available / RESOURCE_PER_FACTORY));
+      if (take <= 0) continue;
+      if (!openTrade(state, ctx, c.id, seller.id, resource, take)) continue;
+      want -= take;
+      spend -= take;
+    }
+  }
+}
 
 export function aiMobilise(state: GameState, c: Country): void {
   if (c.capitulated) return;

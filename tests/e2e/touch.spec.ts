@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
-  bootGame, cameraState, canvasCentre, openMapPoint, pinch, provinceScreenPos,
+  bootGame, cameraState, canvasCentre, openMapPoint, pinch, provinceScreenPos, provinceScreenPosById,
   setCamera, swipe, tapAt,
 } from './helpers/page';
 
@@ -170,7 +170,14 @@ test.describe('touch input', () => {
       // Frame Germany and its eastern neighbour, then select the German stack.
       const setup = await page.evaluate(() => {
         const g = window.__game!;
-        const ger = g.index.provinces.find((p) => p.ownerTag === 'GER')!;
+        // A German province that actually holds the player's divisions. Taking
+        // the first one by index worked on a 323-province map by luck; at
+        // 1,266 it is usually empty, and the premise of the test is a stack.
+        const me = g.state.meta.playerCountry;
+        const ger = g.index.provinces.find(
+          (p) => p.ownerTag === 'GER'
+            && g.state.provinces[p.id].divisions.some((d) => g.state.divisions[d].owner === me),
+        )!;
         const target = g.index.provinces.find((p) => p.ownerTag === 'POL')!;
         g.renderer.camera.centerOn(
           (ger.centerX + target.centerX) / 2,
@@ -183,8 +190,8 @@ test.describe('touch input', () => {
       });
       expect(setup.selected).toBeGreaterThan(0);
 
-      const from = await provinceScreenPos(page, 'GER');
-      const to = await provinceScreenPos(page, 'POL');
+      const from = await provinceScreenPosById(page, setup.from);
+      const to = await provinceScreenPosById(page, setup.to);
       // Both ends have to be on the map before the finger goes down. The
       // gesture's geometry is what decides this test: at zoom 0.42 the target
       // province leaves the viewport and seven runs in ten fail, and at 0.22 the
@@ -233,13 +240,143 @@ test.describe('touch input', () => {
     });
   });
 
+  test('tapping a unit then a destination issues a move order', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    // Frame a stack of the player's own and find where its counter is drawn.
+    // The counter is what the player aims at -- it sits above the province
+    // centre, so the province's own position is the wrong place to tap.
+    // Open the sheet once and leave it open while the shot is framed. Its
+    // height is the floor of the visible band, and with it shut the band looks
+    // 450px taller than it will be the moment the counter is tapped -- which
+    // framed the stack at y=399, underneath the sheet header.
+    await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const first = g.index.provinces.find(
+        (q) => s.provinces[q.id].divisions.some((d) => s.divisions[d].owner === me),
+      )!;
+      g.selectProvince(first.id);
+      g.tickFrame(16);
+    });
+    await expect(page.locator('.hud-sheet')).toHaveClass(/is-open/);
+
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const from = g.index.provinces.find(
+        (q) => s.provinces[q.id].divisions.some((d) => s.divisions[d].owner === me),
+      )!;
+      g.renderer.camera.centerOn(from.centerX, from.centerY);
+      g.renderer.camera.zoom = 1.6;
+      g.tickFrame(16);
+
+      // Put the counter in the middle of the strip of map that is actually
+      // visible, measured from the HUD rather than guessed as a fraction of
+      // the viewport. The top bar and the sheet both change height as chips
+      // and captions are added to them, and a counter that ends up under
+      // either of them cannot be tapped: framing it at a fixed 30% of the
+      // screen put it at y=148, inside the alert row.
+      const band = () => {
+        const top = document.querySelector('.hud-top')!.getBoundingClientRect();
+        const sheet = document.querySelector('.hud-sheet')!.getBoundingClientRect();
+        return (top.bottom + sheet.top) / 2;
+      };
+      // Twice: moving the camera can change which counters are on screen, and
+      // the second pass lands on the settled layout.
+      for (let pass = 0; pass < 2; pass++) {
+        const drawn = g.renderer.units.hitBoxes.find((b) => b.province === from.id);
+        const at = drawn ? drawn.y : g.renderer.camera.worldToScreenY(from.centerY);
+        g.renderer.camera.y += (at - band()) / g.renderer.camera.zoom;
+        for (let i = 0; i < 3; i++) g.tickFrame(16);
+      }
+
+      const box = g.renderer.canvas.getBoundingClientRect();
+      const boxes = g.renderer.units.hitBoxes;
+      const own = boxes.find((b) => b.province === from.id)!;
+      // A neighbour far enough from every counter that the tap is unambiguous.
+      const clear = (n: number) => {
+        const q = g.index.get(n);
+        const sx = g.renderer.camera.worldToScreenX(q.centerX);
+        const sy = g.renderer.camera.worldToScreenY(q.centerY);
+        return boxes.every((b) => Math.abs(sx - b.x) > b.w / 2 + 16
+          || Math.abs(sy - b.y) > b.h / 2 + 16);
+      };
+      const to = g.index.get(from.id).neighbors.find((n) => s.provinces[n] && clear(n))!;
+      const t = g.index.get(to);
+      // Put the map back the way the player would find it: nothing selected.
+      g.selectProvince(null);
+      g.tickFrame(16);
+      return {
+        from: from.id,
+        to,
+        counter: { x: Math.round(box.left + own.x), y: Math.round(box.top + own.y) },
+        dest: {
+          x: Math.round(box.left + g.renderer.camera.worldToScreenX(t.centerX)),
+          y: Math.round(box.top + g.renderer.camera.worldToScreenY(t.centerY)),
+        },
+      };
+    });
+
+    await tapAt(page, setup.counter.x, setup.counter.y);
+    const picked = await page.evaluate(() => ({
+      province: window.__game!.selection.province,
+      divisions: window.__game!.selection.divisions.length,
+    }));
+    expect(picked.province).toBe(setup.from);
+    expect(picked.divisions).toBeGreaterThan(0);
+
+    // The player has to be told which of the two jobs the next tap will do.
+    // One gesture reads the map and commands the army, and the gold ring on
+    // the counter also appears when a province is merely being looked at.
+    const hint = page.locator('.hud-order');
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText(`${picked.divisions}個師団`);
+
+    // Nothing may stand between the player and the ground they are aiming at:
+    // an earlier version of the map-mode strip lay across the map when a panel
+    // was open and swallowed this tap, and the first placement of the banner
+    // above sat directly over the counter it was describing.
+    for (const point of [setup.dest, setup.counter]) {
+      const covering = await page.evaluate((d) => {
+        const e = document.elementFromPoint(d.x, d.y);
+        return e ? (e.className || e.tagName) : 'none';
+      }, point);
+      expect(covering, `something is covering ${JSON.stringify(point)}`).toBe('CANVAS');
+    }
+
+    await tapAt(page, setup.dest.x, setup.dest.y);
+    const orders = await page.evaluate(() => {
+      const g = window.__game!;
+      return g.selection.divisions.map((d) => g.state.divisions[d].order);
+    });
+    expect(orders.length).toBeGreaterThan(0);
+    for (const order of orders) {
+      expect(order).toMatchObject({ kind: 'move', target: setup.to });
+    }
+
+    // The stack stays in hand for a second objective, and the counter is how
+    // it is put down again.
+    await expect(hint).toBeVisible();
+    await tapAt(page, setup.counter.x, setup.counter.y);
+    await expect(hint).toBeHidden();
+    expect(await page.evaluate(() => window.__game!.selection.province)).toBeNull();
+  });
+
   test('orders given while paused take effect', async ({ page }) => {
     await bootGame(page, { static: false });
     await page.locator('.hud-pause').click();
 
     const setup = await page.evaluate(() => {
       const g = window.__game!;
-      const ger = g.index.provinces.find((p) => p.ownerTag === 'GER')!;
+      const me = g.state.meta.playerCountry;
+      const ger = g.index.provinces.find(
+        (p) => p.ownerTag === 'GER'
+          && g.state.provinces[p.id].divisions.some((d) => g.state.divisions[d].owner === me),
+      )!;
       const target = g.index.provinces.find((p) => p.ownerTag === 'POL')!;
       g.renderer.camera.centerOn(
         (ger.centerX + target.centerX) / 2,
@@ -248,12 +385,14 @@ test.describe('touch input', () => {
       g.renderer.camera.zoom = 0.22;
       g.tickFrame(16);
       g.selectProvince(ger.id);
-      return { to: target.id, speed: g.time.speed, selected: g.selection.divisions.length };
+      return { from: ger.id, to: target.id, speed: g.time.speed,
+        selected: g.selection.divisions.length };
     });
     expect(setup.speed).toBe(0);
     expect(setup.selected).toBeGreaterThan(0);
 
-    await swipe(page, await provinceScreenPos(page, 'GER'), await provinceScreenPos(page, 'POL'), 16);
+    await swipe(page, await provinceScreenPosById(page, setup.from),
+      await provinceScreenPosById(page, setup.to), 16);
     await page.waitForTimeout(300);
 
     const state = await page.evaluate(() => {

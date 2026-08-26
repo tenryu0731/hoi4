@@ -70,6 +70,18 @@ interface Stack {
   kind: SymbolKind;
   inCombat: boolean;
   selected: boolean;
+  /** Selected *and* taking orders: the next tap on the map moves it. */
+  ordering: boolean;
+}
+
+/** A counter as the player sees it: where it is drawn, and whose it is. */
+interface CounterHit {
+  province: ProvinceId;
+  owner: CountryId;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 const PLATE_W = 34;
@@ -117,8 +129,11 @@ export class UnitLayer {
   private orders = new Graphics();
   private counters = new Container();
   private pool: Counter[] = [];
+  /** Last frame's counters in screen space, for hit testing. */
+  readonly hitBoxes: CounterHit[] = [];
   private anchors = new Map<number, ProvinceId>();
   private selectedProvince: ProvinceId | null = null;
+  private ordering = false;
   private neutral = false;
   private drag: DragOrder | null = null;
 
@@ -130,8 +145,15 @@ export class UnitLayer {
   /** Kept for symmetry with the other layers; counters read zoom per frame. */
   setZoom(_zoom: number): void {}
 
-  setSelection(id: ProvinceId | null): void {
+  /**
+   * `ordering` is the difference between a province the player is reading and
+   * a stack the player is commanding. On a touch screen there is one gesture
+   * for both, so the counter has to say which mode the next tap is in --
+   * otherwise a tap meant to inspect a neighbour marches the army into it.
+   */
+  setSelection(id: ProvinceId | null, ordering = false): void {
     this.selectedProvince = id;
+    this.ordering = ordering;
   }
 
   /**
@@ -200,6 +222,10 @@ export class UnitLayer {
     const scale = (targetPx / PLATE_W) / zoom;
     const detailed = zoom >= ZOOM_DETAIL;
     const rects: ScreenRect[] = [];
+    // Kept so a tap can ask which counter it landed on. The counter is what
+    // the player is aiming at -- it is the drawn thing -- and its rectangle is
+    // already computed here for label occlusion.
+    this.hitBoxes.length = 0;
     // Counters sit above the province centre so the place name below stays
     // readable; the reserved rects keep labels from sliding under them.
     const liftWorld = (targetPx * 0.85) / zoom;
@@ -228,9 +254,19 @@ export class UnitLayer {
       c.root.visible = true;
       c.root.position.set(c.x, c.y);
       c.root.scale.set(scale);
+      const boxX = camera.worldToScreenX(p.centerX);
+      const boxY = camera.worldToScreenY(p.centerY - liftWorld);
+      this.hitBoxes.push({
+        province: s.province,
+        owner: s.owner,
+        x: boxX,
+        y: boxY,
+        w: targetPx * (byState ? 0.8 : 1),
+        h: ((targetPx * PLATE_H) / PLATE_W + 10) * (byState ? 0.8 : 1),
+      });
       rects.push({
-        x: camera.worldToScreenX(p.centerX),
-        y: camera.worldToScreenY(p.centerY - liftWorld),
+        x: boxX,
+        y: boxY,
         // Aggregated counters stand in for a whole state, so they claim a
         // little less than they occupy -- but they must still claim. Returning
         // nothing let labels draw straight underneath, and a country name with
@@ -242,7 +278,7 @@ export class UnitLayer {
 
       const color = this.neutral ? 0x4a4d55 : rgbToHex(state.countries[s.owner].color);
       const key = `${color}|${this.neutral}|${s.divisions}|${s.kind}|${Math.round(s.org * 10)}` +
-        `|${Math.round(s.strength * 6)}|${s.inCombat}|${s.selected}|${detailed}`;
+        `|${Math.round(s.strength * 6)}|${s.inCombat}|${s.selected}|${s.ordering}|${detailed}`;
       if (c.key !== key) {
         c.key = key;
         this.draw(c, s, color, detailed);
@@ -444,6 +480,22 @@ export class UnitLayer {
       g.roundRect(-hw - 2, -hh - 2, PLATE_W + 4, PLATE_H + 4, 5.5);
       g.stroke({ color: 0xf5e2a3, width: 1.8, alpha: 0.95 });
     }
+    if (s.ordering) {
+      // A second, wider ring plus corner ticks. The single gold outline also
+      // appears when a province is merely being read, so on its own it cannot
+      // tell the player that the next tap is an order rather than a look.
+      g.roundRect(-hw - 5, -hh - 5, PLATE_W + 10, PLATE_H + 10, 7.5);
+      g.stroke({ color: 0xf5e2a3, width: 1.2, alpha: 0.7 });
+      const tx = hw + 5;
+      const ty = hh + 5;
+      const arm = 4.5;
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+        g.moveTo(sx * tx, sy * (ty - arm));
+        g.lineTo(sx * tx, sy * ty);
+        g.lineTo(sx * (tx - arm), sy * ty);
+      }
+      g.stroke({ color: 0xffffff, width: 1.6, alpha: 0.9 });
+    }
 
     this.drawSymbol(c.symbol, s.kind, detailed);
   }
@@ -544,6 +596,7 @@ export class UnitLayer {
         stack = {
           province: anchorId, owner: d.owner, divisions: 0,
           org: 0, strength: 0, kind: 'infantry', inCombat: false, selected: false,
+          ordering: false,
         };
         byProvince.set(anchorId, stack);
         arms.set(anchorId, { infantry: 0, motorised: 0, armour: 0, mountain: 0, artillery: 0 });
@@ -581,10 +634,35 @@ export class UnitLayer {
       }
       s.kind = best;
       s.selected = s.province === this.selectedProvince;
+      s.ordering = s.selected && this.ordering;
       out.push(s);
     }
     // Stable order so the pool assignment does not shuffle between frames.
     out.sort((a, b) => a.province - b.province);
     return out;
   }
+  /**
+   * The counter under a screen point, or null.
+   *
+   * Slack is added around the plate because a fingertip is about 8mm and a
+   * counter is 20px; without it the player has to hit a target smaller than
+   * the thing they can see. Nearest centre wins when two overlap, so a dense
+   * front picks the one actually aimed at rather than whichever was drawn
+   * last.
+   */
+  pickCounter(screenX: number, screenY: number, slack = 6): CounterHit | null {
+    let best: CounterHit | null = null;
+    let bestDist = Infinity;
+    for (const b of this.hitBoxes) {
+      const halfW = b.w / 2 + slack;
+      const halfH = b.h / 2 + slack;
+      const dx = screenX - b.x;
+      const dy = screenY - b.y;
+      if (Math.abs(dx) > halfW || Math.abs(dy) > halfH) continue;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) { bestDist = dist; best = b; }
+    }
+    return best;
+  }
+
 }

@@ -1,7 +1,8 @@
 import type {
   ArmyId, ArmyOrder, BattalionType, BuildingType, CommanderId, CountryId, DivisionId,
-  EquipmentType, ProvinceId, StateId, SupportType, TechId,
+  EquipmentType, ProvinceId, ResourceType, StateId, SupportType, TechId,
 } from './types';
+import type { LawKind } from '../politics/politics';
 
 /**
  * Every mutation the player or the AI can request. The presentation layer never
@@ -9,7 +10,16 @@ import type {
  * replayable and means the AI exercises exactly the same code paths as a human.
  */
 export type Command =
-  | { t: 'changeLaw'; country: CountryId; kind: 'conscription' | 'economy'; step: 1 | -1 }
+  | { t: 'changeLaw'; country: CountryId; kind: LawKind; step: 1 | -1 }
+  /** Commits civilian factories to buying a resource abroad; see sim/economy/trade. */
+  | {
+      t: 'openTrade'; country: CountryId; seller: CountryId;
+      resource: ResourceType; factories: number;
+    }
+  | {
+      t: 'closeTrade'; country: CountryId; seller: CountryId;
+      resource: ResourceType; factories: number;
+    }
   // --- production / economy -------------------------------------------------
   | { t: 'addProductionLine'; country: CountryId; equipment: EquipmentType }
   | { t: 'removeProductionLine'; country: CountryId; line: number }
