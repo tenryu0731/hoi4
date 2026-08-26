@@ -42,7 +42,14 @@ export type Command =
   | { t: 'recruitDivision'; country: CountryId; template: number; province: ProvinceId }
   | { t: 'moveDivisions'; divisions: DivisionId[]; target: ProvinceId }
   | { t: 'stopDivisions'; divisions: DivisionId[] }
-  | { t: 'setDivisionOrder'; divisions: DivisionId[]; order: 'defend' | 'attack'; target?: ProvinceId }
+  /*
+   * There was a setDivisionOrder here, and it is gone: nothing in the game
+   * ever sent it, and both of its branches were something else wearing a
+   * different name. 'defend' did exactly what stopDivisions does, and
+   * 'attack' did exactly what moveDivisions does -- so it was a third way to
+   * spell two commands that already existed, and the one of the three that no
+   * button reached.
+   */
   // --- chain of command -----------------------------------------------------
   /**
    * Raises a new army, or an army group when `isArmyGroup` is set. An army

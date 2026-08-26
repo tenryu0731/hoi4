@@ -145,18 +145,6 @@ export class Simulation {
         }
         return;
       }
-      case 'setDivisionOrder': {
-        for (const id of cmd.divisions) {
-          const d = state.divisions[id];
-          if (!d || d.dead) continue;
-          if (cmd.order === 'attack' && cmd.target !== undefined) {
-            orderMove(state, this.ctx, d, cmd.target);
-          } else {
-            stopDivision(d);
-          }
-        }
-        return;
-      }
       // --- chain of command -------------------------------------------------
       case 'createArmy': {
         // Capped here as well as in the two places the UI offers it. The

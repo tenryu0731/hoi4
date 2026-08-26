@@ -282,6 +282,17 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const orderHint = el('div', 'hud-order');
   const orderRow = el('div', 'hud-order-row');
   const orderText = el('span', 'hud-order-text', '');
+  // Calling off a march. `stopDivisions` has been in the command bus since it
+  // was written and nothing had ever sent it: an order, once given, could not
+  // be taken back -- the only way to stop a division was to order it somewhere
+  // else. It appears only while something is actually moving, so the bar stays
+  // as narrow as it can.
+  const orderStop = el('button', 'hud-order-btn', UI.orderStop);
+  orderStop.setAttribute('aria-label', UI.orderStopLabel);
+  orderStop.addEventListener('click', () => {
+    game.issue({ t: 'stopDivisions', divisions: [...game.selection.divisions] });
+    syncOrder();
+  });
   const orderAssign = el('button', 'hud-order-btn', UI.orderAssign);
   orderAssign.setAttribute('aria-label', UI.orderAssignLabel);
   const orderFront = el('button', 'hud-order-btn', UI.orderDrawFront);
@@ -299,7 +310,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // lower as the game runs. Measured: a tap aimed at a counter at y=266
   // landed on the second row's 軍へ編成 button and opened its menu, while
   // elementFromPoint checked a moment earlier had said CANVAS.
-  orderRow.append(orderText, orderAssign, orderFront, orderCancel);
+  orderRow.append(orderText, orderStop, orderAssign, orderFront, orderCancel);
   const orderMenu = el('div', 'hud-order-menu');
   orderHint.append(orderRow, orderMenu);
 
@@ -415,6 +426,13 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     if (!on) { closeOrderMenu(); return; }
     setText(orderText, UI.orderHint(live));
     orderFront.classList.toggle('is-dim', selectionArmy() === null);
+
+    let marching = 0;
+    for (const id of game.selection.divisions) {
+      const d = game.state.divisions[id];
+      if (d && !d.dead && d.path.length > 0) marching++;
+    }
+    orderStop.style.display = marching > 0 ? '' : 'none';
 
     // An open chip row covers the map. Anything that changes what is selected
     // means the player has gone back to the ground, so it stops standing over

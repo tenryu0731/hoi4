@@ -702,6 +702,87 @@ test.describe('touch input', () => {
     expect(after.y).toBeGreaterThan(before.y + 100);
   });
 
+  test('a march can be called off', async ({ page }) => {
+    await bootGame(page);
+    // Set explicitly rather than by pressing pause: static mode has already
+    // stopped the clock, so pressing it would start the game and the division
+    // would arrive before the assertion -- at which point the control
+    // correctly disappears, because it only exists while something is moving.
+    await page.evaluate(() => window.__game!.setSpeed(0));
+
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const div = s.divisions.find((d) => d.owner === me && !d.dead)!;
+      const to = g.index.get(div.provinceId).neighbors
+        .find((n) => s.provinces[n] !== undefined)!;
+      g.selectDivisions([div.id], { centre: false });
+      g.issue({ t: 'moveDivisions', divisions: [div.id], target: to });
+      return { division: div.id, path: s.divisions[div.id].path.length };
+    });
+    // The premise: it really is marching.
+    expect(setup.path).toBeGreaterThan(0);
+
+    // The control only exists while something is moving, which is the whole
+    // reason it is worth having.
+    const stop = page.getByRole('button', { name: '移動を中止する' });
+    await expect(stop).toBeVisible();
+    await stop.click();
+
+    const after = await page.evaluate((id) => {
+      const d = window.__game!.state.divisions[id];
+      return { path: d.path.length, kind: d.order?.kind ?? null };
+    }, setup.division);
+    expect(after.path).toBe(0);
+    expect(after.kind).not.toBe('move');
+    await expect(stop).toBeHidden();
+  });
+
+  test('an army can be placed under an army group', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    // The scenario already puts the majors' armies under a group, so start by
+    // taking this one out again -- otherwise the test proves nothing about
+    // the control, which is what the first version of it did.
+    const ready = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const armies = (g.state.armies ?? []).filter((a) => a.owner === me);
+      const army = armies.find((a) => !a.isArmyGroup)!;
+      g.issue({ t: 'setArmyParent', country: me, army: army.id, group: null });
+      return {
+        army: army.id,
+        parent: army.parent,
+        groups: armies.filter((a) => a.isArmyGroup).length,
+      };
+    });
+    expect(ready.groups).toBeGreaterThan(0);
+    expect(ready.parent).toBeNull();
+
+    await page.evaluate(() => window.__game!.openPanel!('command'));
+    const head = page.locator('.panel-army-head').first();
+    await expect(head).toBeVisible();
+    // The chips live inside the expanded card.
+    await head.click();
+    const chip = page.locator('.panel-chip', { hasText: '軍集団へ' }).first();
+    await expect(chip).toBeVisible();
+    await chip.click();
+
+    const placed = await page.evaluate((id) => {
+      const g = window.__game!;
+      const armies = g.state.armies ?? [];
+      const army = armies.find((a) => a.id === id)!;
+      const group = armies.find((a) => a.id === army.parent);
+      return { parent: army.parent, listed: group?.children.includes(id) ?? false };
+    }, ready.army);
+    // Both ends of the link: a parent pointer with no matching child entry is
+    // what makes a hierarchy quietly wrong.
+    expect(placed.parent).not.toBeNull();
+    expect(placed.listed).toBe(true);
+  });
+
   test('the order bar raises an army from a selection and gives it a front', async ({ page }) => {
     await bootGame(page);
 

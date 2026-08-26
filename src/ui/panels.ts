@@ -2045,6 +2045,35 @@ export const commandPanel: Panel = {
           }
         }
         card.append(orderControls(game, army, rebuild));
+
+        // Putting an army under an army group. `setArmyParent` has been in the
+        // command bus since the chain of command was written and no button has
+        // ever sent it: a field marshal could be appointed to a group that
+        // could never be given anything to command, so half of the hierarchy
+        // -- and the half of his attributes that reaches his generals -- was
+        // unreachable.
+        const parents = mine.filter((a) => a.isArmyGroup);
+        if (parents.length > 0) {
+          const chips = el('div', 'panel-chips');
+          for (const group of parents) {
+            const inIt = army.parent === group.id;
+            const chip = el('button', 'panel-chip',
+              inIt ? UI.armyGroupLeave : `${UI.armyGroupAssign}: ${group.name}`);
+            chip.classList.toggle('is-on', inIt);
+            // A group holds ARMY_GROUP_LIMIT armies and no more.
+            chip.disabled = !inIt && group.children.length >= ARMY_GROUP_LIMIT;
+            chip.addEventListener('click', () => {
+              game.issue({
+                t: 'setArmyParent', country: me.id, army: army.id,
+                group: inIt ? null : group.id,
+              });
+              rebuild();
+            });
+            chips.append(chip);
+          }
+          card.append(chips);
+        }
+
         card.append(orderOfBattle(game, army));
 
         // What turns a formation into something you can move. Without this an

@@ -129,6 +129,8 @@ export const UI = {
      characters each: the bar hangs over the map band, and every row it grows
      is a row of counters the player can no longer press. The chips that open
      underneath say the rest, and the aria-labels carry the full wording. */
+  orderStop: '停止',
+  orderStopLabel: '移動を中止する',
   orderAssign: '編成',
   orderAssignLabel: '軍へ編成',
   orderDrawFront: '戦線',
@@ -218,6 +220,8 @@ export const UI = {
   orderOfBattle: '隷下師団',
   onTheMove: '移動中',
   divisionState: (org: number, hp: number): string => `組織率 ${org}% · 兵力 ${hp}%`,
+  armyGroupAssign: '軍集団へ',
+  armyGroupLeave: '軍集団から外す',
   newArmy: '＋軍を編成',
   newArmyGroup: '＋軍集団',
   disband: '解隊',
