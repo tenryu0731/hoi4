@@ -1,4 +1,5 @@
 import { HOURS_PER_DAY, daysInYear, hoursFromDate } from '../time/calendar';
+import { lawEffects } from '../politics/politics';
 import type {
   Country, CountryId, DivisionTemplate, GameState, ResearchSlot, ResearchState, TechId,
 } from '../core/types';
@@ -225,7 +226,11 @@ export function requiredDays(state: GameState, tech: TechDef): number {
 
 /** Research days a country accumulates per day, in every slot. */
 export function researchSpeed(state: GameState, country: CountryId): number {
-  return Math.max(MIN_RESEARCH_SPEED, techModifiers(state, country).researchSpeed);
+  // The trade law is here because an open economy buys foreign machine tools
+  // and licences with its exports, which is most of what a research bonus for
+  // free trade means.
+  const law = lawEffects(state.countries[country]).research;
+  return Math.max(MIN_RESEARCH_SPEED, techModifiers(state, country).researchSpeed * law);
 }
 
 // ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import { PANELS, formatNumber, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
 import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
-import { RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
+import { RESOURCE, RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
 
 /**
  * The heads-up display.
@@ -196,17 +196,23 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const resStrip = el('div', 'hud-resources');
   const resNodes: Partial<Record<ResourceType, HTMLElement>> = {};
   for (const r of RESOURCE_TYPES) {
-    const chip = el('div', 'hud-res');
+    // A button, not a label. The chip that has gone red is the most direct
+    // route to the panel where the shortage is fixed, and on a phone there is
+    // no hover to explain what a number means or what to do about it.
+    const chip = el('button', 'hud-res');
+    chip.addEventListener('click', () => togglePanel('trade'));
     const icon = iconNode('hud-res-icon', `icons/resource-${r}.svg`);
     const v = el('span', 'hud-res-v', '0');
     // Icon and number only. Six labelled chips need 493px on a 412px screen,
     // so the last resource was simply cut off by the screen edge; the icon
     // already identifies the resource, and the name stays as the accessible
     // label for anyone who needs it.
-    chip.title = RESOURCE_SHORT[r];
-    chip.setAttribute('aria-label', RESOURCE_SHORT[r]);
+    chip.title = RESOURCE[r];
+    chip.setAttribute('aria-label', RESOURCE[r]);
     const line = el('span', 'hud-chip-line');
     line.append(icon, v);
+    // The short form under the icon: タングステン widens its chip past what the
+    // row can carry, and the full name stays as the accessible label.
     chip.append(line, el('span', 'hud-chip-c', RESOURCE_SHORT[r]));
     resStrip.append(chip);
     resNodes[r] = v;

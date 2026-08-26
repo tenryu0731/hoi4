@@ -49,6 +49,29 @@ export const UI = {
   fuel: '燃料',
   priority: '優先度',
   mapMode: '地図モード',
+  // --- the market --------------------------------------------------------
+  navTrade: '貿易',
+  tradeLaw: '貿易法',
+  tradeExportShare: '輸出割合',
+  researchSpeedLabel: '研究速度',
+  tradeFree: '空き民需',
+  tradeBuying: '購入中',
+  tradeSelling: '売却中',
+  tradeBuy: '購入を増やす',
+  tradeSell: '購入を減らす',
+  tradeNoSellers: '売り手がいません',
+  /** Production, imports, exports and the day's shortfall, in one line. */
+  tradeBalance: (own: number, imported: number, exported: number, short: number): string => {
+    const parts = [`自国 ${own}`];
+    if (imported > 0) parts.push(`輸入 +${imported}`);
+    if (exported > 0) parts.push(`輸出 −${exported}`);
+    if (short > 0) parts.push(`不足 ${short}`);
+    return parts.join(' · ');
+  },
+  tradeOffer: (spare: number, bought: number): string =>
+    bought > 0 ? `売却可能 ${spare}／日 · 工場 ${bought} 基で購入中` : `売却可能 ${spare}／日`,
+  tradeLawLine: (law: string, share: number, perFactory: number): string =>
+    `${law} · 産出の ${share}% を市場へ · 民需工場 1 基につき ${perFactory}／日`,
   cancel: '選択解除',
   /** Shown while a stack is under orders and the next tap sets its objective. */
   orderHint: (n: number): string => `${n}個師団を選択中 — 移動先をタップ`,

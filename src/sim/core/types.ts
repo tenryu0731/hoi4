@@ -1,5 +1,5 @@
 import type { GameClock } from '../time/calendar';
-import type { ConscriptionLaw, EconomyLaw } from '../politics/lawData';
+import type { ConscriptionLaw, EconomyLaw, TradeLaw } from '../politics/lawData';
 import type { RngState } from './rng';
 
 export type CountryId = number;
@@ -507,10 +507,17 @@ export interface Country {
    * will lose before it capitulates.
    */
   warSupport: number;
-  /** The two ladders every campaign is built around; see sim/politics. */
+  /** The ladders every campaign is built around; see sim/politics. */
   laws: {
     conscription: ConscriptionLaw;
     economy: EconomyLaw;
+    /**
+     * How much of what the country digs up reaches the world market.
+     *
+     * Optional because the 1936 scenario table predates the market; the
+     * politics runtime fills it on first use, the way research and focus do.
+     */
+    trade?: TradeLaw;
   };
   isAI: boolean;
   major: boolean;
@@ -559,6 +566,23 @@ export type Outcome =
   | { status: 'victory'; reason: OutcomeReason; day: number }
   | { status: 'defeat'; reason: OutcomeReason; day: number };
 
+/**
+ * One standing purchase on the world market.
+ *
+ * The buyer commits civilian factories; each one buys a fixed daily quantity
+ * of the resource and moves to the seller's civilian pool for as long as the
+ * deal stands. That is the whole trade-off: industry now against materials
+ * now, which is the decision Germany could not make and the reason its oil
+ * never came right.
+ */
+export interface TradeDeal {
+  id: number;
+  buyer: CountryId;
+  seller: CountryId;
+  resource: ResourceType;
+  factories: number;
+}
+
 export interface GameState {
   meta: {
     version: number;
@@ -584,12 +608,19 @@ export interface GameState {
   armies?: Army[];
   factions: Faction[];
   wars: War[];
+  /**
+   * Standing purchases on the world market; see sim/economy/trade.
+   *
+   * Optional for the same reason the commander and army arrays are: the
+   * scenario table predates it.
+   */
+  trades?: TradeDeal[];
   worldTension: number;
   nextIds: {
     division: number; combat: number; line: number; construction: number;
     war: number; template: number;
     /** Optional for the same reason the arrays above are. */
-    commander?: number; army?: number;
+    commander?: number; army?: number; trade?: number;
   };
   outcome: Outcome;
   /** Ring buffer of player-facing events, newest last. */

@@ -1,5 +1,9 @@
 import { techModifiers } from '../research';
 import { occupiedOutput } from './occupation';
+// Mutually recursive with trade.ts, which needs computeResourceOutput to know
+// what a seller has to sell. Both sides are function declarations called long
+// after module evaluation, so the cycle never bites.
+import { factoriesCommitted, factoriesEarned, tradeFlow } from './trade';
 import { lawEffects, politicalPowerPerDay } from '../politics/politics';
 import {
   BASE_EFFICIENCY, BASE_EFFICIENCY_CAP, BUILDING_CAP, BUILDING_COST,
@@ -97,6 +101,11 @@ export function recomputeFactories(state: GameState, country: CountryId): void {
     mil += s.militaryFactories * yield_;
     dock += s.dockyards * yield_;
   }
+  // A factory committed to a purchase works for the seller until the deal
+  // ends, which is what makes an import programme cost the same thing a
+  // building programme does.
+  civ += factoriesEarned(state, country) - factoriesCommitted(state, country);
+  civ = Math.max(0, civ);
   civ = Math.floor(civ);
   mil = Math.floor(mil);
   dock = Math.floor(dock);
@@ -159,7 +168,14 @@ function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): 
   }
 
   // --- 1. resource supply -------------------------------------------------
+  // What the ground yields, plus what was bought, minus what was sold. The
+  // market is why a country with no oilfields is not automatically a country
+  // whose armour never moves.
   const produced = computeResourceOutput(state, ctx.index, c.id);
+  const flow = tradeFlow(state, c.id);
+  for (const r of RESOURCE_TYPES) {
+    produced[r] = Math.max(0, produced[r] + flow.imports[r] - flow.exports[r]);
+  }
 
   // --- 2. resource demand -------------------------------------------------
   const demand = {} as Record<ResourceType, number>;

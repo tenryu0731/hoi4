@@ -96,7 +96,9 @@ export function collectAlerts(game: Game): Alert[] {
       id: 'fuel', icon: 'ui-fuel',
       text: `${Math.round(me.economy.fuelRatio * 100)}%`, caption: UI.alertShortFuel,
       title: UI.alertFuel,
-      panel: 'production', urgent: true,
+      // The market, not the factory floor: fuel comes from oil, and a country
+      // with no oilfields can only buy it.
+      panel: 'trade', urgent: true,
     });
   }
 

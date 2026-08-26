@@ -9,12 +9,14 @@ import {
   type StateRuntime, type SupportType,
 } from '../sim/core/types';
 import { deriveTemplate } from '../sim/scenario/europe1936';
-import { canQueueBuilding } from '../sim/economy/production';
+import { canQueueBuilding, computeResourceOutput } from '../sim/economy/production';
 import {
-  CONSCRIPTION_LAWS, ECONOMY_LAWS, LAW_COST,
-} from '../sim/politics/lawData';
+  availableFrom, canTradeWith, exportShare, factoriesCommitted, factoriesEarned,
+  maxPurchase, RESOURCE_PER_FACTORY, tradeFlow, tradeLawOf,
+} from '../sim/economy/trade';
+import { LAW_COST, TRADE } from '../sim/politics/lawData';
 import {
-  canChangeLaw, lawEffects, lawIndex, type LawCheck, type LawKind,
+  canChangeLaw, lawEffects, lawIndex, lawLadder, type LawCheck, type LawKind,
 } from '../sim/politics/politics';
 import { CONSCRIPTION_NAME, ECONOMY_NAME } from './lawNames';
 import { ENTRENCHMENT_PER_LEVEL } from '../sim/military/movement';
@@ -45,7 +47,7 @@ import {
 
 export type PanelId =
   | 'focus' | 'research' | 'production' | 'construction' | 'army' | 'command'
-  | 'diplomacy' | 'province' | 'designer' | 'politics';
+  | 'diplomacy' | 'province' | 'designer' | 'politics' | 'trade';
 
 export interface Panel {
   id: PanelId;
@@ -998,9 +1000,154 @@ export const PANELS: Record<PanelId, Panel> = {
   province: provincePanel,
   designer: designerPanel,
   get politics() { return politicsPanel; },
+  get trade() { return tradePanel; },
 } as Record<PanelId, Panel>;
 
 export { RESOURCE_LABEL, EQUIPMENT_LABEL, RESOURCE_TYPES };
+
+
+// ---------------------------------------------------------------------------
+// Trade
+// ---------------------------------------------------------------------------
+
+/**
+ * The market.
+ *
+ * Reached by tapping the resource you are short of, which is the whole design:
+ * the chip in the top bar that has gone red is the button that opens the place
+ * where it is fixed. A player who can see a shortage and cannot act on it is
+ * being told off rather than given a decision.
+ */
+export const tradePanel: Panel = {
+  id: 'trade',
+  title: UI.navTrade,
+  build(game, root) {
+    root.innerHTML = '';
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const ctx = { index: game.index };
+
+    const head = el('div', 'panel-head');
+    head.dataset.role = 'trade-head';
+    head.append(
+      stat(UI.tradeFree, String(Math.floor(me.economy.freeCivilianFactories))),
+      stat(UI.tradeBuying, String(factoriesCommitted(state, me.id))),
+      stat(UI.tradeSelling, String(factoriesEarned(state, me.id))),
+    );
+    root.append(head);
+
+    const law = el('div', 'panel-sub');
+    law.dataset.role = 'trade-law';
+    root.append(law);
+
+    const body = el('div', 'panel-list');
+    body.dataset.role = 'trade-body';
+    root.append(body);
+
+    const rebuild = (): void => { tradePanel.build(game, root); };
+
+    // What the ground yields, read directly rather than backed out of the
+    // day's supply: the economy tick runs once a day, so a purchase made this
+    // frame would otherwise show as negative home production until midnight.
+    const home = computeResourceOutput(state, game.index, me.id);
+    const traffic = tradeFlow(state, me.id);
+
+    for (const r of RESOURCE_TYPES) {
+      const flow = me.economy.resources[r];
+      const sellers = state.countries
+        .filter((c) => canTradeWith(state, me.id, c.id))
+        .map((c) => ({ c, spare: availableFrom(state, ctx, c.id, r) }))
+        .filter((x) => x.spare >= RESOURCE_PER_FACTORY
+          || state.trades?.some((d) => d.buyer === me.id && d.seller === x.c.id && d.resource === r))
+        .sort((a, b) => b.spare - a.spare)
+        .slice(0, 6);
+
+      const short = flow.deficit > 0.5;
+      const { head: shead, body: sbody } = section(
+        `trade:${r}`, RESOURCE_LABEL[r], sellers.length, short,
+      );
+      if (short) shead.classList.add('is-short');
+      const balance = el('div', 'panel-row-sub');
+      balance.textContent = UI.tradeBalance(
+        Math.round(home[r]),
+        Math.round(traffic.imports[r]),
+        Math.round(traffic.exports[r]),
+        Math.round(flow.deficit),
+      );
+      sbody.append(balance);
+
+      for (const { c, spare } of sellers) {
+        const deal = state.trades?.find(
+          (d) => d.buyer === me.id && d.seller === c.id && d.resource === r,
+        );
+        const row = el('div', 'panel-row');
+
+        const swatch = el('img', 'panel-flag');
+        swatch.alt = '';
+        swatch.src = flagUrl(c.tag);
+        swatch.style.background = `rgb(${c.color[0]},${c.color[1]},${c.color[2]})`;
+        swatch.addEventListener('error', () => { swatch.removeAttribute('src'); });
+
+        const main = el('div', 'panel-row-main');
+        main.append(
+          el('div', 'panel-row-title', country(c.tag)),
+          // Rounded down to whole factory-loads: a seller with 1.6 a day left
+          // cannot sell any of it, and printing "1" beside a disabled + is a
+          // panel arguing with itself.
+          el('div', 'panel-row-sub', UI.tradeOffer(
+            Math.floor(spare / RESOURCE_PER_FACTORY) * RESOURCE_PER_FACTORY,
+            deal?.factories ?? 0,
+          )),
+        );
+
+        const controls = el('div', 'panel-row-controls');
+        const minus = el('button', 'panel-btn', '−');
+        minus.setAttribute('aria-label', `${country(c.tag)}: ${UI.tradeSell}`);
+        minus.disabled = !deal;
+        minus.addEventListener('click', () => {
+          game.issue({ t: 'closeTrade', country: me.id, seller: c.id, resource: r, factories: 1 });
+          rebuild();
+        });
+        const count = el('span', 'panel-count', String(deal?.factories ?? 0));
+        const plus = el('button', 'panel-btn', '+');
+        plus.setAttribute('aria-label', `${country(c.tag)}: ${UI.tradeBuy}`);
+        plus.disabled = maxPurchase(state, ctx, me.id, c.id, r) < 1;
+        plus.addEventListener('click', () => {
+          game.issue({ t: 'openTrade', country: me.id, seller: c.id, resource: r, factories: 1 });
+          rebuild();
+        });
+        controls.append(minus, count, plus);
+
+        row.append(swatch, main, controls);
+        sbody.append(row);
+      }
+
+      if (sellers.length === 0) {
+        sbody.append(el('div', 'panel-empty', UI.tradeNoSellers));
+      }
+      body.append(shead, sbody);
+    }
+
+    tradePanel.refresh?.(game, root);
+  },
+  refresh(game, root) {
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const head = root.querySelector<HTMLElement>('[data-role="trade-head"]');
+    if (head) {
+      const values = head.querySelectorAll<HTMLElement>('.hud-stat-v');
+      setText(values[0], String(Math.floor(me.economy.freeCivilianFactories)));
+      setText(values[1], String(factoriesCommitted(state, me.id)));
+      setText(values[2], String(factoriesEarned(state, me.id)));
+    }
+    const law = root.querySelector<HTMLElement>('[data-role="trade-law"]');
+    if (law) {
+      setText(law, UI.tradeLawLine(
+        TRADE[tradeLawOf(me)].name, Math.round(exportShare(me) * 100), RESOURCE_PER_FACTORY,
+      ));
+    }
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Chain of command
@@ -1579,7 +1726,7 @@ function lawRow(
   card.append(el('div', 'panel-focus-name', current));
 
   const rung = lawIndex(me, kind);
-  const total = kind === 'conscription' ? CONSCRIPTION_LAWS.length : ECONOMY_LAWS.length;
+  const total = lawLadder(kind).length;
   const bar = el('div', 'panel-bar');
   const fill = el('i', 'panel-bar-fill');
   fill.style.width = `${((rung + 1) / total * 100).toFixed(1)}%`;
@@ -1646,9 +1793,12 @@ export const politicsPanel: Panel = {
       game, 'conscription', UI.conscriptionLaw,
       CONSCRIPTION_NAME[me.laws.conscription], rebuild,
     ));
+    root.append(lawRow(
+      game, 'trade', UI.tradeLaw, TRADE[tradeLawOf(me)].name, rebuild,
+    ));
 
-    // What the two ladders are currently worth, so the cost of a step is
-    // legible before it is paid rather than after.
+    // What the ladders are currently worth, so the cost of a step is legible
+    // before it is paid rather than after.
     root.append(el('div', 'panel-label', UI.effects));
     const kvs = el('div', 'panel-kvs');
     const kv = (k: string, v: string) => {
@@ -1660,6 +1810,8 @@ export const politicsPanel: Panel = {
     kv(UI.consumerGoodsShare, `${Math.round(effects.consumerGoods * 100)}%`);
     kv(UI.constructionSpeed, `${Math.round(effects.construction * 100)}%`);
     kv(UI.factoryOutputLabel, `${Math.round(effects.output * effects.factoryStaffing * 100)}%`);
+    kv(UI.researchSpeedLabel, `${Math.round(effects.research * 100)}%`);
+    kv(UI.tradeExportShare, `${Math.round(exportShare(me) * 100)}%`);
     root.append(kvs);
   },
 };

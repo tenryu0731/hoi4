@@ -38,6 +38,7 @@ import {
 import { tickBattlePlansDaily } from './military/frontline';
 import { tickAIDaily } from './ai/ai';
 import { cancelResearch, startResearch, tickResearchDaily } from './research';
+import { closeTrade, openTrade, tickTradeDaily } from './economy/trade';
 import { cancelFocus, startFocus, tickFocusDaily } from './focus';
 import { tickVictoryCheck } from './scenario/victory';
 
@@ -225,6 +226,14 @@ export class Simulation {
         startJustification(state, cmd.country, cmd.target);
         return;
       }
+      case 'openTrade': {
+        openTrade(state, this.ctx, cmd.country, cmd.seller, cmd.resource, cmd.factories);
+        break;
+      }
+      case 'closeTrade': {
+        closeTrade(state, cmd.country, cmd.seller, cmd.resource, cmd.factories);
+        break;
+      }
       case 'demandSubmission': {
         demandSubmission(state, this.ctx, cmd.country, cmd.target);
         return;
@@ -295,6 +304,9 @@ export class Simulation {
       tickBattlePlansDaily(state, this.ctx);
       tickCommanderExperienceDaily(state);
       tickSupplyDaily(state, this.index);
+      // Before the economy, so a deal broken by yesterday's declaration of war
+      // is already gone when today's resource supply is added up.
+      tickTradeDaily(state, this.ctx);
       tickEconomyDaily(state, this.ctx);
       tickPoliticsDaily(state, (id) => occupationRatio(state, id));
       tickFuelDaily(state);
@@ -311,6 +323,12 @@ export class Simulation {
       recomputeCountryStats(state);
       tickAIDaily(state, this.ctx);
       tickCapitulationDaily(state, this.ctx);
+      // A second sweep, because recruitment happens inside the AI pass and the
+      // first sweep ran before it: a division built today would otherwise
+      // stand uncommanded until tomorrow, and any observer looking at the
+      // state between the two ticks sees an army with no general. Returns
+      // immediately when nothing is loose, which is almost every day.
+      tickCommandReinforcementDaily(state);
       recomputeCountryStats(state);
     }
 
