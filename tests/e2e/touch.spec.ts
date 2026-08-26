@@ -1040,6 +1040,18 @@ test.describe('touch input', () => {
     await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
     await page.evaluate(() => window.__game!.openPanel!('trade'));
 
+    // Each resource is a section, and only the ones the country is short of
+    // open on their own -- on day one, before the economy has ticked, that is
+    // none of them. Open them all and shop.
+    const sections = page.locator('[data-role="trade-body"] .panel-section');
+    const count = await sections.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      const head = sections.nth(i);
+      const cls = (await head.getAttribute('class')) ?? '';
+      if (!cls.includes('is-open')) await head.click();
+    }
+
     // The first seller anywhere in the panel that will actually sell.
     const plus = page.locator('.panel-row-controls button:not([disabled])', {
       hasText: '+',
