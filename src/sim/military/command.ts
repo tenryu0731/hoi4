@@ -239,6 +239,9 @@ export function assignDivisions(
     const old = armyById(state, div.armyId);
     if (old) old.divisions = old.divisions.filter((x) => x !== divId);
     div.armyId = army ? army.id : null;
+    // Changing formation is a fresh start: whatever the division was doing on
+    // its own it now does under its new general's plan.
+    div.detached = false;
     if (army && !army.divisions.includes(divId)) army.divisions.push(divId);
   }
 }

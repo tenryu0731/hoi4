@@ -19,7 +19,7 @@ import { orderMove } from '../military/movement';
 import { canChangeLaw, changeLaw } from '../politics/politics';
 import { fuelRatio } from '../economy/fuel';
 import {
-  availableToAI, canTradeWith, openTrade, RESOURCE_PER_FACTORY,
+  availableToAI, canTradeWith, MIN_TRADE_LOAD, openTrade, RESOURCE_PER_FACTORY,
 } from '../economy/trade';
 import { VARIANT_LEVEL_XP, canUpgrade, upgradeVariant } from '../economy/variants';
 import { LAW_COST } from '../politics/lawData';
@@ -1172,6 +1172,8 @@ const AI_TRADE_SHARE = 0.4;
 /** Below this many factories spare, buying is not worth what it costs. */
 const AI_TRADE_FLOOR = 2;
 
+
+
 export function runTradeAI(state: GameState, ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
   const budget = Math.floor(c.economy.freeCivilianFactories * AI_TRADE_SHARE);
@@ -1202,12 +1204,16 @@ export function runTradeAI(state: GameState, ctx: AIContext, c: Country): void {
         available: availableToAI(state, ctx, s.id, resource),
         favour: areAllied(state, c.id, s.id) ? 2 : 1 + opinionOf(state, s.id, c.id) / 200,
       }))
-      .filter((s) => s.available >= RESOURCE_PER_FACTORY)
+      // Worth a factory, without being worth a whole load. A buyer that only
+      // looks at sellers with a full load left ignores most of this map: the
+      // world's tungsten is six countries offering between 0.8 and 3.6 a day,
+      // and at a rate of 8 that is the entire supply invisible.
+      .filter((s) => s.available >= RESOURCE_PER_FACTORY * MIN_TRADE_LOAD)
       .sort((a, b) => b.available * b.favour - a.available * a.favour);
 
     for (const seller of sellers) {
       if (want <= 0) break;
-      const take = Math.min(want, Math.floor(seller.available / RESOURCE_PER_FACTORY));
+      const take = Math.min(want, Math.ceil(seller.available / RESOURCE_PER_FACTORY));
       if (take <= 0) continue;
       if (!openTrade(state, ctx, c.id, seller.id, resource, take)) continue;
       want -= take;

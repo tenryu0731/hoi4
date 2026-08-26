@@ -86,7 +86,8 @@ export function assignToFront(
   if (front.length === 0) return;
   const divisions = army.divisions
     .map((id) => state.divisions.find((d) => d.id === id))
-    .filter((d): d is NonNullable<typeof d> => !!d && !d.dead && d.combatId === null);
+    .filter((d): d is NonNullable<typeof d> =>
+      !!d && !d.dead && d.combatId === null && !d.detached);
   if (divisions.length === 0) return;
 
   // Sorted by victory points so the doubling-up lands on what is worth holding,
@@ -132,7 +133,7 @@ export function pressOffensive(
   if (live.length === 0) return;
   for (const id of army.divisions) {
     const div = state.divisions.find((d) => d.id === id);
-    if (!div || div.dead || div.combatId !== null) continue;
+    if (!div || div.dead || div.combatId !== null || div.detached) continue;
     let best = live[0];
     let bestCost = Infinity;
     const from = ctx.index.get(div.provinceId);

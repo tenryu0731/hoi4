@@ -173,7 +173,7 @@ function tickCountryEconomy(state: GameState, ctx: EconomyContext, c: Country): 
   // market is why a country with no oilfields is not automatically a country
   // whose armour never moves.
   const produced = computeResourceOutput(state, ctx.index, c.id);
-  const flow = tradeFlow(state, c.id);
+  const flow = tradeFlow(state, ctx, c.id);
   for (const r of RESOURCE_TYPES) {
     produced[r] = Math.max(0, produced[r] + flow.imports[r] - flow.exports[r]);
   }

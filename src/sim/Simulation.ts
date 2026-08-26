@@ -134,6 +134,11 @@ export class Simulation {
           if (!d || d.dead) continue;
           // A division locked in a battle cannot walk away from it.
           if (d.combatId !== null) continue;
+          // An order given by hand outranks the army's plan and goes on
+          // outranking it. The plan re-issues its assignments every day, so
+          // without this the order is gone by tomorrow morning -- which is
+          // what 「軍の移動がまだ少し変」 was.
+          d.detached = true;
           orderMove(state, this.ctx, d, cmd.target);
         }
         return;
@@ -141,7 +146,11 @@ export class Simulation {
       case 'stopDivisions': {
         for (const id of cmd.divisions) {
           const d = state.divisions[id];
-          if (d && !d.dead) stopDivision(d);
+          if (!d || d.dead) continue;
+          // Stopping is an order too: a halt the plan undoes tomorrow is not
+          // a halt.
+          d.detached = true;
+          stopDivision(d);
         }
         return;
       }
@@ -199,6 +208,13 @@ export class Simulation {
         // for one thing; it does not transfer to another.
         if (JSON.stringify(army.order) !== JSON.stringify(cmd.order)) army.planning = 0;
         army.order = cmd.order;
+        // And it takes the whole formation back under command. A division sent
+        // somewhere by hand stays there until the army is given something new
+        // to do, which is the moment the player has said they want it back.
+        for (const id of army.divisions) {
+          const d = state.divisions[id];
+          if (d) d.detached = false;
+        }
         return;
       }
       case 'createTemplate': {

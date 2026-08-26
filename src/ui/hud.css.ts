@@ -1180,6 +1180,8 @@ button:active { transform: scale(0.96); }
   color: var(--ink); font: inherit; text-align: left; cursor: pointer;
 }
 .panel-oob-row.is-fighting { border-left-color: #d8574a; }
+/* A division following an order of its own rather than the army's plan. */
+.panel-oob-row.is-detached { border-left-color: var(--accent); }
 
 .panel-army-head.is-over .panel-army-count {
   color: var(--danger); border-color: #4a1f1a; font-weight: 700;

@@ -90,8 +90,10 @@ export const UI = {
     if (short > 0) parts.push(`不足 ${short}`);
     return parts.join(' · ');
   },
-  tradeOffer: (spare: number, bought: number): string =>
-    bought > 0 ? `売却可能 ${spare}／日 · 工場 ${bought} 基で購入中` : `売却可能 ${spare}／日`,
+  tradeOffer: (spare: string, factories: number, shipped: string): string =>
+    factories > 0
+      ? `売却可能 ${spare}／日 · 工場 ${factories} 基で ${shipped}／日を輸入中`
+      : `売却可能 ${spare}／日`,
   tradeLawLine: (law: string, share: number, perFactory: number): string =>
     `${law} · 産出の ${share}% を市場へ · 民需工場 1 基につき ${perFactory}／日`,
   /* Production, as the reference lays it out: what a line makes a day, how
@@ -219,6 +221,9 @@ export const UI = {
   divisionName: (ordinal: number, template: string): string => `第${ordinal}${template}`,
   orderOfBattle: '隷下師団',
   onTheMove: '移動中',
+  detached: '独立行動',
+  rejoinPlan: '計画に復帰',
+  detachedCount: (n: number): string => `${n}個師団が独立行動中`,
   divisionState: (org: number, hp: number): string => `組織率 ${org}% · 兵力 ${hp}%`,
   armyGroupAssign: '軍集団へ',
   renameArmy: '名称変更',

@@ -27,15 +27,35 @@ import type { TradeLaw } from '../politics/lawData';
 /**
  * Resources one committed civilian factory buys per day.
  *
- * HOI4 uses 8, but its world holds an order of magnitude more of everything --
- * its Germany mines around 500 steel where this one mines 41. At 8 the whole
- * world's tradable oil was four factories' worth, and the leftovers after the
- * first buyer were unsellable: measured in 1937, Italy faced a 20-a-day oil
- * deficit with 19 spare factories and five willing sellers offering 1.6, 4.5,
- * 2.5, 2.0 and 1.0 -- every one of them below the granularity, so it bought
- * nothing at all for six years. Two is the same trade scaled to this map.
+ * HOI4's number, and the ratio that matters is the one against what a factory
+ * *spends*: a military factory building rifles draws 2 steel a day here, the
+ * same as it does there, so eight units is one traded factory keeping four
+ * military ones fed. This was 2, which made it one for one -- 「貿易の民需に
+ * 対する貿易品の量少ない」, and correctly so: committing a quarter of the
+ * German civilian industry bought a quarter of the German military industry,
+ * which is not a trade anyone would sign.
+ *
+ * It was 2 for a real reason, which is fixed below rather than paid for here.
+ * A deal used to have to be a whole multiple of this rate, and the sellers on
+ * this map are small -- the world's tungsten in 1936 is 13.9 units a day split
+ * between six countries offering 1.3, 3.6, 1.2, 1.2, 0.8 and 2.4. Rounding
+ * each of those down to a multiple of 8 leaves nothing, and rounding down to a
+ * multiple of 2 left 6 of the 13.9. So the rate went down until the rounding
+ * stopped hurting, and the trade went with it. `dealUnits` now ships whatever
+ * the seller actually has instead, so the rate is free to be the right one.
  */
-export const RESOURCE_PER_FACTORY = 2;
+export const RESOURCE_PER_FACTORY = 8;
+
+/**
+ * The smallest share of a full load worth committing a factory to.
+ *
+ * A factory buys the rate or the seller's remainder, whichever is smaller, so
+ * every producer is technically a seller now. A quarter-load is the line
+ * between an offer and a rounding error: below it the panel does not list the
+ * row and the AI does not cross the road, and above it the scarce resources --
+ * whose producers are all small on this map -- stay reachable.
+ */
+export const MIN_TRADE_LOAD = 0.25;
 
 export interface TradeContext {
   index: ProvinceIndex;
@@ -129,16 +149,47 @@ export function availableFrom(
   state: GameState, ctx: TradeContext, seller: CountryId, resource: ResourceType,
 ): number {
   const pool = tradableOutput(state, ctx, seller)[resource];
-  return Math.max(0, pool - soldBy(state, seller, resource));
+  return Math.max(0, pool - soldBy(state, ctx, seller, resource));
 }
 
-/** Units of one resource already promised to buyers. */
-export function soldBy(state: GameState, seller: CountryId, resource: ResourceType): number {
-  let sold = 0;
+/**
+ * Units of one resource already promised to buyers.
+ *
+ * Bounded by the pool, because a promise larger than the mine is not a
+ * promise: the deals share out what there is, oldest first, and the ones past
+ * the end of it ship nothing.
+ */
+export function soldBy(
+  state: GameState, ctx: TradeContext, seller: CountryId, resource: ResourceType,
+): number {
+  let want = 0;
   for (const d of tradesOf(state)) {
-    if (d.seller === seller && d.resource === resource) sold += d.factories * RESOURCE_PER_FACTORY;
+    if (d.seller === seller && d.resource === resource) want += d.factories * RESOURCE_PER_FACTORY;
   }
-  return sold;
+  return Math.min(tradableOutput(state, ctx, seller)[resource], want);
+}
+
+/**
+ * What each standing deal actually ships today.
+ *
+ * A deal is priced in whole factories and paid in whatever the seller has: the
+ * last factory of a purchase gets the remainder rather than nothing, which is
+ * what lets the rate be HOI4's on a map whose miners are a tenth the size.
+ * Shared out in list order so a seller whose output falls breaks its newest
+ * promises rather than its oldest -- the same rule the daily trim already used.
+ */
+export function dealUnits(state: GameState, ctx: TradeContext): Map<number, number> {
+  const out = new Map<number, number>();
+  const claimed = new Map<string, number>();
+  for (const d of tradesOf(state)) {
+    const key = `${d.seller}:${d.resource}`;
+    const used = claimed.get(key) ?? 0;
+    const pool = tradableOutput(state, ctx, d.seller)[d.resource];
+    const units = Math.max(0, Math.min(d.factories * RESOURCE_PER_FACTORY, pool - used));
+    claimed.set(key, used + units);
+    out.set(d.id, units);
+  }
+  return out;
 }
 
 /**
@@ -161,7 +212,7 @@ export function availableToAI(
 ): number {
   const pool = tradableOutput(state, ctx, seller)[resource];
   const cap = pool * (1 - OPEN_MARKET_SHARE);
-  return Math.max(0, cap - soldBy(state, seller, resource));
+  return Math.max(0, cap - soldBy(state, ctx, seller, resource));
 }
 
 /** Civilian factories the buyer has committed to the market. */
@@ -178,15 +229,16 @@ export function factoriesEarned(state: GameState, seller: CountryId): number {
   return n;
 }
 
-/** Daily imports and exports, by resource. */
+/** Daily imports and exports, by resource: what ships, not what was ordered. */
 export function tradeFlow(
-  state: GameState, country: CountryId,
+  state: GameState, ctx: TradeContext, country: CountryId,
 ): { imports: Record<ResourceType, number>; exports: Record<ResourceType, number> } {
   const imports = {} as Record<ResourceType, number>;
   const exports = {} as Record<ResourceType, number>;
   for (const r of RESOURCE_TYPES) { imports[r] = 0; exports[r] = 0; }
+  const shipped = dealUnits(state, ctx);
   for (const d of tradesOf(state)) {
-    const units = d.factories * RESOURCE_PER_FACTORY;
+    const units = shipped.get(d.id) ?? 0;
     if (d.buyer === country) imports[d.resource] += units;
     if (d.seller === country) exports[d.resource] += units;
   }
@@ -209,7 +261,11 @@ export function maxPurchase(
   buyer: CountryId, seller: CountryId, resource: ResourceType,
 ): number {
   if (!canTradeWith(state, buyer, seller)) return 0;
-  const supply = Math.floor(availableFrom(state, ctx, seller, resource) / RESOURCE_PER_FACTORY);
+  // Rounded up, not down: the factory that takes a seller's last three units
+  // is a worse deal than one that takes eight, but it is a deal, and rounding
+  // it away is what made the scarce resources untradeable at any rate above
+  // two. The panel shows what will actually ship, so the choice is visible.
+  const supply = Math.ceil(availableFrom(state, ctx, seller, resource) / RESOURCE_PER_FACTORY);
   const spare = Math.floor(state.countries[buyer].economy.freeCivilianFactories);
   return Math.max(0, Math.min(supply, spare));
 }
@@ -279,18 +335,19 @@ export function tickTradeDaily(state: GameState, ctx: TradeContext): void {
     if (d.factories <= 0) { list.splice(i, 1); continue; }
   }
 
-  // Trim each seller back to what it can actually ship, oldest deal first: a
-  // country that loses its mines breaks its newest promises, not its oldest.
-  for (const seller of state.countries) {
-    const pools = tradableOutput(state, ctx, seller.id);
-    for (const r of RESOURCE_TYPES) {
-      let budget = pools[r];
-      for (const d of list) {
-        if (d.seller !== seller.id || d.resource !== r) continue;
-        const affordable = Math.floor(budget / RESOURCE_PER_FACTORY);
-        if (d.factories > affordable) d.factories = Math.max(0, affordable);
-        budget -= d.factories * RESOURCE_PER_FACTORY;
-      }
+  // Hand back factories a deal is no longer using. What each deal ships is
+  // already bounded by the seller's pool, so a mine that halves does not break
+  // the contract -- it just delivers less. What it must not do is go on
+  // charging the buyer for factories that bring nothing home, so each deal is
+  // cut to the factories its actual delivery needs, and one that delivers
+  // nothing is struck out below.
+  const shipped = dealUnits(state, ctx);
+  for (const d of list) {
+    const units = shipped.get(d.id) ?? 0;
+    const needed = Math.ceil(units / RESOURCE_PER_FACTORY);
+    if (needed < d.factories) {
+      state.countries[d.buyer].economy.freeCivilianFactories += d.factories - needed;
+      d.factories = needed;
     }
   }
 

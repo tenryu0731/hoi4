@@ -234,6 +234,23 @@ export interface Division {
    * which changes, and is not what a division is called.
    */
   ordinal: number;
+  /**
+   * Set while the division is following an order of its own rather than its
+   * army's plan.
+   *
+   * A battle plan re-issues its assignments every day, so before this existed
+   * a hand-given order survived for less than one: measured with an army of
+   * twenty-four on a live front, twenty divisions started for Berlin and by
+   * the following day one was still going and the nine that had arrived had
+   * been marched back out again. An order the player gives has to outlive the
+   * plan that did not know about it, and the only way for it to do that is to
+   * say so on the division.
+   *
+   * Cleared when the army is given a new plan, and when the division changes
+   * army: both are a fresh start, and neither is something the plan did on
+   * its own.
+   */
+  detached?: boolean;
   /** Set when the division has been destroyed; kept so ids stay stable. */
   dead: boolean;
   /** Hours the unit must spend recovering before it may attack again. */

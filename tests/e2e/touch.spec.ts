@@ -986,4 +986,82 @@ test.describe('touch input', () => {
     await expect(card.locator('.panel-focus-name').first()).toContainText('南方軍集団');
   });
 
+
+  test('a division sent by hand says so, and can be put back under the plan', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const army = (s.armies ?? []).find((a) => a.owner === me && !a.isArmyGroup)!;
+      // A plan for it to be following in the first place. Which enemy does
+      // not matter here -- what matters is that the army has standing orders,
+      // which is what makes leaving them mean something.
+      const enemy = s.countries.find((c) => c.id !== me && c.major)!;
+      g.issue({
+        t: 'setArmyOrder', country: me, army: army.id, order: { kind: 'front', against: enemy.id },
+      });
+      const div = s.divisions.find(
+        (d) => army.divisions.includes(d.id) && !d.dead && d.combatId === null,
+      )!;
+      const to = g.index.get(div.provinceId).neighbors
+        .find((n) => s.provinces[n] !== undefined)!;
+      g.issue({ t: 'moveDivisions', divisions: [div.id], target: to });
+      return { army: army.id, division: div.id, detached: div.detached === true };
+    });
+    // The order is what detaches it; the panel only reports what happened.
+    expect(setup.detached).toBe(true);
+
+    await page.evaluate(() => window.__game!.openPanel!('command'));
+    const card = page.locator(`.panel-focus[data-army="${setup.army}"]`);
+    await card.locator('.panel-army-head').click();
+
+    const row = card.locator('.panel-oob-row.is-detached');
+    await expect(row.first()).toBeVisible();
+    await expect(row.first()).toContainText('独立行動');
+
+    const rejoin = card.locator('.panel-chip', { hasText: '計画に復帰' });
+    await expect(rejoin).toBeVisible();
+    await rejoin.click();
+
+    const after = await page.evaluate((id) => {
+      const d = window.__game!.state.divisions[id];
+      return d.detached === true;
+    }, setup.division);
+    expect(after).toBe(false);
+    await expect(card.locator('.panel-oob-row.is-detached')).toHaveCount(0);
+    await expect(rejoin).toBeHidden();
+  });
+
+  test('a committed factory brings home what the seller can actually ship', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+    await page.evaluate(() => window.__game!.openPanel!('trade'));
+
+    // The first seller anywhere in the panel that will actually sell.
+    const plus = page.locator('.panel-row-controls button:not([disabled])', {
+      hasText: '+',
+    }).first();
+    await expect(plus).toBeVisible();
+
+    const before = await page.evaluate(() => (window.__game!.state.trades ?? []).length);
+    await plus.click();
+
+    const after = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const deals = (s.trades ?? []).filter((d) => d.buyer === me);
+      return { count: (s.trades ?? []).length, factories: deals[0]?.factories ?? 0 };
+    });
+    expect(after.count).toBe(before + 1);
+    expect(after.factories).toBe(1);
+
+    // And the row says what that factory is bringing in, not just what it cost.
+    const row = page.locator('.panel-row', { hasText: '／日を輸入中' }).first();
+    await expect(row).toBeVisible();
+  });
+
 });

@@ -22,3 +22,4 @@ tests/e2e/__screenshots__/determinism-check.png
 .audit-*
 .ad-*
 .*.mjs
+.*.mts

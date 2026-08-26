@@ -14,8 +14,8 @@ import {
   canQueueBuilding, computeResourceOutput, constructionAllocation,
 } from '../sim/economy/production';
 import {
-  availableFrom, canTradeWith, exportShare, factoriesCommitted, factoriesEarned,
-  maxPurchase, RESOURCE_PER_FACTORY, tradeFlow, tradeLawOf,
+  availableFrom, canTradeWith, dealUnits, exportShare, factoriesCommitted, factoriesEarned,
+  maxPurchase, MIN_TRADE_LOAD, RESOURCE_PER_FACTORY, tradeFlow, tradeLawOf,
 } from '../sim/economy/trade';
 import { LAW_COST, TRADE } from '../sim/politics/lawData';
 import {
@@ -122,6 +122,12 @@ function flagUrl(tag: string): string {
 
 function iconUrl(name: string): string {
   return `${import.meta.env.BASE_URL}assets/icons/${name}.svg`;
+}
+
+/** One decimal, without a trailing .0 -- resource flows are fractional. */
+function round1(n: number): string {
+  const v = Math.round(n * 10) / 10;
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 
 export function formatNumber(n: number): string {
@@ -1959,14 +1965,19 @@ export const tradePanel: Panel = {
     // day's supply: the economy tick runs once a day, so a purchase made this
     // frame would otherwise show as negative home production until midnight.
     const home = computeResourceOutput(state, game.index, me.id);
-    const traffic = tradeFlow(state, me.id);
+    const traffic = tradeFlow(state, ctx, me.id);
+    const shipped = dealUnits(state, ctx);
 
     for (const r of RESOURCE_TYPES) {
       const flow = me.economy.resources[r];
       const sellers = state.countries
         .filter((c) => canTradeWith(state, me.id, c.id))
         .map((c) => ({ c, spare: availableFrom(state, ctx, c.id, r) }))
-        .filter((x) => x.spare >= RESOURCE_PER_FACTORY
+        // A quarter-load rather than a whole one: a factory now takes a
+        // seller's remainder instead of needing an exact multiple of the rate,
+        // so the small producers -- which on this map is all of the tungsten
+        // and all of the rubber -- belong in the list.
+        .filter((x) => x.spare >= RESOURCE_PER_FACTORY * MIN_TRADE_LOAD
           || state.trades?.some((d) => d.buyer === me.id && d.seller === x.c.id && d.resource === r))
         .sort((a, b) => b.spare - a.spare)
         .slice(0, 6);
@@ -2000,12 +2011,14 @@ export const tradePanel: Panel = {
         const main = el('div', 'panel-row-main');
         main.append(
           el('div', 'panel-row-title', country(c.tag)),
-          // Rounded down to whole factory-loads: a seller with 1.6 a day left
-          // cannot sell any of it, and printing "1" beside a disabled + is a
-          // panel arguing with itself.
+          // What is on offer and what is actually arriving, which are not the
+          // same number once a factory can take a seller's remainder: three
+          // factories against a mine with 9 a day left bring 9, not 24, and
+          // the row has to say so or the arithmetic in the header looks wrong.
           el('div', 'panel-row-sub', UI.tradeOffer(
-            Math.floor(spare / RESOURCE_PER_FACTORY) * RESOURCE_PER_FACTORY,
+            round1(spare),
             deal?.factories ?? 0,
+            round1(deal ? (shipped.get(deal.id) ?? 0) : 0),
           )),
         );
 
@@ -2135,6 +2148,20 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
     rebuild();
   });
   box.append(clear);
+
+  // Divisions sent somewhere by hand stop following the plan, and the way back
+  // is to give the army its orders again. Re-issuing the order it already has
+  // does exactly that and keeps the preparation it has banked, so this is that
+  // button rather than a command of its own.
+  const loose = army.divisions.filter((id) => game.state.divisions[id]?.detached).length;
+  if (loose > 0 && army.order !== null) {
+    const rejoin = el('button', 'panel-chip', UI.rejoinPlan);
+    rejoin.addEventListener('click', () => {
+      game.issue({ t: 'setArmyOrder', country: me.id, army: army.id, order: army.order });
+      rebuild();
+    });
+    box.append(rejoin);
+  }
   return box;
 }
 
@@ -2167,12 +2194,16 @@ function orderOfBattle(game: Game, army: Army): HTMLElement {
     const org = Math.round((d.org / Math.max(1, tpl?.maxOrg ?? 1)) * 100);
     const hp = Math.round((d.hp / Math.max(1, tpl?.maxHp ?? 1)) * 100);
     const where = game.index.get(d.provinceId).name;
+    // A division under a hand-given order is not where the plan put it, and
+    // the order of battle is the one place that can say so.
     const tag = d.combatId !== null ? ` · ${UI.inCombat}`
-      : d.path.length > 0 ? ` · ${UI.onTheMove}` : '';
+      : d.detached ? ` · ${UI.detached}`
+        : d.path.length > 0 ? ` · ${UI.onTheMove}` : '';
     main.append(el('div', 'panel-row-sub',
       `${where} · ${UI.divisionState(org, hp)}${tag}`));
     row.append(main);
     if (d.combatId !== null) row.classList.add('is-fighting');
+    if (d.detached) row.classList.add('is-detached');
     row.addEventListener('click', () => {
       game.selectDivisions([d.id], { army: army.id });
       closeSheet();
