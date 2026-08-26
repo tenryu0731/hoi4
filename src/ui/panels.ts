@@ -32,7 +32,9 @@ import {
   idleCommanders, nextArmyName,
 } from '../sim/military/command';
 import { maxPlanning } from '../sim/military/frontline';
-import { divisionsPerBattle, terrainProfile } from '../sim/military/combat';
+import {
+  divisionsPerBattle, equipmentShortfall, terrainProfile,
+} from '../sim/military/combat';
 import { MAX_BATTALIONS, MAX_SUPPORTS } from '../sim/core/data';
 import {
   BATTALION, BUILDING, EQUIPMENT as EQUIPMENT_NAME, IDEOLOGY, RESOURCE,
@@ -130,17 +132,50 @@ const BUILDABLE: BuildingType[] = [
 // Production
 // ---------------------------------------------------------------------------
 
+/** Factory blocks past this many collapse into a count. */
+const FACTORY_BLOCK_CAP = 24;
+
+/**
+ * The assigned factories, drawn as blocks.
+ *
+ * The reference gives every production line a little field of them, and it is
+ * the one part of that panel that is read without being read: two lines
+ * side by side say which is the bigger effort before either number is
+ * looked at. A bare integer does not do that.
+ */
+function factoryBlocks(n: number): HTMLElement {
+  const box = el('div', 'panel-blocks');
+  const shown = Math.min(n, FACTORY_BLOCK_CAP);
+  for (let i = 0; i < shown; i++) box.append(el('i', 'panel-block'));
+  if (n > FACTORY_BLOCK_CAP) box.append(el('span', 'panel-blocks-more', `+${n - FACTORY_BLOCK_CAP}`));
+  if (n === 0) box.append(el('span', 'panel-blocks-more', UI.noFactories));
+  return box;
+}
+
+/**
+ * Production, laid out the way the real panel lays it out.
+ *
+ * One row per line, and each row carries the silhouette of what is being
+ * built, its output a day, an efficiency bar, the depot against what the army
+ * is short of, and a field of blocks for the factories on it. This was a name
+ * and a plus and minus, with everything else crushed into one grey subtitle
+ * that changed every frame -- which is a status line, not a panel a decision
+ * gets made in.
+ */
 export const productionPanel: Panel = {
   id: 'production',
   title: UI.navProduction,
   build(game, root) {
     root.innerHTML = '';
-    const me = game.state.countries[game.state.meta.playerCountry];
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
+    const assigned = me.productionLines.reduce((s2, l) => s2 + l.assignedFactories, 0);
 
     const head = el('div', 'panel-head');
     head.append(
-      stat(UI.militaryFactories, String(me.economy.militaryFactories)),
-      stat(UI.assigned, String(me.productionLines.reduce((s, l) => s + l.assignedFactories, 0))),
+      stat(UI.militaryFactories, `${assigned}/${me.economy.militaryFactories}`),
+      stat(UI.dockyards, String(me.economy.dockyards)),
+      stat(UI.lines, String(me.productionLines.length)),
     );
     root.append(head);
 
@@ -148,40 +183,20 @@ export const productionPanel: Panel = {
     list.dataset.role = 'lines';
     root.append(list);
 
-    for (const line of me.productionLines) {
-      const row = el('div', 'panel-row');
+    const shortfall = equipmentShortfall(state, me.id);
+
+    for (let i = 0; i < me.productionLines.length; i++) {
+      const line = me.productionLines[i];
+      const row = el('div', 'panel-line');
       row.dataset.line = String(line.id);
 
-      const name = el('div', 'panel-row-main');
-      name.append(
-        el('div', 'panel-row-title', EQUIPMENT_LABEL[line.equipment]),
-        el('div', 'panel-row-sub', ''),
-      );
+      // --- header: rank, name, priority, and the way off the line ----------
+      const top = el('div', 'panel-line-top');
+      top.append(el('span', 'panel-line-rank', String(i + 1)));
+      top.append(el('span', 'panel-line-name', EQUIPMENT_LABEL[line.equipment]));
 
-      const controls = el('div', 'panel-row-controls');
-      const minus = el('button', 'panel-btn', '−');
-      const count = el('span', 'panel-count', String(line.assignedFactories));
-      const plus = el('button', 'panel-btn', '+');
-      minus.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.removeFactory}`);
-      plus.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.addFactory}`);
-      minus.addEventListener('click', () => {
-        game.issue({
-          t: 'setLineFactories', country: me.id, line: line.id,
-          factories: Math.max(0, line.assignedFactories - 1),
-        });
-      });
-      plus.addEventListener('click', () => {
-        game.issue({
-          t: 'setLineFactories', country: me.id, line: line.id,
-          factories: line.assignedFactories + 1,
-        });
-      });
-      // Priority decides which line gets scarce steel and tungsten first. It
-      // was a four-step mechanic with no control anywhere: measured over a
-      // campaign, 316,806 line-days carried one distinct value, so the
-      // allocator's priority sort degenerated to a sort by line id.
       const prio = el('button', 'panel-btn prio');
-      const paintPrio = () => {
+      const paintPrio = (): void => {
         setText(prio, UI.priorityNames[line.priority]);
         prio.classList.toggle('is-high', line.priority >= 2);
         prio.setAttribute(
@@ -190,15 +205,95 @@ export const productionPanel: Panel = {
         );
       };
       paintPrio();
+      // Priority decides which line gets scarce steel and tungsten first. It
+      // was a four-step mechanic with no control anywhere: measured over a
+      // campaign, 316,806 line-days carried one distinct value, so the
+      // allocator's priority sort degenerated to a sort by line id.
       prio.addEventListener('click', () => {
         const next = ((line.priority + 1) % 4) as 0 | 1 | 2 | 3;
         game.issue({ t: 'setLinePriority', country: me.id, line: line.id, priority: next });
         line.priority = next;
         paintPrio();
       });
-      controls.append(prio, minus, count, plus);
+      top.append(prio);
 
-      row.append(name, controls);
+      // The command has existed since the command bus was written and nothing
+      // has ever sent it: a line, once opened, could only be starved to zero
+      // factories and left sitting in the list.
+      const drop = el('button', 'panel-btn danger');
+      drop.textContent = '×';
+      drop.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.closeLine}`);
+      drop.addEventListener('click', () => {
+        game.issue({ t: 'removeProductionLine', country: me.id, line: line.id });
+        productionPanel.build(game, root);
+      });
+      top.append(drop);
+      row.append(top);
+
+      // --- body: silhouette, figures, blocks -------------------------------
+      const body = el('div', 'panel-line-body');
+
+      const art = el('div', 'panel-line-art');
+      const icon = el('img', 'panel-line-icon');
+      icon.alt = '';
+      icon.src = iconUrl(`equipment-${line.equipment}`);
+      icon.addEventListener('error', () => { icon.removeAttribute('src'); });
+      art.append(icon);
+      body.append(art);
+
+      const figures = el('div', 'panel-line-figures');
+
+      const rate = el('div', 'panel-line-rate');
+      rate.dataset.role = 'rate';
+      figures.append(rate);
+
+      const bar = el('div', 'panel-bar');
+      const fill = el('i', 'panel-bar-fill');
+      fill.dataset.role = 'eff';
+      bar.append(fill);
+      const effRow = el('div', 'panel-line-eff');
+      effRow.append(bar, el('span', 'panel-line-effv', ''));
+      figures.append(effRow);
+
+      figures.append(el('div', 'panel-line-stock'));
+      body.append(figures);
+      row.append(body);
+
+      // --- factories --------------------------------------------------------
+      const foot = el('div', 'panel-line-foot');
+      const blocks = factoryBlocks(line.assignedFactories);
+      foot.append(blocks);
+      const controls = el('div', 'panel-row-controls');
+      const minus = el('button', 'panel-btn', '−');
+      const count = el('span', 'panel-count', String(line.assignedFactories));
+      const plus = el('button', 'panel-btn', '+');
+      minus.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.removeFactory}`);
+      plus.setAttribute('aria-label', `${EQUIPMENT_LABEL[line.equipment]}: ${UI.addFactory}`);
+      // The blocks and the count are repainted where they stand rather than by
+      // rebuilding the panel. Rebuilding scrolls a list of ten lines back to
+      // the top under the finger that is still pressing the plus button.
+      const repaint = (): void => {
+        setText(count, String(line.assignedFactories));
+        blocks.replaceChildren(...factoryBlocks(line.assignedFactories).childNodes);
+      };
+      minus.addEventListener('click', () => {
+        game.issue({
+          t: 'setLineFactories', country: me.id, line: line.id,
+          factories: Math.max(0, line.assignedFactories - 1),
+        });
+        repaint();
+      });
+      plus.addEventListener('click', () => {
+        game.issue({
+          t: 'setLineFactories', country: me.id, line: line.id,
+          factories: line.assignedFactories + 1,
+        });
+        repaint();
+      });
+      controls.append(minus, count, plus);
+      foot.append(controls);
+      row.append(foot);
+
       list.append(row);
     }
 
@@ -214,34 +309,55 @@ export const productionPanel: Panel = {
     for (const eq of EQUIPMENT_TYPES) {
       if (me.productionLines.some((l) => l.equipment === eq)) continue;
       const b = el('button', 'panel-build');
-      b.append(el('span', 'panel-build-title', EQUIPMENT_LABEL[eq]));
+      const badge = el('img', 'panel-build-icon');
+      badge.alt = '';
+      badge.src = iconUrl(`equipment-${eq}`);
+      badge.addEventListener('error', () => { badge.removeAttribute('src'); });
+      b.append(badge, el('span', 'panel-build-title', EQUIPMENT_LABEL[eq]));
+      // A type the army is already short of is the one worth opening.
+      if ((shortfall[eq] ?? 0) > 0) b.classList.add('is-wanted');
       b.addEventListener('click', () => {
         game.issue({ t: 'addProductionLine', country: me.id, equipment: eq });
+        productionPanel.build(game, root);
       });
       add.append(b);
     }
     if (add.children.length === 0) add.append(el('div', 'panel-empty', UI.allLinesOpen));
     root.append(add);
+
+    productionPanel.refresh?.(game, root);
   },
   refresh(game, root) {
-    const me = game.state.countries[game.state.meta.playerCountry];
+    const state = game.state;
+    const me = state.countries[state.meta.playerCountry];
     const list = root.querySelector<HTMLElement>('[data-role="lines"]');
     if (!list) return;
+    const shortfall = equipmentShortfall(state, me.id);
     for (const line of me.productionLines) {
       const row = list.querySelector<HTMLElement>(`[data-line="${line.id}"]`);
       if (!row) continue;
-      const sub = row.querySelector<HTMLElement>('.panel-row-sub');
-      const count = row.querySelector<HTMLElement>('.panel-count');
-      if (count) setText(count, String(line.assignedFactories));
-      if (!sub) continue;
       const perDay = line.assignedFactories * FACTORY_OUTPUT * line.efficiency
         / EQUIPMENT[line.equipment].cost;
-      setText(
-        sub,
-        `${UI.efficiency} ${Math.round(line.efficiency * 100)}% · ` +
-        `${perDay.toFixed(1)}${UI.perDay} · ${UI.stockpile} ` +
-        `${formatNumber(me.economy.stockpile[line.equipment])}`,
-      );
+      const rate = row.querySelector<HTMLElement>('[data-role="rate"]');
+      if (rate) setText(rate, `${perDay.toFixed(1)}${UI.perDay}`);
+
+      const eff = row.querySelector<HTMLElement>('[data-role="eff"]');
+      if (eff) {
+        const pct = Math.min(100, line.efficiency * 100);
+        if (eff.style.width !== `${pct.toFixed(1)}%`) eff.style.width = `${pct.toFixed(1)}%`;
+      }
+      const effv = row.querySelector<HTMLElement>('.panel-line-effv');
+      if (effv) setText(effv, `${Math.round(line.efficiency * 100)}%`);
+
+      const stock = row.querySelector<HTMLElement>('.panel-line-stock');
+      if (stock) {
+        const short = Math.round(shortfall[line.equipment] ?? 0);
+        setText(stock, short > 0
+          ? UI.stockShort(
+            formatNumber(Math.round(me.economy.stockpile[line.equipment])), formatNumber(short))
+          : UI.stockHeld(formatNumber(Math.round(me.economy.stockpile[line.equipment]))));
+        stock.classList.toggle('is-short', short > 0);
+      }
     }
   },
 };
@@ -1009,6 +1125,30 @@ export function editTemplate(tpl: DivisionTemplate): void {
   };
 }
 
+/**
+ * The silhouette a battalion or support company shows.
+ *
+ * Its principal equipment, which is what the unit is: a battalion of
+ * mountaineers carries the same rifles as the infantry, and a reconnaissance
+ * company is the trucks it drives. Taken from the equipment bill rather than
+ * invented, so it cannot say one thing while the template needs another.
+ */
+const BATTALION_ART: Record<BattalionType, EquipmentType> = {
+  infantry: 'infantry_equipment',
+  mountaineers: 'infantry_equipment',
+  motorized: 'motorized',
+  artillery: 'artillery',
+  light_armor: 'light_armor',
+  medium_armor: 'medium_armor',
+};
+
+const SUPPORT_ART: Record<SupportType, EquipmentType> = {
+  engineer: 'support_equipment',
+  logistics: 'support_equipment',
+  recon: 'motorized',
+  artillery_support: 'artillery',
+};
+
 /** Slots the battalion grid draws, whether or not they are filled. */
 const GRID_COLS = 4;
 const GRID_ROWS = 6;
@@ -1027,9 +1167,18 @@ let slotPicker: 'battalion' | 'support' | null = null;
  * what is in it and empties when pressed, the next free slot is the plus that
  * opens the picker, and the rest are the empty establishment behind it.
  */
-function slot(label: string | null, next: boolean, onPick: () => void): HTMLElement {
+function slot(
+  label: string | null, next: boolean, onPick: () => void, icon?: EquipmentType,
+): HTMLElement {
   const b = el('button', 'panel-slot');
   if (label !== null) {
+    if (icon) {
+      const art = el('img', 'panel-slot-icon');
+      art.alt = '';
+      art.src = iconUrl(`equipment-${icon}`);
+      art.addEventListener('error', () => { art.removeAttribute('src'); });
+      b.append(art);
+    }
     b.append(el('span', 'panel-slot-name', label));
     b.addEventListener('click', onPick);
     return b;
@@ -1045,6 +1194,15 @@ function slot(label: string | null, next: boolean, onPick: () => void): HTMLElem
   b.textContent = UI.slotEmpty;
   b.addEventListener('click', onPick);
   return b;
+}
+
+/** The small silhouette a picker chip carries. */
+function chipArt(eq: EquipmentType): HTMLElement {
+  const art = el('img', 'panel-chip-icon');
+  art.alt = '';
+  art.src = iconUrl(`equipment-${eq}`);
+  art.addEventListener('error', () => { art.removeAttribute('src'); });
+  return art;
 }
 
 /** A row of the three-column stat table. */
@@ -1117,6 +1275,7 @@ export const designerPanel: Panel = {
           }
           rebuild();
         },
+        held ? SUPPORT_ART[held] : undefined,
       ));
     }
 
@@ -1136,6 +1295,7 @@ export const designerPanel: Panel = {
           }
           rebuild();
         },
+        held ? BATTALION_ART[held] : undefined,
       ));
     }
     board.append(supportCol, combat);
@@ -1150,7 +1310,8 @@ export const designerPanel: Panel = {
       const chips = el('div', 'panel-chips');
       if (slotPicker === 'battalion') {
         for (const b of BATTALION_TYPES) {
-          const chip = el('button', 'panel-chip', BATTALION[b]);
+          const chip = el('button', 'panel-chip');
+          chip.append(chipArt(BATTALION_ART[b]), document.createTextNode(BATTALION[b]));
           chip.disabled = draft.battalions.length >= MAX_BATTALIONS;
           chip.addEventListener('click', () => {
             draft.battalions.push(b);
@@ -1161,7 +1322,8 @@ export const designerPanel: Panel = {
         }
       } else {
         for (const sc of SUPPORT_TYPES) {
-          const chip = el('button', 'panel-chip', SUPPORT[sc]);
+          const chip = el('button', 'panel-chip');
+          chip.append(chipArt(SUPPORT_ART[sc]), document.createTextNode(SUPPORT[sc]));
           chip.disabled = draft.supports.includes(sc) || draft.supports.length >= MAX_SUPPORTS;
           chip.addEventListener('click', () => {
             draft.supports = [...draft.supports, sc];

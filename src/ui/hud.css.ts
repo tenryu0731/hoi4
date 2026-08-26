@@ -742,6 +742,57 @@ button:active { transform: scale(0.96); }
 }
 .panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
 
+/* --- production ---------------------------------------------------------- */
+/* One card per line, three bands: who and what, the figures beside the
+   silhouette, and the factories along the bottom. The reference stacks the
+   same three horizontally because it has 380px of width to do it in. */
+.panel-line {
+  background: var(--panel, #23221e);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 3px;
+  padding: 5px 7px 6px; margin-bottom: 5px;
+}
+.panel-line-top { display: flex; align-items: center; gap: 6px; }
+/* The rank number, as the reference numbers its lines: production order is a
+   real thing here -- it is what the resource allocator walks. */
+.panel-line-rank {
+  min-width: 18px; text-align: center;
+  color: var(--ink-dim); font-size: 11px;
+}
+.panel-line-name { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--ink); }
+.panel-line-body { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.panel-line-art {
+  display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 36px; flex: 0 0 auto;
+  background: rgba(0,0,0,0.28); border: 1px solid #100f0d; border-radius: 2px;
+}
+.panel-line-icon { width: 28px; height: 28px; opacity: 0.92; }
+.panel-line-figures { flex: 1 1 auto; min-width: 0; }
+/* The output a day is the number a player is here for, so it is the biggest
+   thing in the row. */
+.panel-line-rate { color: var(--accent); font-size: 15px; font-weight: 700; line-height: 1.2; }
+.panel-line-eff { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.panel-line-eff .panel-bar { flex: 1 1 auto; }
+.panel-line-effv { font-size: 11px; color: var(--ink-dim); min-width: 30px; text-align: right; }
+.panel-line-stock { font-size: 11px; color: var(--ink-dim); }
+.panel-line-stock.is-short { color: #d8574a; }
+.panel-line-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 4px;
+}
+.panel-blocks {
+  display: flex; flex-wrap: wrap; align-content: center; gap: 2px;
+  flex: 1 1 auto; min-width: 0;
+}
+.panel-block {
+  width: 7px; height: 11px;
+  background: linear-gradient(180deg, #8fd48f 0%, #4f8f4f 100%);
+  border: 1px solid #14200f; border-radius: 1px;
+}
+.panel-blocks-more { font-size: 11px; color: var(--ink-dim); margin-left: 3px; }
+.panel-build-icon { width: 22px; height: 22px; opacity: 0.9; margin-bottom: 2px; }
+/* A type the army is already short of: the line worth opening next. */
+.panel-build.is-wanted { border-color: var(--accent); }
+
 /* --- division designer --------------------------------------------------- */
 /* The reference puts support companies in a column down the left and the line
    battalions in a grid to their right, and that arrangement carries the whole
@@ -767,7 +818,12 @@ button:active { transform: scale(0.96); }
   color: var(--ink); font: inherit; font-size: 11px; line-height: 1.15;
   text-align: center; cursor: pointer;
 }
-.panel-slot-name { overflow: hidden; }
+/* A filled slot stacks its silhouette over its name, which is the only way to
+   fit both into a 44px square. */
+.panel-slot { flex-direction: column; gap: 1px; }
+.panel-slot-icon { width: 20px; height: 20px; opacity: 0.9; }
+.panel-slot-name { overflow: hidden; font-size: 10px; }
+.panel-chip-icon { width: 16px; height: 16px; opacity: 0.9; margin-right: 4px; vertical-align: -3px; }
 /* An empty slot is a hole in the establishment, not a button with a label:
    quieter ground, a lighter plus, no bevel to suggest something is there. */
 .panel-slot.is-empty {

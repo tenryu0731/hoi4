@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { bootGame } from './helpers/page';
+import { EQUIPMENT_TYPES } from '../../src/sim/core/types';
 
 /**
  * Asset budget and load time.
@@ -53,6 +54,9 @@ test.describe('assets', () => {
     expect(manifest.counts.resourceIcons).toBe(6);
     expect(manifest.counts.unitIcons).toBeGreaterThanOrEqual(12);
     expect(manifest.counts.uiIcons).toBeGreaterThanOrEqual(14);
+    // One silhouette per equipment type. A missing one is a production row
+    // with a hole in it where the thing being built should be.
+    expect(manifest.counts.equipmentIcons).toBe(EQUIPMENT_TYPES.length);
   });
 
   test('the baked map stays inside its size budget', () => {

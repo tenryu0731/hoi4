@@ -4,10 +4,11 @@
     "flags": 30,
     "resourceIcons": 6,
     "uiIcons": 22,
+    "equipmentIcons": 9,
     "unitIcons": 12
   },
-  "totalBytes": 24461,
-  "totalGzipBytes": 15320,
+  "totalBytes": 27147,
+  "totalGzipBytes": 17201,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -158,6 +159,51 @@
       "path": "assets/flags/YUG.svg",
       "bytes": 432,
       "gzipBytes": 231
+    },
+    {
+      "path": "assets/icons/equipment-artillery.svg",
+      "bytes": 293,
+      "gzipBytes": 227
+    },
+    {
+      "path": "assets/icons/equipment-cas.svg",
+      "bytes": 267,
+      "gzipBytes": 208
+    },
+    {
+      "path": "assets/icons/equipment-convoy.svg",
+      "bytes": 263,
+      "gzipBytes": 201
+    },
+    {
+      "path": "assets/icons/equipment-fighter.svg",
+      "bytes": 227,
+      "gzipBytes": 182
+    },
+    {
+      "path": "assets/icons/equipment-infantry_equipment.svg",
+      "bytes": 329,
+      "gzipBytes": 228
+    },
+    {
+      "path": "assets/icons/equipment-light_armor.svg",
+      "bytes": 361,
+      "gzipBytes": 221
+    },
+    {
+      "path": "assets/icons/equipment-medium_armor.svg",
+      "bytes": 391,
+      "gzipBytes": 225
+    },
+    {
+      "path": "assets/icons/equipment-motorized.svg",
+      "bytes": 268,
+      "gzipBytes": 201
+    },
+    {
+      "path": "assets/icons/equipment-support_equipment.svg",
+      "bytes": 287,
+      "gzipBytes": 188
     },
     {
       "path": "assets/icons/resource-aluminium.svg",

@@ -10,7 +10,8 @@ import { TERRAIN } from '../core/data';
 import { jitter } from '../core/rng';
 import { TERRAIN_TYPES } from '../core/types';
 import type {
-  Combat, CountryId, Division, DivisionTemplate, GameState, ProvinceId, TerrainType,
+  Combat, CountryId, Division, DivisionTemplate, EquipmentType, GameState, ProvinceId,
+  TerrainType,
 } from '../core/types';
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 
@@ -132,6 +133,51 @@ export function equipmentRatio(state: GameState, d: Division): number {
 }
 
 /** Combined multiplier from equipment, supply and experience. */
+/**
+ * What the army is still short of, by equipment type.
+ *
+ * The production panel prints a stockpile, which answers "how much is in the
+ * depot" and not the question a player is actually asking -- whether the
+ * divisions in the field are equipped. A stockpile of 3,000 rifles reads
+ * comfortable next to an army 12,000 short.
+ *
+ * Cached for a day, the way tradableOutput is: it walks every live division
+ * and its template bill, the panel asks once a frame, and nothing it depends
+ * on moves faster than the daily reinforcement pass.
+ */
+const DEMAND_CACHE = new WeakMap<GameState, {
+  day: number;
+  byCountry: Map<CountryId, Partial<Record<EquipmentType, number>>>;
+}>();
+
+export function equipmentShortfall(
+  state: GameState, owner: CountryId,
+): Partial<Record<EquipmentType, number>> {
+  let cache = DEMAND_CACHE.get(state);
+  if (!cache || cache.day !== state.clock.totalDays) {
+    cache = { day: state.clock.totalDays, byCountry: new Map() };
+    DEMAND_CACHE.set(state, cache);
+  }
+  const hit = cache.byCountry.get(owner);
+  if (hit) return hit;
+
+  const out: Partial<Record<EquipmentType, number>> = {};
+  for (const d of state.divisions) {
+    if (d.dead || d.owner !== owner) continue;
+    const base = state.countries[owner].templates.find((t) => t.id === d.templateId);
+    if (!base) continue;
+    const tpl = effectiveTemplate(state, owner, base);
+    for (const key of Object.keys(tpl.equipmentNeed) as EquipmentType[]) {
+      const need = tpl.equipmentNeed[key] ?? 0;
+      const held = d.equipment[key] ?? 0;
+      if (held >= need) continue;
+      out[key] = (out[key] ?? 0) + (need - held);
+    }
+  }
+  cache.byCountry.set(owner, out);
+  return out;
+}
+
 export function effectiveness(state: GameState, d: Division): number {
   const eq = equipmentRatio(state, d);
   // Supply never zeroes a unit's output outright; a starving formation still

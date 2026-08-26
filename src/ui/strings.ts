@@ -94,6 +94,13 @@ export const UI = {
     bought > 0 ? `売却可能 ${spare}／日 · 工場 ${bought} 基で購入中` : `売却可能 ${spare}／日`,
   tradeLawLine: (law: string, share: number, perFactory: number): string =>
     `${law} · 産出の ${share}% を市場へ · 民需工場 1 基につき ${perFactory}／日`,
+  /* Production, as the reference lays it out: what a line makes a day, how
+     efficient it has become, and the depot against what the army is short. */
+  lines: '生産ライン',
+  noFactories: '工場未割当',
+  closeLine: 'ラインを閉じる',
+  stockHeld: (held: string): string => `在庫 ${held}`,
+  stockShort: (held: string, short: string): string => `在庫 ${held} · 不足 ${short}`,
   cancel: '選択解除',
   /**
    * The tag on a front line, as the reference screenshot writes it:
