@@ -466,16 +466,21 @@ export function spawnDivision(
   provinceId: number,
   equipmentRatio = 1,
 ): Division {
-  const tpl = state.countries[owner].templates.find((t) => t.id === templateId)!;
+  const country = state.countries[owner];
+  const tpl = country.templates.find((t) => t.id === templateId)!;
   const equipment: Partial<Record<EquipmentType, number>> = {};
   for (const [eq, need] of Object.entries(tpl.equipmentNeed) as [EquipmentType, number][]) {
     equipment[eq] = Math.round(need * equipmentRatio);
   }
+  if (!country.divisionOrdinals) country.divisionOrdinals = {};
+  const ordinal = (country.divisionOrdinals[templateId] ?? 0) + 1;
+  country.divisionOrdinals[templateId] = ordinal;
   const div: Division = {
     id: state.nextIds.division++,
     owner,
     templateId,
     provinceId,
+    ordinal,
     armyId: null,
     org: tpl.maxOrg,
     hp: tpl.maxHp * equipmentRatio,

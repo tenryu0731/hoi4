@@ -215,6 +215,15 @@ export interface Division {
    * striking late, and what a defensive general is for.
    */
   entrenchment: number;
+  /**
+   * This division's number within its template: the 12 in 第12歩兵師団.
+   *
+   * A formation needs a name before an order of battle can be read. Before
+   * this, an army of twenty-four was twenty-four rows all reading 歩兵師団,
+   * and the only way to tell one from another was the province it stood in --
+   * which changes, and is not what a division is called.
+   */
+  ordinal: number;
   /** Set when the division has been destroyed; kept so ids stay stable. */
   dead: boolean;
   /** Hours the unit must spend recovering before it may attack again. */
@@ -525,6 +534,16 @@ export interface Country {
   productionLines: ProductionLine[];
   constructionQueue: ConstructionItem[];
   templates: DivisionTemplate[];
+  /**
+   * How many divisions this country has ever raised on each template, so the
+   * next one can be numbered.
+   *
+   * Optional because the 1936 scenario table predates it; spawnDivision fills
+   * it on first use, the way research and focus fill theirs. Never decremented
+   * -- the 12th infantry division stays the 12th after the 4th is destroyed,
+   * which is what a formation number is for.
+   */
+  divisionOrdinals?: Partial<Record<number, number>>;
   research: ResearchState;
   /** National focus state. Created on first use by sim/focus. */
   focus?: CountryFocus;

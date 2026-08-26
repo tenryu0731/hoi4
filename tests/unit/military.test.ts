@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { Simulation } from '../../src/sim/Simulation';
 
 import {
-  ORG_RECOVERY_PER_HOUR, effectiveness, equipmentRatio, findCombatAt,
-  resolveCombatRound, tickDivisionUpkeep,
+  ORG_RECOVERY_PER_HOUR, divisionsPerBattle, effectiveness, equipmentRatio, findCombatAt,
+  resolveCombatRound, terrainProfile, tickDivisionUpkeep,
 } from '../../src/sim/military/combat';
 import {
   captureProvince, isHostile, movementSpeed, orderMove, placeDivision,
@@ -13,7 +13,11 @@ import {
 import {
   computeSupply, encircledProvinces, supplySources, tickSupplyDaily,
 } from '../../src/sim/military/supply';
-import { spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY } from '../../src/sim/scenario/europe1936';
+import {
+  deriveTemplate, spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY,
+} from '../../src/sim/scenario/europe1936';
+import { TERRAIN } from '../../src/sim/core/data';
+import { TERRAIN_TYPES } from '../../src/sim/core/types';
 import type { Division, GameState, ProvinceId } from '../../src/sim/core/types';
 import { makeFixture, type Fixture } from './helpers/fixture';
 
@@ -63,6 +67,77 @@ describe('templates', () => {
     expect(arm.breakthrough).toBeGreaterThan(inf.breakthrough);
     expect(arm.armor).toBeGreaterThan(inf.armor);
     expect(arm.buildCost).toBeGreaterThan(inf.buildCost);
+  });
+});
+
+describe('what a template is worth on each kind of ground', () => {
+  it('reports the same terrain modifiers the battle applies', () => {
+    const f = makeFixture();
+    const inf = f.country('GER').templates[TEMPLATE_INFANTRY];
+    const rows = terrainProfile(inf);
+    expect(rows.map((r) => r.terrain)).toEqual([...TERRAIN_TYPES]);
+    for (const row of rows) {
+      const def = TERRAIN[row.terrain];
+      // No mountain training in the infantry template, so the profile is the
+      // ground and nothing else. If these ever diverge, the panel is lying
+      // about the fight.
+      expect(row.attack).toBeCloseTo(def.attackMod, 6);
+      expect(row.defence).toBeCloseTo(def.defenceMod, 6);
+      expect(row.speed).toBeCloseTo(def.speed, 6);
+      expect(row.width).toBe(def.combatWidth);
+    }
+  });
+
+  it('pays mountain troops on the high ground and nowhere else', () => {
+    const plain = deriveTemplate(-1, 'foot', ['infantry', 'infantry'], []);
+    const alpine = deriveTemplate(-2, 'alpine', ['mountaineers', 'mountaineers'], []);
+    const a = new Map(terrainProfile(plain).map((r) => [r.terrain, r]));
+    const b = new Map(terrainProfile(alpine).map((r) => [r.terrain, r]));
+
+    for (const t of TERRAIN_TYPES) {
+      const rough = t === 'mountain' || t === 'hills';
+      if (rough) {
+        expect(b.get(t)!.attack).toBeGreaterThan(a.get(t)!.attack);
+        expect(b.get(t)!.defence).toBeGreaterThan(a.get(t)!.defence);
+      } else {
+        expect(b.get(t)!.attack).toBeCloseTo(a.get(t)!.attack, 6);
+        expect(b.get(t)!.defence).toBeCloseTo(a.get(t)!.defence, 6);
+      }
+    }
+  });
+
+  it('says how many of a division the ground lets into one battle', () => {
+    const f = makeFixture();
+    const inf = f.country('GER').templates[TEMPLATE_INFANTRY];
+    for (const row of terrainProfile(inf)) {
+      expect(divisionsPerBattle(inf, row.width)).toBe(Math.floor(row.width / inf.width));
+    }
+    // Mountains take fewer than plains, which is the whole point of the number.
+    const plains = TERRAIN.plains.combatWidth;
+    const mountain = TERRAIN.mountain.combatWidth;
+    expect(divisionsPerBattle(inf, mountain)).toBeLessThan(divisionsPerBattle(inf, plains));
+  });
+});
+
+describe('division numbers', () => {
+  it('numbers each division within its own template', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const a = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, ger.capital, 1);
+    const b = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, ger.capital, 1);
+    const c = spawnDivision(f.state, ger.id, TEMPLATE_ARMOUR, ger.capital, 1);
+    expect(b.ordinal).toBe(a.ordinal + 1);
+    // A different template counts separately, the way formation numbers do.
+    expect(c.ordinal).toBeLessThan(b.ordinal);
+  });
+
+  it('never reissues the number of a division that has been destroyed', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const a = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, ger.capital, 1);
+    a.dead = true;
+    const b = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, ger.capital, 1);
+    expect(b.ordinal).toBe(a.ordinal + 1);
   });
 });
 

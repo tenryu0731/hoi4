@@ -741,6 +741,94 @@ button:active { transform: scale(0.96); }
   border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
 .panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
+
+/* --- division designer --------------------------------------------------- */
+/* The reference puts support companies in a column down the left and the line
+   battalions in a grid to their right, and that arrangement carries the whole
+   distinction between the two before any label does. It survives on a phone
+   because it is a grid either way -- only the proportions change. */
+.panel-board {
+  display: grid; grid-template-columns: auto 1fr; gap: 6px;
+  margin-bottom: 8px;
+}
+.panel-board-support {
+  display: grid; grid-auto-rows: 44px; align-content: start; gap: 4px;
+  padding-right: 6px; border-right: 1px solid var(--edge-lo, #0f0e0c);
+}
+.panel-board-combat {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 44px; gap: 4px;
+}
+.panel-slot {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 2px 4px;
+  background: linear-gradient(180deg, #35322b 0%, #24221d 100%);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 3px;
+  color: var(--ink); font: inherit; font-size: 11px; line-height: 1.15;
+  text-align: center; cursor: pointer;
+}
+.panel-slot-name { overflow: hidden; }
+/* An empty slot is a hole in the establishment, not a button with a label:
+   quieter ground, a lighter plus, no bevel to suggest something is there. */
+.panel-slot.is-empty {
+  background: rgba(0,0,0,0.22); box-shadow: none;
+  border-style: dashed; border-color: #3a352c; color: var(--ink-dim);
+  font-size: 15px;
+}
+/* Establishment the division has not used. Present, so the grid still says how
+   big a division may be, but quiet enough not to look like 23 buttons. */
+.panel-slot.is-spare {
+  background: rgba(0,0,0,0.14); box-shadow: none;
+  border-style: dashed; border-color: #2a251e; cursor: default;
+}
+
+/* Three columns of numbers, as the reference has them: what the division is,
+   what it does in a fight, and what it costs. They wrap to two on a narrow
+   screen rather than shrinking the type. */
+.panel-stattable {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 6px; margin-bottom: 8px;
+}
+.panel-statcol {
+  background: var(--panel, #23221e);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 3px;
+  padding: 5px 7px 6px;
+}
+.panel-statcol-h {
+  font-size: 11px; color: var(--accent); letter-spacing: 0.06em;
+  padding-bottom: 3px; margin-bottom: 3px;
+  border-bottom: 1px solid #100f0d;
+}
+.panel-statline {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 11px; line-height: 1.6;
+}
+.panel-statline-k { color: var(--ink-dim); }
+/* Numbers large and light, names small and dark -- the rule the reference
+   follows everywhere and the one that makes a dense table readable. */
+.panel-statline-v { color: var(--ink); font-weight: 600; }
+.panel-statline-v.is-short { color: var(--bad, #d8574a); }
+
+/* The Adjusters box. */
+.panel-adjusters {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 5px; margin-bottom: 8px;
+}
+.panel-adjuster {
+  background: var(--panel, #23221e);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 3px;
+  padding: 4px 6px 5px;
+}
+.panel-adjuster-h { font-size: 11px; color: var(--ink); margin-bottom: 2px; }
+.panel-adjuster-nums {
+  display: flex; flex-wrap: wrap; gap: 2px 7px; font-size: 11px;
+}
+/* Each figure stays whole. Without this the row broke between the label and
+   its number and the box read "攻-10% 防 / +0% 速 +0%". */
+.panel-adjuster-n { color: var(--ink-dim); white-space: nowrap; }
+.panel-adjuster-n.is-good { color: #7fe07f; }
+.panel-adjuster-n.is-bad { color: #d8574a; }
+.panel-adjuster-fit { font-size: 10px; color: var(--ink-dim); margin-top: 2px; }
 /* A garrison row the player has picked out of the stack. Splitting one
    formation off a province was impossible from anywhere before this. */
 .panel-row.is-picked {
@@ -974,6 +1062,19 @@ button:active { transform: scale(0.96); }
 }
 /* A general with more divisions than he can handle is the one number on this
    panel the player has to notice, so it is the one thing painted in alarm. */
+/* The order of battle. Rows are buttons: tapping one takes that division out
+   of the formation's hands and into the player's, without dissolving the
+   formation around it. */
+.panel-oob { margin-top: 6px; }
+.panel-oob-row {
+  display: flex; align-items: center; width: 100%;
+  min-height: 44px; padding: 5px 8px; margin-bottom: 3px;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid #100f0d; border-left: 2px solid #3a352c; border-radius: 2px;
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.panel-oob-row.is-fighting { border-left-color: #d8574a; }
+
 .panel-army-head.is-over .panel-army-count {
   color: var(--danger); border-color: #4a1f1a; font-weight: 700;
 }

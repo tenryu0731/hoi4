@@ -14,8 +14,6 @@ import type { EquipmentType, GameState } from './core/types';
  * stops being a choice. Twenty-four line battalions is a little above the
  * largest historical division, which leaves room to be wrong on purpose.
  */
-const MAX_BATTALIONS = 24;
-const MAX_SUPPORTS = 4;
 import type { ProvinceIndex } from './map/ProvinceIndex';
 import type { TickContext } from './time/TimeEngine';
 import {
@@ -36,6 +34,7 @@ import {
   setArmyParent, tickCommandReinforcementDaily, tickCommanderExperienceDaily,
 } from './military/command';
 import { tickBattlePlansDaily } from './military/frontline';
+import { MAX_BATTALIONS, MAX_SUPPORTS } from './core/data';
 import { tickAIDaily } from './ai/ai';
 import { cancelResearch, startResearch, tickResearchDaily } from './research';
 import { closeTrade, openTrade, tickTradeDaily } from './economy/trade';

@@ -1,5 +1,5 @@
 import { BitmapFont, BitmapText, Container } from 'pixi.js';
-import { COUNTRY } from '../../ui/strings';
+import { COUNTRY, PLAN_GLYPHS } from '../../ui/strings';
 
 import type { ProvinceIndex } from '../../sim/map/ProvinceIndex';
 import type { ScreenRect } from './UnitLayer';
@@ -30,6 +30,8 @@ const MAX_LABEL_SHRINK = 1.6;
 export const FONT_COUNTRY = 'IF-Country';
 export const FONT_PROVINCE = 'IF-Province';
 export const FONT_CITY = 'IF-City';
+/** Front-line tags. Its own atlas because its glyphs are CJK and small. */
+export const FONT_PLAN = 'IF-Plan';
 
 /**
  * Every distinct character the Japanese country names use.
@@ -74,6 +76,18 @@ function installFonts(): void {
       letterSpacing: 1,
     },
     chars: [['a', 'z'], ['A', 'Z'], ['0', '9'], LATIN_GLYPHS],
+    resolution: 2,
+  });
+  BitmapFont.install({
+    name: FONT_PLAN,
+    style: {
+      fontFamily: '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Helvetica Neue", Arial, sans-serif',
+      fontSize: 24,
+      fontWeight: 'bold',
+      fill: 0xffffff,
+      stroke: { color: 0x0e0b06, width: 5, join: 'round' },
+    },
+    chars: [['0', '9'], PLAN_GLYPHS],
     resolution: 2,
   });
   BitmapFont.install({

@@ -9,6 +9,7 @@ import { MapRenderer, type PlanLine, type SelectionScope } from '../render/MapRe
 import type { MapMode } from '../render/palette';
 import { TouchController } from '../input/TouchController';
 import { ZOOM_AGGREGATE_STATES } from '../render/layers/UnitLayer';
+import { UI } from '../ui/strings';
 
 /**
  * Composition root. Owns the loop and wires the three halves of the program
@@ -338,11 +339,21 @@ export class Game {
     for (let i = 0; i < armies.length; i++) {
       const army = armies[i];
       if (army.frontProvinces.length === 0) continue;
+      // Counted live rather than taken from army.divisions.length: a
+      // formation that has lost half its divisions is still carrying them on
+      // its books, and the tag on the line has to say what is actually there.
+      const strength = army.divisions.reduce(
+        (n, id) => n + (this.state.divisions[id]?.dead === false ? 1 : 0), 0,
+      );
+      const offensive = army.order?.kind === 'offensive';
       out.push({
         owner: me,
         provinces: army.frontProvinces,
-        targets: army.order?.kind === 'offensive' ? army.order.targets : [],
+        targets: offensive && army.order?.kind === 'offensive' ? army.order.targets : [],
         color: Game.PLAN_COLORS[i % Game.PLAN_COLORS.length],
+        label: offensive
+          ? UI.planOffensive(army.name, strength)
+          : UI.planLabel(army.name, strength),
         // With nothing selected every plan is drawn at full strength: the
         // player is looking at the whole board. Selecting one is what pushes
         // the others back.

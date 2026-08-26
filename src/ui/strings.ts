@@ -2,6 +2,7 @@ import type {
   BattalionType, BuildingType, EquipmentType, GameEventBody, Ideology,
   OutcomeReason, ResourceType, SupportType, TerrainType,
 } from '../sim/core/types';
+import { ARMY_GROUP_NAME, ARMY_ORDINALS, ARMY_SUFFIX } from '../sim/military/command';
 
 /**
  * Everything the player reads, in Japanese.
@@ -94,6 +95,14 @@ export const UI = {
   tradeLawLine: (law: string, share: number, perFactory: number): string =>
     `${law} · 産出の ${share}% を市場へ · 民需工場 1 基につき ${perFactory}／日`,
   cancel: '選択解除',
+  /**
+   * The tag on a front line, as the reference screenshot writes it:
+   * "17 Divs - 4. Armee". A standing order the player cannot see on the map
+   * is a standing order they have to remember they gave.
+   */
+  planLabel: (army: string, divisions: number): string => `${army} · ${divisions}個師団`,
+  planOffensive: (army: string, divisions: number): string =>
+    `${army} · ${divisions}個師団 進攻`,
   /** Shown while a stack is under orders and the next tap sets its objective. */
   orderHint: (n: number): string => `${n}個師団 — 移動先をタップ`,
   /* The order bar's own buttons, on the map rather than in a panel. Two
@@ -184,6 +193,11 @@ export const UI = {
   setOrderClear: '解除',
   pickEnemy: '対象',
   divisionsInArmy: '個師団',
+  /** A division's name: the 12 in 第12歩兵師団. */
+  divisionName: (ordinal: number, template: string): string => `第${ordinal}${template}`,
+  orderOfBattle: '隷下師団',
+  onTheMove: '移動中',
+  divisionState: (org: number, hp: number): string => `組織率 ${org}% · 兵力 ${hp}%`,
   newArmy: '＋軍を編成',
   newArmyGroup: '＋軍集団',
   disband: '解隊',
@@ -257,6 +271,45 @@ export const UI = {
   supportCompanies: '支援中隊',
   equipmentPerDivision: '1個師団あたりの装備',
   saveTemplate: '保存',
+  /* The three-column table the real designer puts beside the battalion grid.
+     HOI4 splits them because they answer different questions: what the
+     division is, what it does in a fight, and what it costs to raise. */
+  statsBase: '基本性能',
+  statsCombat: '戦闘性能',
+  statsCost: '装備コスト',
+  statHp: '耐久',
+  statOrg: '組織率',
+  statSpeed: '最高速度',
+  statSupply: '補給消費',
+  statFuel: '燃料消費',
+  statWeight: '編成規模',
+  statSoftAttack: '対人攻撃',
+  statHardAttack: '対甲攻撃',
+  statDefence: '防御',
+  statBreakthrough: '突破',
+  statArmor: '装甲',
+  statPiercing: '貫通',
+  statHardness: '硬度',
+  statWidth: '戦闘正面',
+  statManpower: '必要人的資源',
+  statCost: '生産コスト',
+  /* The Adjusters box. Every one of these numbers is already in the fight and
+     none of them was on screen. */
+  terrainAdjusters: '地形補正',
+  terrainAttack: '攻',
+  terrainDefence: '防',
+  terrainSpeed: '速',
+  terrainFits: '同時投入',
+  /** How many of this division the ground lets into one battle. */
+  divisionsFit: (n: number): string => `${n}個`,
+  battalionAdd: '大隊を追加',
+  supportAdd: '支援中隊を追加',
+  slotEmpty: '＋',
+  designerReset: 'リセット',
+  designerDuplicate: '複製',
+  estimatedCost: '推定生産コスト',
+  pickBattalion: '追加する大隊',
+  pickSupport: '追加する支援中隊',
   back: '戻る',
   edit: '編集',
   softAttack: '攻撃',
@@ -376,6 +429,18 @@ export const SUPPORT: Record<SupportType, string> = {
   engineer: '工兵中隊', recon: '偵察中隊',
   artillery_support: '砲兵中隊', logistics: '兵站中隊',
 };
+
+/**
+ * Every character a front-line tag can contain.
+ *
+ * A bitmap font rasterises its glyphs at install time and has no fallback, so
+ * the atlas has to be told. Built from the pieces the tag is built from --
+ * the ordinal army names, the suffixes, and the words around them -- so that
+ * renaming an army can never leave its tag rendering as blanks.
+ */
+export const PLAN_GLYPHS = [...new Set(
+  ARMY_ORDINALS.join('') + ARMY_SUFFIX + ARMY_GROUP_NAME + '個師団 · 進攻',
+)].join('');
 
 export const IDEOLOGY: Record<Ideology, string> = {
   fascist: 'ファシズム', democratic: '民主主義',

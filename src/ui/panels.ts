@@ -32,6 +32,8 @@ import {
   idleCommanders, nextArmyName,
 } from '../sim/military/command';
 import { maxPlanning } from '../sim/military/frontline';
+import { divisionsPerBattle, terrainProfile } from '../sim/military/combat';
+import { MAX_BATTALIONS, MAX_SUPPORTS } from '../sim/core/data';
 import {
   BATTALION, BUILDING, EQUIPMENT as EQUIPMENT_NAME, IDEOLOGY, RESOURCE,
   SUPPORT, TERRAIN, TRAIT, UI, country,
@@ -1007,8 +1009,63 @@ export function editTemplate(tpl: DivisionTemplate): void {
   };
 }
 
-const MAX_BATTALIONS = 24;
+/** Slots the battalion grid draws, whether or not they are filled. */
+const GRID_COLS = 4;
+const GRID_ROWS = 6;
+const SUPPORT_SLOTS = 4;
 
+/** The picker that is open under the grid, or null. */
+let slotPicker: 'battalion' | 'support' | null = null;
+
+/**
+ * One battalion or support slot.
+ *
+ * Three states, not the reference's four. HOI4 draws a padlock on slots its
+ * special-forces and doctrine rules have not opened yet; nothing in this game
+ * gates a battalion type, so a padlock here would be an ornament that says
+ * something untrue. What is left is the part that is real: a filled slot shows
+ * what is in it and empties when pressed, the next free slot is the plus that
+ * opens the picker, and the rest are the empty establishment behind it.
+ */
+function slot(label: string | null, next: boolean, onPick: () => void): HTMLElement {
+  const b = el('button', 'panel-slot');
+  if (label !== null) {
+    b.append(el('span', 'panel-slot-name', label));
+    b.addEventListener('click', onPick);
+    return b;
+  }
+  b.classList.add('is-empty');
+  if (!next) {
+    // Room the division has and has not used. Inert: pressing the twentieth
+    // slot cannot mean anything the ninth does not already mean.
+    b.classList.add('is-spare');
+    b.disabled = true;
+    return b;
+  }
+  b.textContent = UI.slotEmpty;
+  b.addEventListener('click', onPick);
+  return b;
+}
+
+/** A row of the three-column stat table. */
+function statLine(k: string, v: string, short = false): HTMLElement {
+  const row = el('div', 'panel-statline');
+  row.append(el('span', 'panel-statline-k', k),
+    el('span', `panel-statline-v${short ? ' is-short' : ''}`, v));
+  return row;
+}
+
+/**
+ * The division designer, laid out the way the real one is.
+ *
+ * The reference screenshot puts a grid of battalions on the left and three
+ * columns of numbers on the right -- base, combat, cost -- with the terrain
+ * adjusters underneath and the estimated production cost along the bottom.
+ * This was a list of counters with plus and minus buttons and two rows of
+ * chips: it could build the same division, and it could not show you what one
+ * was. A phone cannot put the grid beside the table, so they stack; the
+ * grouping and the reading order are the reference's.
+ */
 export const designerPanel: Panel = {
   id: 'designer',
   title: UI.designer,
@@ -1019,24 +1076,6 @@ export const designerPanel: Panel = {
     // previews is exactly what the simulation will fight with.
     const preview = deriveTemplate(-1, draft.name || UI.newTemplate,
       draft.battalions.length > 0 ? draft.battalions : ['infantry'], draft.supports);
-
-    const head = el('div', 'panel-head');
-    head.append(
-      stat(UI.softAttack, preview.softAttack.toFixed(0)),
-      stat(UI.defence, preview.defense.toFixed(0)),
-      stat(UI.breakthrough, preview.breakthrough.toFixed(0)),
-      stat(UI.combatWidth, String(preview.width)),
-    );
-    root.append(head);
-
-    const head2 = el('div', 'panel-head');
-    head2.append(
-      stat(UI.organisation, preview.maxOrg.toFixed(0)),
-      stat(UI.strength, preview.maxHp.toFixed(0)),
-      stat(UI.speed, `${preview.speedKmh.toFixed(0)}`),
-      stat(UI.manpower, formatNumber(preview.manpowerNeed)),
-    );
-    root.append(head2);
 
     const rebuild = (): void => {
       designerPanel.build(game, root);
@@ -1053,70 +1092,175 @@ export const designerPanel: Panel = {
     nameRow.append(nameInput);
     root.append(nameRow);
 
-    // --- line battalions ----------------------------------------------------
+    // --- the grid -----------------------------------------------------------
     root.append(el('div', 'panel-label',
-      `${UI.battalions} ${draft.battalions.length}/${MAX_BATTALIONS}`));
-    const bnCounts = el('div', 'panel-list');
-    for (const b of BATTALION_TYPES) {
-      const n = draft.battalions.filter((x) => x === b).length;
-      const row = el('div', 'panel-row');
-      const main = el('div', 'panel-row-main');
-      main.append(el('div', 'panel-row-title', BATTALION[b]));
-      const controls = el('div', 'panel-row-controls');
-      const minus = el('button', 'panel-btn', '−');
-      const count = el('span', 'panel-count', String(n));
-      const plus = el('button', 'panel-btn', '+');
-      minus.disabled = n === 0;
-      plus.disabled = draft.battalions.length >= MAX_BATTALIONS;
-      minus.addEventListener('click', () => {
-        const i = draft.battalions.lastIndexOf(b);
-        if (i >= 0) draft.battalions.splice(i, 1);
-        rebuild();
-      });
-      plus.addEventListener('click', () => {
-        if (draft.battalions.length < MAX_BATTALIONS) draft.battalions.push(b);
-        rebuild();
-      });
-      controls.append(minus, count, plus);
-      row.append(main, controls);
-      bnCounts.append(row);
-    }
-    root.append(bnCounts);
+      `${UI.battalions} ${draft.battalions.length}/${MAX_BATTALIONS}`
+      + ` · ${UI.supportCompanies} ${draft.supports.length}/${MAX_SUPPORTS}`));
 
-    // --- support companies --------------------------------------------------
-    root.append(el('div', 'panel-label', UI.supportCompanies));
-    const sup = el('div', 'panel-grid');
-    for (const sc of SUPPORT_TYPES) {
-      const on = draft.supports.includes(sc);
-      const b = el('button', `panel-build${on ? ' is-on' : ''}`);
-      b.append(el('span', 'panel-build-title', SUPPORT[sc]));
-      b.addEventListener('click', () => {
-        draft.supports = on
-          ? draft.supports.filter((x) => x !== sc)
-          : [...draft.supports, sc];
-        rebuild();
-      });
-      sup.append(b);
-    }
-    root.append(sup);
+    const board = el('div', 'panel-board');
 
-    // --- equipment bill -----------------------------------------------------
-    root.append(el('div', 'panel-label', UI.equipmentPerDivision));
-    const bill = el('div', 'panel-kvs');
+    // Support companies down the left, as they are in the real designer: they
+    // are a different kind of thing from a line battalion and the layout says
+    // so before any label does.
+    const supportCol = el('div', 'panel-board-support');
+    for (let i = 0; i < SUPPORT_SLOTS; i++) {
+      const held = draft.supports[i];
+      supportCol.append(slot(
+        held ? SUPPORT[held] : null,
+        i === draft.supports.length && draft.supports.length < MAX_SUPPORTS,
+        () => {
+          if (held) {
+            draft.supports = draft.supports.filter((x) => x !== held);
+            slotPicker = null;
+          } else {
+            slotPicker = slotPicker === 'support' ? null : 'support';
+          }
+          rebuild();
+        },
+      ));
+    }
+
+    const combat = el('div', 'panel-board-combat');
+    const cells = GRID_COLS * GRID_ROWS;
+    for (let i = 0; i < cells; i++) {
+      const held = draft.battalions[i];
+      combat.append(slot(
+        held ? BATTALION[held] : null,
+        i === draft.battalions.length && draft.battalions.length < MAX_BATTALIONS,
+        () => {
+          if (held !== undefined) {
+            draft.battalions.splice(i, 1);
+            slotPicker = null;
+          } else {
+            slotPicker = slotPicker === 'battalion' ? null : 'battalion';
+          }
+          rebuild();
+        },
+      ));
+    }
+    board.append(supportCol, combat);
+    root.append(board);
+
+    // The picker, opened by an empty slot. A phone has no room for a grid and
+    // a permanent palette of six types, and the palette is only wanted for the
+    // moment after a slot has been pressed.
+    if (slotPicker !== null) {
+      root.append(el('div', 'panel-label',
+        slotPicker === 'battalion' ? UI.pickBattalion : UI.pickSupport));
+      const chips = el('div', 'panel-chips');
+      if (slotPicker === 'battalion') {
+        for (const b of BATTALION_TYPES) {
+          const chip = el('button', 'panel-chip', BATTALION[b]);
+          chip.disabled = draft.battalions.length >= MAX_BATTALIONS;
+          chip.addEventListener('click', () => {
+            draft.battalions.push(b);
+            slotPicker = null;
+            rebuild();
+          });
+          chips.append(chip);
+        }
+      } else {
+        for (const sc of SUPPORT_TYPES) {
+          const chip = el('button', 'panel-chip', SUPPORT[sc]);
+          chip.disabled = draft.supports.includes(sc) || draft.supports.length >= MAX_SUPPORTS;
+          chip.addEventListener('click', () => {
+            draft.supports = [...draft.supports, sc];
+            slotPicker = null;
+            rebuild();
+          });
+          chips.append(chip);
+        }
+      }
+      root.append(chips);
+    }
+
+    // --- the three columns --------------------------------------------------
+    const table = el('div', 'panel-stattable');
+
+    const base = el('div', 'panel-statcol');
+    base.append(el('div', 'panel-statcol-h', UI.statsBase));
+    base.append(
+      statLine(UI.statHp, preview.maxHp.toFixed(1)),
+      statLine(UI.statOrg, preview.maxOrg.toFixed(1)),
+      statLine(UI.statSpeed, `${preview.speedKmh.toFixed(0)} km/h`),
+      statLine(UI.statWeight, String(preview.battalions.length + preview.supports.length)),
+      statLine(UI.statSupply, preview.supplyUse.toFixed(2)),
+      statLine(UI.statFuel, preview.fuelUse.toFixed(1)),
+    );
+
+    const fight = el('div', 'panel-statcol');
+    fight.append(el('div', 'panel-statcol-h', UI.statsCombat));
+    fight.append(
+      statLine(UI.statSoftAttack, preview.softAttack.toFixed(1)),
+      statLine(UI.statHardAttack, preview.hardAttack.toFixed(1)),
+      statLine(UI.statDefence, preview.defense.toFixed(1)),
+      statLine(UI.statBreakthrough, preview.breakthrough.toFixed(1)),
+      statLine(UI.statArmor, preview.armor.toFixed(0)),
+      statLine(UI.statPiercing, preview.piercing.toFixed(0)),
+      statLine(UI.statHardness, `${(preview.hardness * 100).toFixed(0)}%`),
+      statLine(UI.statWidth, String(preview.width)),
+    );
+
+    const cost = el('div', 'panel-statcol');
+    cost.append(el('div', 'panel-statcol-h', UI.statsCost));
+    cost.append(
+      statLine(UI.statManpower, formatNumber(preview.manpowerNeed)),
+      statLine(UI.statCost, formatNumber(preview.buildCost)),
+    );
+    // The equipment bill belongs in this column, against what is in the depot:
+    // it is the part of the cost that can actually stop a division being
+    // raised, and it was in a separate block at the bottom of the panel.
     for (const [eq, need] of Object.entries(preview.equipmentNeed) as [EquipmentType, number][]) {
-      const row = el('div', 'panel-kv');
       const have = me.economy.stockpile[eq] ?? 0;
-      row.append(
-        el('span', 'panel-k', EQUIPMENT_LABEL[eq]),
-        el('span', `panel-v${have < need ? ' is-short' : ''}`,
-          `${Math.round(need)} / ${formatNumber(have)}`),
-      );
-      bill.append(row);
+      cost.append(statLine(
+        EQUIPMENT_LABEL[eq],
+        `${Math.round(need)} / ${formatNumber(have)}`,
+        have < need,
+      ));
     }
-    root.append(bill);
+
+    table.append(base, fight, cost);
+    root.append(table);
+
+    // --- terrain adjusters --------------------------------------------------
+    root.append(el('div', 'panel-label', UI.terrainAdjusters));
+    const adj = el('div', 'panel-adjusters');
+    for (const row of terrainProfile(preview)) {
+      const cell = el('div', 'panel-adjuster');
+      cell.append(el('div', 'panel-adjuster-h', TERRAIN[row.terrain]));
+      const nums = el('div', 'panel-adjuster-nums');
+      const pct = (v: number): string => `${v >= 1 ? '+' : ''}${Math.round((v - 1) * 100)}%`;
+      const mark = (label: string, v: number): HTMLElement => {
+        const n = el('span', 'panel-adjuster-n', `${label}${pct(v)}`);
+        n.classList.toggle('is-good', v > 1.001);
+        n.classList.toggle('is-bad', v < 0.999);
+        return n;
+      };
+      nums.append(
+        mark(UI.terrainAttack, row.attack),
+        mark(UI.terrainDefence, row.defence),
+        mark(UI.terrainSpeed, row.speed),
+      );
+      cell.append(nums);
+      // What the ground actually lets in. This is the number that decides
+      // whether a wide division is worth building, and it has never been shown.
+      cell.append(el('div', 'panel-adjuster-fit',
+        `${UI.terrainFits} ${UI.divisionsFit(divisionsPerBattle(preview, row.width))}`));
+      adj.append(cell);
+    }
+    root.append(adj);
 
     // --- actions ------------------------------------------------------------
+    root.append(el('div', 'panel-row-sub',
+      `${UI.estimatedCost} ${formatNumber(preview.buildCost)}`));
     const actions = el('div', 'panel-row');
+    const reset = el('button', 'panel-btn', UI.designerReset);
+    reset.addEventListener('click', () => {
+      draft.battalions = [];
+      draft.supports = [];
+      slotPicker = null;
+      rebuild();
+    });
     const save = el('button', 'panel-btn wide primary', UI.saveTemplate);
     save.disabled = draft.battalions.length === 0;
     save.addEventListener('click', () => {
@@ -1125,11 +1269,15 @@ export const designerPanel: Panel = {
         name: draft.name || UI.newTemplate,
         battalions: draft.battalions, supports: draft.supports,
       });
+      slotPicker = null;
       game.openPanel?.('army');
     });
-    const back = el('button', 'panel-btn wide', UI.back);
-    back.addEventListener('click', () => game.openPanel?.('army'));
-    actions.append(back, save);
+    const back = el('button', 'panel-btn', UI.back);
+    back.addEventListener('click', () => {
+      slotPicker = null;
+      game.openPanel?.('army');
+    });
+    actions.append(back, reset, save);
     root.append(actions);
   },
 };
@@ -1378,6 +1526,50 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
   return box;
 }
 
+/**
+ * The divisions in an army, which is what an army is.
+ *
+ * The card carried a count and a preparation bar and no way to see what was
+ * under the general -- a formation you cannot open is a number, not an order
+ * of battle. Each row is tappable and puts that one division under orders on
+ * the map, so a single division can be pulled out of a front without
+ * dissolving the formation around it.
+ */
+function orderOfBattle(game: Game, army: Army): HTMLElement {
+  const state = game.state;
+  const box = el('div', 'panel-oob');
+  box.append(el('div', 'panel-label', `${UI.orderOfBattle} ${army.divisions.length}`));
+  const live = army.divisions
+    .map((id) => state.divisions[id])
+    .filter((d) => d && !d.dead);
+  if (live.length === 0) {
+    box.append(el('div', 'panel-empty', UI.unassigned));
+    return box;
+  }
+  for (const d of live) {
+    const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
+    const row = el('button', 'panel-oob-row');
+    const main = el('div', 'panel-row-main');
+    main.append(el('div', 'panel-row-title',
+      UI.divisionName(d.ordinal, tpl?.name ?? UI.newTemplate)));
+    const org = Math.round((d.org / Math.max(1, tpl?.maxOrg ?? 1)) * 100);
+    const hp = Math.round((d.hp / Math.max(1, tpl?.maxHp ?? 1)) * 100);
+    const where = game.index.get(d.provinceId).name;
+    const tag = d.combatId !== null ? ` · ${UI.inCombat}`
+      : d.path.length > 0 ? ` · ${UI.onTheMove}` : '';
+    main.append(el('div', 'panel-row-sub',
+      `${where} · ${UI.divisionState(org, hp)}${tag}`));
+    row.append(main);
+    if (d.combatId !== null) row.classList.add('is-fighting');
+    row.addEventListener('click', () => {
+      game.selectDivisions([d.id], { army: army.id });
+      closeSheet();
+    });
+    box.append(row);
+  }
+  return box;
+}
+
 /** An enemy's most valuable provinces: what an offensive is actually for. */
 function objectivesAgainst(game: Game, enemy: CountryId): number[] {
   return game.index.provinces
@@ -1539,6 +1731,7 @@ export const commandPanel: Panel = {
           }
         }
         card.append(orderControls(game, army, rebuild));
+        card.append(orderOfBattle(game, army));
 
         // What turns a formation into something you can move. Without this an
         // army was a note in a panel: the map only ever knew about whatever

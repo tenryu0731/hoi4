@@ -1,5 +1,5 @@
 import {
-  Application, Container, Graphics, Matrix, Sprite, Texture, TilingSprite,
+  Application, BitmapText, Container, Graphics, Matrix, Sprite, Texture, TilingSprite,
 } from 'pixi.js';
 
 import type { Province, ProvinceIndex } from '../sim/map/ProvinceIndex';
@@ -14,7 +14,7 @@ import {
 } from './textures';
 import { NATIONS } from '../sim/scenario/nations';
 import { supplyCapacity } from '../sim/military/supply';
-import { LabelLayer } from './layers/LabelLayer';
+import { FONT_PLAN, LabelLayer } from './layers/LabelLayer';
 import { UnitLayer, type DragOrder } from './layers/UnitLayer';
 import { country } from '../ui/strings';
 
@@ -44,6 +44,10 @@ export interface MapRendererOptions {
 /** Zoom thresholds at which line weights and label sets change. */
 const LOD_STEPS = [0.045, 0.075, 0.13, 0.24, 0.45, 0.9];
 
+/** On-screen height of a front-line tag, and the size its atlas was built at. */
+const PLAN_LABEL_PX = 12;
+const PLAN_FONT_PX = 24;
+
 /**
  * Which of the map's two tiers an outline belongs to. A province is where a
  * division stands; a state is what gets built in.
@@ -67,6 +71,8 @@ export interface PlanLine {
   color: number;
   /** Drawn at full strength; the other formations' plans stay quiet. */
   selected: boolean;
+  /** The tag written on the line: which formation, and how many divisions. */
+  label: string;
 }
 
 export class MapRenderer {
@@ -89,6 +95,8 @@ export class MapRenderer {
   private selectScope: SelectionScope = 'province';
   private frontLayer = new Graphics();
   private planLayer = new Graphics();
+  private planLabels = new Container();
+  private planLabelPool: BitmapText[] = [];
   private cityLayer = new Graphics();
   /** Exposed for the visual-determinism probe in the e2e suite. */
   labels!: LabelLayer;
@@ -220,6 +228,9 @@ export class MapRenderer {
 
     this.units = new UnitLayer(this.index);
     this.world.addChild(this.units.container);
+    // Front-line tags go over the counters. They name a formation, and a
+    // formation is exactly what the counters underneath are part of.
+    this.world.addChild(this.planLabels);
     this.world.addChild(this.labels.topContainer);
   }
 
@@ -743,13 +754,19 @@ export class MapRenderer {
   private drawPlans(state: GameState): void {
     const g = this.planLayer;
     g.clear();
-    if (this.plans.length === 0) return;
     const zoom = Math.max(0.02, this.camera.zoom);
+    const labels: { text: string; x: number; y: number; color: number }[] = [];
+    if (this.plans.length === 0) {
+      this.placePlanLabels(labels, zoom);
+      return;
+    }
 
     for (const plan of this.plans) {
       if (plan.provinces.length === 0) continue;
       const inPlan = new Set(plan.provinces);
-      const runs: number[][] = [];
+      // Each arc is carried with the centre of the province that holds it, so
+      // the teeth below know which way is home without having to ask the map.
+      const runs: { pts: number[]; homeX: number; homeY: number }[] = [];
       for (const id of plan.provinces) {
         const p = this.index.provinces[id];
         if (!p) continue;
@@ -759,21 +776,32 @@ export class MapRenderer {
           // the position, not the edge of it, and drawing those turns the
           // line into a filled-in blob of the army's colour.
           if (state.provinces[nb]?.controller === plan.owner) continue;
-          runs.push(...this.sharedBorderCached(Math.min(id, nb), Math.max(id, nb)));
+          for (const pts of this.sharedBorderCached(Math.min(id, nb), Math.max(id, nb))) {
+            runs.push({ pts, homeX: p.centerX, homeY: p.centerY });
+          }
         }
       }
 
       const emphasis = plan.selected ? 1 : 0.62;
       if (runs.length > 0) {
-        for (const r of runs) this.tracePolyline(g, r);
+        for (const r of runs) this.tracePolyline(g, r.pts);
         g.stroke({
           color: plan.color, width: 11 / zoom, alpha: 0.16 * emphasis,
           cap: 'round', join: 'round',
         });
-        for (const r of runs) this.tracePolyline(g, r);
+        for (const r of runs) this.tracePolyline(g, r.pts);
         g.stroke({
           color: plan.color, width: 3.6 / zoom, alpha: 0.9 * emphasis,
           cap: 'round', join: 'round',
+        });
+        // Teeth on the friendly side, the way the reference draws a front.
+        // A plain stroke along a border is a border; the comb is what says
+        // there is an army standing behind this particular line and which
+        // way it is facing.
+        for (const r of runs) this.traceTeeth(g, r, zoom);
+        g.stroke({
+          color: plan.color, width: 2.2 / zoom, alpha: 0.75 * emphasis,
+          cap: 'round',
         });
       }
 
@@ -801,6 +829,102 @@ export class MapRenderer {
           cap: 'round', join: 'round',
         });
       }
+
+      const anchor = this.labelAnchor(runs.map((r) => r.pts), plan.provinces);
+      if (anchor) labels.push({ text: plan.label, x: anchor.x, y: anchor.y, color: plan.color });
+    }
+
+    this.placePlanLabels(labels, zoom);
+  }
+
+  /**
+   * Where a front's tag goes: the middle of its longest continuous run.
+   *
+   * The longest run rather than the centroid of the provinces, because a front
+   * that bends around a salient has a centroid inside enemy territory, and a
+   * tag floating over the country it is aimed at reads as a claim on it.
+   */
+  private labelAnchor(
+    runs: readonly number[][], provinces: readonly ProvinceId[],
+  ): { x: number; y: number } | null {
+    let best: number[] | null = null;
+    for (const r of runs) if (!best || r.length > best.length) best = r;
+    if (best && best.length >= 4) {
+      const mid = Math.floor(best.length / 4) * 2;
+      return { x: best[mid], y: best[mid + 1] };
+    }
+    // A plan with no outward face at all -- an interior garrison -- still has
+    // provinces, and its tag belongs over them.
+    const p = provinces.length > 0 ? this.index.provinces[provinces[0]] : null;
+    return p ? { x: p.centerX, y: p.centerY } : null;
+  }
+
+  /**
+   * Short strokes on the owning side of the line.
+   *
+   * The side is chosen per segment against the centre of the province the arc
+   * belongs to, which is carried alongside the arc for exactly this. The first
+   * version asked pickNearest where each tooth landed -- correct, and a
+   * spatial-grid query per tooth per frame for a decoration. The province is
+   * already known at the point the arc is collected, and a dot product costs
+   * nothing.
+   */
+  private traceTeeth(
+    g: Graphics, run: { pts: number[]; homeX: number; homeY: number }, zoom: number,
+  ): void {
+    const pts = run.pts;
+    const len = 7 / zoom;
+    // Teeth roughly every 26 screen pixels, and never on every vertex: the
+    // simplified rings put their vertices very unevenly.
+    const spacing = 26 / zoom;
+    let since = spacing;
+    for (let i = 2; i < pts.length - 2; i += 2) {
+      const x = pts[i];
+      const y = pts[i + 1];
+      since += Math.hypot(x - pts[i - 2], y - pts[i - 1]);
+      if (since < spacing) continue;
+      since = 0;
+      const dx = pts[i + 2] - pts[i - 2];
+      const dy = pts[i + 3] - pts[i - 1];
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 1e-3) continue;
+      let nx = -dy / d;
+      let ny = dx / d;
+      // Flip the normal if it points away from the province behind the line.
+      if (nx * (run.homeX - x) + ny * (run.homeY - y) < 0) { nx = -nx; ny = -ny; }
+      g.moveTo(x, y);
+      g.lineTo(x + nx * len, y + ny * len);
+    }
+  }
+
+  /**
+   * The tags themselves, pooled like the counters are.
+   *
+   * Constant on-screen size: a tag that scaled with the map would be
+   * unreadable at the zoom a whole front is visible at, which is the only
+   * zoom at which anybody wants to read it.
+   */
+  private placePlanLabels(
+    labels: readonly { text: string; x: number; y: number; color: number }[],
+    zoom: number,
+  ): void {
+    for (let i = 0; i < labels.length; i++) {
+      let node = this.planLabelPool[i];
+      if (!node) {
+        node = new BitmapText({ text: '', style: { fontFamily: FONT_PLAN } });
+        node.anchor.set(0.5);
+        this.planLabels.addChild(node);
+        this.planLabelPool.push(node);
+      }
+      const l = labels[i];
+      if (node.text !== l.text) node.text = l.text;
+      node.visible = true;
+      node.tint = l.color;
+      node.position.set(l.x, l.y);
+      node.scale.set(PLAN_LABEL_PX / PLAN_FONT_PX / zoom);
+    }
+    for (let i = labels.length; i < this.planLabelPool.length; i++) {
+      this.planLabelPool[i].visible = false;
     }
   }
 
