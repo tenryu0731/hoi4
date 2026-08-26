@@ -2,7 +2,7 @@ import type { Game } from '../app/Game';
 import type { MapMode } from '../render/palette';
 import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
-import { PANELS, formatNumber, type PanelId } from './panels';
+import { PANELS, formatNumber, setSheetCloser, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
 import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
@@ -40,6 +40,7 @@ const NAV: [PanelId, string, string][] = [
   ['research', UI.navResearch, 'ui-research'],
   ['construction', UI.navConstruction, 'ui-construction'],
   ['production', UI.navProduction, 'ui-production'],
+  ['trade', UI.navTrade, 'ui-diplomacy'],
   ['command', UI.navCommand, 'ui-command'],
   ['army', UI.navArmy, 'ui-army'],
   ['diplomacy', UI.navDiplomacy, 'ui-diplomacy'],
@@ -396,6 +397,10 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       row.classList.toggle('is-clipped', row.scrollWidth > row.clientWidth + 1);
     }
   }
+
+  // A panel can ask to get out of the way; putting an army under orders does,
+  // because the next thing the player does is tap the ground underneath.
+  setSheetCloser(() => { togglePanel(null); });
 
   const topObserver = new ResizeObserver(() => { measureTop(); measureBand(); markOverflow(); });
   topObserver.observe(top);

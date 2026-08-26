@@ -641,6 +641,13 @@ button:active { transform: scale(0.96); }
   border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
 .panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
+/* A garrison row the player has picked out of the stack. Splitting one
+   formation off a province was impossible from anywhere before this. */
+.panel-row.is-picked {
+  background: linear-gradient(180deg, rgba(211,171,99,0.16) 0%, rgba(211,171,99,0.05) 100%);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.panel-row.is-picked .panel-row-title { color: var(--accent); }
 /* A state row is the tap target for "build here", so it is a button and needs
    to look like a row rather than like a control. */
 .panel-row.wide-row {

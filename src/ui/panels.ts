@@ -79,6 +79,23 @@ function tally(names: string[]): string {
   return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join('・');
 }
 
+/**
+ * Shuts the bottom sheet, set by the HUD that owns it.
+ *
+ * A panel occasionally has to get out of the player's way -- putting an army
+ * under orders is the case: what happens next is a tap on the map, and the
+ * sheet is sitting on the map.
+ */
+let closeSheetImpl: () => void = () => {};
+
+export function setSheetCloser(fn: () => void): void {
+  closeSheetImpl = fn;
+}
+
+function closeSheet(): void {
+  closeSheetImpl();
+}
+
 function setText(node: HTMLElement, value: string): void {
   if (node.textContent !== value) node.textContent = value;
 }
@@ -671,6 +688,16 @@ export const diplomacyPanel: Panel = {
 // Province
 // ---------------------------------------------------------------------------
 
+/**
+ * The two tiers, told apart.
+ *
+ * A province is where a division stands and what it marches through; a state
+ * is what holds the factories, the population and the building slots, and
+ * several provinces share one. Reading both off a single undifferentiated card
+ * meant a player could never tell which tier a number belonged to -- 「今ステ
+ * ートしかない」 was about the map, and this is the same complaint about the
+ * panel. The switch changes what the card says *and* what the map outlines.
+ */
 export const provincePanel: Panel = {
   id: 'province',
   title: '州',
@@ -685,18 +712,99 @@ export const provincePanel: Panel = {
     const geo = game.index.get(id);
     const p = state.provinces[id];
     const stateData = game.index.data.states[geo.stateId];
+    const st = state.states[geo.stateId];
     const owner = state.countries[p.owner];
     const controller = state.countries[p.controller];
+    const scope = game.selection.scope;
+    const rebuild = (): void => provincePanel.build(game, root);
 
+    // --- which tier -------------------------------------------------------
+    const tabs = el('div', 'panel-chips');
+    // Just the tier. The names went in the labels first and wrapped the pair
+    // onto two lines on a 412px screen; the sheet title already says which
+    // place is selected.
+    for (const [value, label] of [
+      ['province', UI.tierProvince],
+      ['state', UI.tierState],
+    ] as const) {
+      const chip = el('button', 'panel-chip', label);
+      chip.classList.toggle('is-on', scope === value);
+      chip.addEventListener('click', () => {
+        game.setSelectionScope(value);
+        rebuild();
+      });
+      tabs.append(chip);
+    }
+    root.append(tabs);
+
+    if (scope === 'state') {
+      const head = el('div', 'panel-head');
+      head.append(
+        stat(UI.civFactories, String(stateData.civilianFactories)),
+        stat(UI.milFactories, String(stateData.militaryFactories)),
+        stat(UI.buildSlots, String(stateData.buildingSlots)),
+        stat(UI.infrastructure, String(stateData.infrastructure)),
+      );
+      if (st.owner !== st.controller) {
+        head.append(stat(UI.resistance, `${Math.round(st.resistance * 100)}%`));
+      }
+      root.append(head);
+
+      root.append(el('div', 'panel-sub',
+        `${country(state.countries[st.owner].tag)} · ${stateData.provinces.length}${UI.provinceCount}`
+        + (st.owner === st.controller
+          ? '' : ` · ${country(state.countries[st.controller].tag)}が占領中`)));
+
+      const resources = Object.entries(stateData.resources)
+        .filter(([, v]) => (v ?? 0) > 0)
+        .map(([k, v]) => `${RESOURCE_LABEL[k as ResourceType]} ${v}`)
+        .join('、') || 'なし';
+      const grid = el('div', 'panel-kvs');
+      for (const [k, v] of [
+        [UI.population, formatNumber(stateData.manpower * 1000)],
+        [UI.dockyards, String(stateData.dockyards)],
+        [UI.resources, resources],
+      ] as [string, string][]) {
+        const row = el('div', 'panel-kv');
+        row.append(el('span', 'panel-k', k), el('span', 'panel-v', v));
+        grid.append(row);
+      }
+      root.append(grid);
+
+      // The provinces as rows, not as a sentence. Eight names joined by 、 in
+      // a key/value cell is a wall of text in a 180px column, and the one
+      // thing a player wants from that list is to go to one of them.
+      root.append(el('div', 'panel-label', UI.provincesHere));
+      const members = el('div', 'panel-list');
+      for (const q of stateData.provinces) {
+        const g2 = game.index.get(q);
+        const row = el('button', 'panel-row wide-row');
+        row.classList.toggle('is-picked', q === id);
+        const main = el('div', 'panel-row-main');
+        const held = state.provinces[q];
+        main.append(
+          el('div', 'panel-row-title', g2.name),
+          el('div', 'panel-row-sub',
+            `${TERRAIN[g2.terrain]} · ${UI.victoryPoints} ${g2.vp}`
+            + (held.divisions.length > 0 ? ` · ${held.divisions.length}${UI.divisionsHere}` : '')),
+        );
+        row.append(main);
+        row.addEventListener('click', () => {
+          game.selectProvince(q);
+          game.setSelectionScope('province');
+          rebuild();
+        });
+        members.append(row);
+      }
+      root.append(members);
+      return;
+    }
+
+    // --- the province -----------------------------------------------------
     const head = el('div', 'panel-head');
     head.dataset.role = 'prov-head';
     head.append(stat(UI.victoryPoints, String(geo.vp)), stat(UI.supplyLevel, '—'),
       stat(UI.totalDivisions, '0'));
-    // Only where it applies: home ground never resists.
-    const st = state.states[geo.stateId];
-    if (st.owner !== st.controller) {
-      head.append(stat(UI.resistance, `${Math.round(st.resistance * 100)}%`));
-    }
     root.append(head);
 
     const sub = el('div', 'panel-sub');
@@ -706,50 +814,87 @@ export const provincePanel: Panel = {
     root.append(sub);
 
     const grid = el('div', 'panel-kvs');
-    const resources = Object.entries(stateData.resources)
-      .filter(([, v]) => (v ?? 0) > 0)
-      .map(([k, v]) => `${RESOURCE_LABEL[k as ResourceType]} ${v}`)
-      .join('、') || 'なし';
-    // The two tiers, named and related. A province is what a division stands
-    // in; the state is what the factories and the population belong to, and
-    // several provinces share one -- which is invisible unless it is said.
-    const rows: [string, string][] = [
-      ['所属ステート', `${stateData.name}（${stateData.provinces.length}プロヴィンス）`],
-      [UI.infrastructure, String(stateData.infrastructure)],
-      ['人口', formatNumber(stateData.manpower * 1000)],
-      ['工場（州全体）', `民需 ${stateData.civilianFactories} / 軍需 ${stateData.militaryFactories}`],
-      ['建設枠（州全体）', String(stateData.buildingSlots)],
-      [UI.resources, resources],
+    for (const [k, v] of [
+      [UI.terrainLabel, TERRAIN[geo.terrain]],
+      [UI.fortLevel, String(p.fortLevel)],
+      [UI.coastal, geo.coastal ? UI.yes : UI.no],
       ['占領率', `${country(owner.tag)}の${Math.round(occupationRatio(state, p.owner) * 100)}%`],
-    ];
-    for (const [k, v] of rows) {
+    ] as [string, string][]) {
       const row = el('div', 'panel-kv');
       row.append(el('span', 'panel-k', k), el('span', 'panel-v', v));
       grid.append(row);
     }
     root.append(grid);
 
+    // --- the garrison, as something you can pick from ---------------------
     const divisions = p.divisions
       .map((d) => state.divisions[d])
       .filter((d) => d && !d.dead);
-    if (divisions.length > 0) {
-      root.append(el('div', 'panel-label', UI.garrison));
-      const list = el('div', 'panel-list');
-      list.dataset.role = 'garrison';
-      for (const d of divisions) {
-        const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
-        const row = el('div', 'panel-row');
-        row.dataset.div = String(d.id);
-        const main = el('div', 'panel-row-main');
-        main.append(
-          el('div', 'panel-row-title', `${country(state.countries[d.owner].tag)} ${tpl?.name ?? '師団'}`),
-          el('div', 'panel-row-sub', ''),
-        );
-        row.append(main);
-        list.append(row);
+    if (divisions.length === 0) return;
+
+    const me = state.meta.playerCountry;
+    const mine = divisions.filter((d) => d.owner === me);
+    root.append(el('div', 'panel-label', UI.garrison));
+
+    if (mine.length > 0) {
+      const picked = new Set(game.selection.divisions);
+      const tools = el('div', 'panel-chips');
+      const all = el('button', 'panel-chip', UI.selectAllHere);
+      all.addEventListener('click', () => {
+        game.selectDivisions(mine.map((d) => d.id), { centre: false });
+        rebuild();
+      });
+      tools.append(all);
+      // Putting a division into a formation is what turns a garrison into an
+      // army, so it belongs beside the garrison rather than three panels away.
+      for (const army of (state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup)) {
+        const chip = el('button', 'panel-chip', `${army.name}${UI.assignTo}`);
+        chip.disabled = picked.size === 0;
+        chip.addEventListener('click', () => {
+          game.issue({
+            t: 'assignDivisions', country: me, army: army.id,
+            divisions: [...game.selection.divisions],
+          });
+          rebuild();
+        });
+        tools.append(chip);
       }
-      root.append(list);
+      root.append(tools);
     }
+
+    const list = el('div', 'panel-list');
+    list.dataset.role = 'garrison';
+    for (const d of divisions) {
+      const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
+      const own = d.owner === me;
+      const row = el(own ? 'button' : 'div', 'panel-row');
+      row.dataset.div = String(d.id);
+      if (own) {
+        row.classList.add('wide-row');
+        row.classList.toggle('is-picked', game.selection.divisions.includes(d.id));
+      }
+      const army = d.armyId === null ? null : (state.armies ?? []).find((a) => a.id === d.armyId);
+      const main = el('div', 'panel-row-main');
+      main.append(
+        el('div', 'panel-row-title',
+          `${country(state.countries[d.owner].tag)} ${tpl?.name ?? '師団'}`),
+        el('div', 'panel-row-sub', own ? (army?.name ?? UI.unassigned) : ''),
+      );
+      row.append(main);
+      if (own) {
+        // One division at a time: a stack tap takes the whole province, and
+        // splitting one formation off it was impossible from anywhere.
+        row.addEventListener('click', () => {
+          const now = new Set(game.selection.divisions);
+          if (now.has(d.id)) now.delete(d.id);
+          else now.add(d.id);
+          game.selectDivisions([...now], { centre: false });
+          rebuild();
+        });
+      }
+      list.append(row);
+    }
+    root.append(list);
   },
   refresh(game, root) {
     const id = game.selection.province;
@@ -1379,6 +1524,20 @@ export const commandPanel: Panel = {
           }
         }
         card.append(orderControls(game, army, rebuild));
+
+        // What turns a formation into something you can move. Without this an
+        // army was a note in a panel: the map only ever knew about whatever
+        // happened to be standing in one province, which is a garrison, not an
+        // order of battle.
+        const take = el('button', 'panel-btn wide primary', UI.commandArmy);
+        take.disabled = army.divisions.length === 0;
+        take.addEventListener('click', () => {
+          game.selectDivisions([...army.divisions], { army: army.id });
+          // Close the sheet rather than open another: the next thing the
+          // player does is tap the ground, and the sheet is over the ground.
+          closeSheet();
+        });
+        card.append(take);
 
         const drop = el('button', 'panel-btn wide danger', UI.disband);
         drop.addEventListener('click', () => {

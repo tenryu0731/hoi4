@@ -5,7 +5,7 @@ import { Simulation } from '../sim/Simulation';
 import { TimeEngine, type Speed } from '../sim/time/TimeEngine';
 import { CommandQueue, type Command } from '../sim/core/commands';
 import type { GameState, ProvinceId } from '../sim/core/types';
-import { MapRenderer } from '../render/MapRenderer';
+import { MapRenderer, type SelectionScope } from '../render/MapRenderer';
 import type { MapMode } from '../render/palette';
 import { TouchController } from '../input/TouchController';
 
@@ -32,8 +32,26 @@ export interface GameOptions {
 
 export interface SelectionState {
   province: ProvinceId | null;
-  /** Divisions the player has selected for orders. */
+  /**
+   * Which tier the player is asking about.
+   *
+   * The map has two, and they answer different questions: a province is where
+   * a division stands and what it marches through; a state is what holds the
+   * factories, the resources and the building slots. Tapping the ground picks
+   * a province; the panel can widen the same tap to the state it belongs to,
+   * and the outline on the map follows.
+   */
+  scope: SelectionScope;
+  /**
+   * Divisions under orders.
+   *
+   * Not "whatever is standing in the selected province": a stack tap fills it
+   * from a province, an army fills it from a formation, and the garrison list
+   * fills it one division at a time. What moves is what is in here.
+   */
   divisions: number[];
+  /** The army the selection came from, when it came from one. */
+  army: number | null;
 }
 
 export class Game {
@@ -45,7 +63,7 @@ export class Game {
   readonly input: TouchController;
 
   state: GameState;
-  selection: SelectionState = { province: null, divisions: [] };
+  selection: SelectionState = { province: null, scope: 'province', divisions: [], army: null };
 
   /** Milliseconds the last frame took, for display-only easing in the HUD. */
   lastFrameMs = 16.667;
@@ -340,18 +358,65 @@ export class Game {
   set unitSelected(on: boolean) {
     if (this.ordering === on) return;
     this.ordering = on;
-    this.renderer.setSelection(this.selection.province, on);
+    this.pushSelection();
+  }
+
+  private pushSelection(): void {
+    this.renderer.setSelection(this.selection.province, this.ordering, this.selection.scope);
+  }
+
+  /** Divisions of the player's that are alive and standing in this province. */
+  private garrisonOf(id: ProvinceId | null): number[] {
+    if (id === null) return [];
+    return this.state.provinces[id].divisions.filter(
+      (d) => this.state.divisions[d] && !this.state.divisions[d].dead
+        && this.state.divisions[d].owner === this.state.meta.playerCountry,
+    );
   }
 
   selectProvince(id: ProvinceId | null): void {
     this.selection.province = id;
-    this.selection.divisions = id === null
-      ? []
-      : this.state.provinces[id].divisions.filter(
-          (d) => this.state.divisions[d] && !this.state.divisions[d].dead
-            && this.state.divisions[d].owner === this.state.meta.playerCountry,
-        );
-    this.renderer.setSelection(id, this.ordering);
+    this.selection.divisions = this.garrisonOf(id);
+    this.selection.army = null;
+    if (id === null) this.selection.scope = 'province';
+    this.pushSelection();
+  }
+
+  /**
+   * Widens or narrows what the outline and the panel are talking about,
+   * without changing which province was tapped.
+   */
+  setSelectionScope(scope: SelectionScope): void {
+    if (this.selection.scope === scope) return;
+    this.selection.scope = scope;
+    this.pushSelection();
+  }
+
+  /**
+   * Puts a named set of divisions under orders, whatever they belong to.
+   *
+   * This is what makes a formation something you can move rather than a note
+   * in a panel: an army selected here marches as an army, and the map centres
+   * on it so the next tap has somewhere to land.
+   */
+  selectDivisions(divisions: number[], opts: { army?: number | null; centre?: boolean } = {}): void {
+    const live = divisions.filter((d) => {
+      const div = this.state.divisions[d];
+      return div && !div.dead && div.owner === this.state.meta.playerCountry;
+    });
+    this.selection.divisions = live;
+    this.selection.army = opts.army ?? null;
+    if (live.length > 0) {
+      const at = this.state.divisions[live[0]].provinceId;
+      this.selection.province = at;
+      this.selection.scope = 'province';
+      if (opts.centre !== false) {
+        const p = this.index.get(at);
+        this.renderer.camera.centerOn(p.centerX, p.centerY);
+      }
+    }
+    this.ordering = live.length > 0;
+    this.pushSelection();
   }
 
   private canDragFrom(worldX: number, worldY: number): boolean {

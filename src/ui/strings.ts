@@ -51,6 +51,22 @@ export const UI = {
   mapMode: '地図モード',
   // --- the market --------------------------------------------------------
   navTrade: '貿易',
+  // --- the two administrative tiers ---------------------------------------
+  tierProvince: 'プロヴィンス',
+  tierState: 'ステート',
+  provinceCount: 'プロヴィンス',
+  provincesHere: '含まれるプロヴィンス',
+  divisionsHere: '個師団',
+  population: '人口',
+  dockyards: '造船所',
+  terrainLabel: '地形',
+  fortLevel: '要塞',
+  coastal: '海に面する',
+  yes: 'はい',
+  no: 'いいえ',
+  selectAllHere: 'ここの全師団を選択',
+  commandArmy: 'この軍を指揮する（地図で移動先をタップ）',
+  assignTo: 'へ編成',
   // --- the technology grid ------------------------------------------------
   pickTech: '技術を選ぶと、ここに内容が出ます。',
   year: '年',
