@@ -75,13 +75,20 @@ interface Stack {
 }
 
 /** A counter as the player sees it: where it is drawn, and whose it is. */
-interface CounterHit {
+export interface CounterHit {
   province: ProvinceId;
   owner: CountryId;
   x: number;
   y: number;
   w: number;
   h: number;
+  /**
+   * Whether the point that found this counter landed on the counter's own box
+   * rather than in the invisible margin grown around it for touch. The caller
+   * needs the difference: a tap on the thing itself is not open to
+   * reinterpretation, and a tap in the margin is.
+   */
+  inside: boolean;
 }
 
 const PLATE_W = 34;
@@ -118,10 +125,24 @@ const ZOOM_HIDE_COUNTERS = 0.055;
  * continent at, and only breaks into per-province counters once the camera is
  * close enough that the provinces themselves are large.
  */
-const ZOOM_AGGREGATE_STATES = 0.22;
+export const ZOOM_AGGREGATE_STATES = 0.22;
 
 /** Below this the bevel and the readouts are smaller than a pixel: skip them. */
 const ZOOM_DETAIL = 0.09;
+
+/**
+ * The smallest a counter may be to a finger, whatever it is to the eye.
+ *
+ * The drawn plate is 14 to 24 CSS pixels wide and 10 to 17 tall; the box
+ * recorded for it adds 10px of vertical room for the place name underneath,
+ * so hit testing starts from 14x20 at the widest zoom and 24x27 at the
+ * closest. Both are under the 44px that every touch guideline has asked for
+ * since 2010, and the report -- twice -- was that divisions are hard to
+ * press. This is the number the box is grown to for hit testing only; the
+ * drawn counter is unchanged, because 44px of ink on every province of a
+ * front would leave no map underneath it.
+ */
+export const MIN_TOUCH_PX = 44;
 
 export class UnitLayer {
   readonly container = new Container();
@@ -263,6 +284,7 @@ export class UnitLayer {
         y: boxY,
         w: targetPx * (byState ? 0.8 : 1),
         h: ((targetPx * PLATE_H) / PLATE_W + 10) * (byState ? 0.8 : 1),
+        inside: false,
       });
       rects.push({
         x: boxX,
@@ -650,17 +672,26 @@ export class UnitLayer {
    * front picks the one actually aimed at rather than whichever was drawn
    * last.
    */
-  pickCounter(screenX: number, screenY: number, slack = 6): CounterHit | null {
+  pickCounter(screenX: number, screenY: number, minTouch = MIN_TOUCH_PX): CounterHit | null {
     let best: CounterHit | null = null;
     let bestDist = Infinity;
     for (const b of this.hitBoxes) {
-      const halfW = b.w / 2 + slack;
-      const halfH = b.h / 2 + slack;
       const dx = screenX - b.x;
       const dy = screenY - b.y;
+      // Grown to the touch minimum on each axis independently. A fixed slack
+      // could not do this: the recorded box runs from 14x20 to 24x27 across
+      // the zoom range, so one added number is either too little on the small
+      // counter or a halo three provinces wide on the large one. Growing to a
+      // floor gives every counter the same 44px target and adds nothing to a
+      // box that already reaches it.
+      const halfW = Math.max(b.w, minTouch) / 2;
+      const halfH = Math.max(b.h, minTouch) / 2;
       if (Math.abs(dx) > halfW || Math.abs(dy) > halfH) continue;
       const dist = dx * dx + dy * dy;
-      if (dist < bestDist) { bestDist = dist; best = b; }
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { ...b, inside: Math.abs(dx) <= b.w / 2 && Math.abs(dy) <= b.h / 2 };
+      }
     }
     return best;
   }

@@ -269,33 +269,87 @@ export const HUD_CSS = `
    army there -- are indistinguishable, and the gold ring on the counter says
    only "selected", which it also says when nothing has been ordered. */
 .hud-order {
-  /* Directly under the top bar. It was above the sheet first, which put it
-     exactly over the stack it was describing -- the selected counter sat
-     behind the banner announcing that it was selected. */
-  position: absolute; left: 50%; transform: translate(-50%, -8px);
+  /* Directly under the top bar, and left of the map-mode column: it was above
+     the sheet first, which put it exactly over the stack it was describing --
+     the selected counter sat behind the banner announcing that it was
+     selected. Anchored to both edges rather than centred, because centring a
+     box whose width depends on a division count means it moves whenever the
+     count changes. */
+  position: absolute; left: 8px; right: 74px; transform: translateY(-8px);
   top: calc(var(--hud-top-h, 200px) + 8px);
-  display: none; align-items: center; gap: 8px;
-  padding: 0 4px 0 12px; height: 40px;
-  background: linear-gradient(180deg, rgba(58,52,38,0.96) 0%, rgba(36,32,24,0.96) 100%);
-  border: 1px solid #0f0e0c; border-radius: 3px;
-  box-shadow: var(--bevel), 0 4px 14px rgba(0,0,0,0.55);
-  color: var(--ink); font-size: 13px; white-space: nowrap;
-  /* Transparent to touch except for its own button. It sits over the map band,
-     and a banner that eats taps is exactly the bug the horizontal map-mode
-     strip had: the counter it is telling you about was underneath it. */
+  display: none; flex-direction: column; align-items: stretch; gap: 4px;
+  /* Transparent to touch except for its own controls. It sits over the map
+     band, and a banner that eats taps is exactly the bug the horizontal
+     map-mode strip had: the counter it is telling you about was underneath. */
   pointer-events: none; opacity: 0;
   transition: opacity 160ms ease, transform 160ms ease;
 }
-.hud-order.is-on { display: flex; opacity: 1; transform: translate(-50%, 0); }
-/* Clear of the map-mode control in the top-right corner. */
-.hud-order { max-width: calc(100% - 150px); }
-.hud-order-text { color: #f0e4c4; }
+.hud-order.is-on { display: flex; opacity: 1; transform: translateY(0); }
+.hud-order-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 0 4px 0 12px; min-height: 40px;
+  background: linear-gradient(180deg, rgba(58,52,38,0.96) 0%, rgba(36,32,24,0.96) 100%);
+  border: 1px solid #0f0e0c; border-radius: 3px;
+  box-shadow: var(--bevel), 0 4px 14px rgba(0,0,0,0.55);
+  color: var(--ink); font-size: 13px;
+}
+.hud-order-acts { display: flex; gap: 4px; justify-content: flex-end; }
+.hud-order-text {
+  color: #f0e4c4;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hud-order-btn {
+  pointer-events: auto;
+  /* These are the only way to reach the chain of command from the map, so
+     they get the same 40px a nav button gets rather than the 32 a dismiss
+     affordance can live with. */
+  min-height: 40px; padding: 0 12px;
+  background: linear-gradient(180deg, #3b352a 0%, #2a2620 100%);
+  border: 1px solid #0f0e0c; border-radius: 2px;
+  box-shadow: var(--bevel);
+  color: var(--ink); font: inherit; font-size: 12px; cursor: pointer;
+}
+.hud-order-btn.is-on { border-color: var(--accent); color: var(--accent); }
+/* Dimmed rather than disabled: the button still has something to say when it
+   cannot act, and that sentence is the only place the player finds out that a
+   front belongs to a formation and not to a pile of divisions. */
+.hud-order-btn.is-dim { color: var(--ink-dim); }
 .hud-order-cancel {
   pointer-events: auto;
   min-width: 32px; min-height: 32px; padding: 0;
   background: transparent; border: 0; color: var(--ink-dim);
   font: inherit; font-size: 15px; cursor: pointer;
 }
+.hud-order-menu {
+  display: none; gap: 4px; flex-wrap: wrap; justify-content: flex-end;
+  padding: 6px; max-width: 100%;
+  background: rgba(24,22,18,0.96);
+  border: 1px solid #0f0e0c; border-radius: 3px;
+  box-shadow: var(--bevel), 0 4px 14px rgba(0,0,0,0.55);
+}
+.hud-order-menu.is-on { display: flex; }
+.hud-order-chip {
+  pointer-events: auto;
+  min-height: 40px; padding: 0 12px;
+  background: linear-gradient(180deg, #3b352a 0%, #2a2620 100%);
+  border: 1px solid #0f0e0c; border-radius: 2px;
+  box-shadow: var(--bevel);
+  color: var(--ink); font: inherit; font-size: 12px; cursor: pointer;
+  white-space: nowrap;
+}
+.hud-order-note { color: var(--ink-dim); font-size: 12px; padding: 0 4px; }
+
+/* --- marquee ------------------------------------------------------------- */
+/* The rubber band. Never takes a pointer: the finger drawing it is captured by
+   the canvas underneath, and an element that intercepted the move would end
+   the gesture the moment the band grew under the contact point. */
+.hud-marquee {
+  position: absolute; display: none; pointer-events: none;
+  border: 1px solid var(--accent);
+  background: rgba(211,171,99,0.14);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.55) inset;
+}
+.hud-marquee.is-on { display: block; }
 
 /* --- bottom sheet -------------------------------------------------------- */
 /* The sheet ground is darker than the plates that sit on it. Measured before:

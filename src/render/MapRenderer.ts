@@ -2,8 +2,8 @@ import {
   Application, Container, Graphics, Matrix, Sprite, Texture, TilingSprite,
 } from 'pixi.js';
 
-import type { ProvinceIndex } from '../sim/map/ProvinceIndex';
-import type { GameState, ProvinceId } from '../sim/core/types';
+import type { Province, ProvinceIndex } from '../sim/map/ProvinceIndex';
+import type { CountryId, GameState, ProvinceId } from '../sim/core/types';
 import { Camera } from './Camera';
 import {
   PALETTE, RESOURCE_RAMP, SUPPLY_RAMP, TERRAIN_COLOR, VICTORY_RAMP,
@@ -50,6 +50,25 @@ const LOD_STEPS = [0.045, 0.075, 0.13, 0.24, 0.45, 0.9];
  */
 export type SelectionScope = 'province' | 'state';
 
+/**
+ * One formation's order, reduced to what the map needs to draw it.
+ *
+ * Deliberately not an `Army`: the renderer has no business knowing what a
+ * chain of command is, and the same shape lets a plan be drawn for something
+ * that is not an army at all -- a selection of divisions the player has just
+ * boxed, before they have been given a formation.
+ */
+export interface PlanLine {
+  owner: CountryId;
+  /** Provinces the order covers. */
+  provinces: readonly ProvinceId[];
+  /** Places an offensive is aimed at; empty for a front or a garrison. */
+  targets: readonly ProvinceId[];
+  color: number;
+  /** Drawn at full strength; the other formations' plans stay quiet. */
+  selected: boolean;
+}
+
 export class MapRenderer {
   readonly app: Application;
   readonly camera: Camera;
@@ -69,6 +88,7 @@ export class MapRenderer {
   private selectionLayer = new Graphics();
   private selectScope: SelectionScope = 'province';
   private frontLayer = new Graphics();
+  private planLayer = new Graphics();
   private cityLayer = new Graphics();
   /** Exposed for the visual-determinism probe in the e2e suite. */
   labels!: LabelLayer;
@@ -188,6 +208,7 @@ export class MapRenderer {
     stage.addChild(this.grain);
 
     this.world.addChild(this.frontLayer);
+    this.world.addChild(this.planLayer);
     this.world.addChild(this.selectionLayer);
     this.world.addChild(this.cityLayer);
 
@@ -323,23 +344,37 @@ export class MapRenderer {
     const g = this.borderLayer;
     g.clear();
 
-    // Province seams first, then the state seams over them: the two tiers are
-    // the whole shape of the game -- provinces are what a division stands in
-    // and states are what a factory is built in -- and until now neither was
-    // drawn, so a country read as one flat slab of colour.
+    // Three tiers, drawn thinnest first so the heavier ones cover their ends.
+    //
+    // Both tiers were already being drawn before this, at 1.0px/0.34 and
+    // 1.3px/0.62 -- a third of a pixel apart on a phone, which is no
+    // difference at all, and the report was that the map showed provinces and
+    // no states. It was showing both, as one undifferentiated mesh. What
+    // separates them has to be weight, not alpha: 0.9 / 2.0 / 2.8 px of dark
+    // core, each with its own halo, so the eye sorts them without being told.
     const internal = this.internalBorders();
     if (step >= 2) {
+      // The finest tier is a hairline with no halo. It is texture: it says
+      // "this cell divides further", and it must not compete with the state
+      // seam sitting on top of it.
+      //
+      // Dark, not the mid-tone borderProvince: a stroke this thin lands on
+      // less than one physical pixel once px() has scaled it for the LOD
+      // band, so the rasteriser hands back a fraction of whatever alpha it
+      // was given. At 0.9px of (92,83,67) over Germany's grey the seams were
+      // measurably present and visually absent -- 3424 world units of them
+      // inside Germany alone, and the screenshot showed three lines.
       for (const line of internal.province) this.tracePolyline(g, line);
-      g.stroke({ color: 0x0f0d09, width: px(1.0), alpha: 0.34, join: 'round' });
+      g.stroke({ color: 0x14110c, width: px(1.3), alpha: 0.5, join: 'round' });
     }
     if (step >= 1) {
       // A halo under the state seam, as the country border gets: the fills
       // either side are the same colour, so a dark line alone has nothing to
       // separate it from and reads as a scratch rather than a boundary.
       for (const line of internal.state) this.tracePolyline(g, line);
-      g.stroke({ color: 0xf0e6cf, width: px(2.6), alpha: 0.22, join: 'round', cap: 'round' });
+      g.stroke({ color: 0xf0e6cf, width: px(3.4), alpha: 0.30, join: 'round', cap: 'round' });
       for (const line of internal.state) this.tracePolyline(g, line);
-      g.stroke({ color: 0x0f0d09, width: px(1.3), alpha: 0.62, join: 'round', cap: 'round' });
+      g.stroke({ color: 0x14110c, width: px(2.0), alpha: 0.80, join: 'round', cap: 'round' });
     }
 
     for (const line of this.index.data.borders.coast) this.tracePolyline(g, line);
@@ -348,9 +383,9 @@ export class MapRenderer {
     // Country borders get a soft light halo first, then the dark line, which is
     // what gives printed political maps their engraved look.
     for (const line of this.index.data.borders.country) this.tracePolyline(g, line);
-    g.stroke({ color: 0xf0e6cf, width: px(4.2), alpha: 0.3, join: 'round', cap: 'round' });
+    g.stroke({ color: 0xf0e6cf, width: px(5.2), alpha: 0.34, join: 'round', cap: 'round' });
     for (const line of this.index.data.borders.country) this.tracePolyline(g, line);
-    g.stroke({ color: PALETTE.borderCountry, width: px(2.0), alpha: 0.92, join: 'round', cap: 'round' });
+    g.stroke({ color: PALETTE.borderCountry, width: px(2.8), alpha: 0.95, join: 'round', cap: 'round' });
 
     const rg = this.riverLayer;
     rg.clear();
@@ -564,6 +599,7 @@ export class MapRenderer {
       reserved = this.units.update(state, cam, this.staticMode ? 0 : this.elapsed,
         this.staticMode ? 1e6 : dtMs);
       this.drawFrontline(state);
+      this.drawPlans(state);
     }
     this.labels.update(cam, reserved);
 
@@ -672,6 +708,137 @@ export class MapRenderer {
     g.stroke({ color: PALETTE.frontline, width: 10 / zoom, alpha: 0.2, cap: 'round', join: 'round' });
     for (const r of runs) this.tracePolyline(g, r);
     g.stroke({ color: PALETTE.frontline, width: 3.2 / zoom, alpha: 0.95, cap: 'round', join: 'round' });
+  }
+
+  /**
+   * One army's standing order, as the map has to show it.
+   *
+   * The simulation already works out which provinces an order covers and
+   * re-works it every day as the border moves -- that is what makes a front a
+   * standing instruction rather than a list of destinations. None of it was
+   * drawn, so the player set an order in a panel and then had no way to see
+   * where their army had been told to stand, which is the half of the feature
+   * that makes it worth having.
+   */
+  private plans: readonly PlanLine[] = [];
+
+  /** Kept by reference: the caller builds a fresh array every frame. */
+  setPlans(plans: readonly PlanLine[]): void {
+    this.plans = plans;
+  }
+
+  /**
+   * Battle plans, drawn along the ground the order actually covers.
+   *
+   * A front is the outward face of the provinces the army was given: every arc
+   * between one of them and a province that is neither in the plan nor ours.
+   * That is the line the army is holding, and it is drawn in the formation's
+   * own colour so two armies on one border can be told apart.
+   *
+   * An offensive additionally gets an arrow per objective, from the middle of
+   * its own line to the place it has been aimed at. HOI4 draws these as fat
+   * curved arrows; a phone at 0.18 zoom has no room for the curve, so they are
+   * straight, and they are drawn under the counters rather than over them.
+   */
+  private drawPlans(state: GameState): void {
+    const g = this.planLayer;
+    g.clear();
+    if (this.plans.length === 0) return;
+    const zoom = Math.max(0.02, this.camera.zoom);
+
+    for (const plan of this.plans) {
+      if (plan.provinces.length === 0) continue;
+      const inPlan = new Set(plan.provinces);
+      const runs: number[][] = [];
+      for (const id of plan.provinces) {
+        const p = this.index.provinces[id];
+        if (!p) continue;
+        for (const nb of p.neighbors) {
+          if (inPlan.has(nb)) continue;
+          // The outward face only: an arc onto our own rear areas is inside
+          // the position, not the edge of it, and drawing those turns the
+          // line into a filled-in blob of the army's colour.
+          if (state.provinces[nb]?.controller === plan.owner) continue;
+          runs.push(...this.sharedBorderCached(Math.min(id, nb), Math.max(id, nb)));
+        }
+      }
+
+      const emphasis = plan.selected ? 1 : 0.62;
+      if (runs.length > 0) {
+        for (const r of runs) this.tracePolyline(g, r);
+        g.stroke({
+          color: plan.color, width: 11 / zoom, alpha: 0.16 * emphasis,
+          cap: 'round', join: 'round',
+        });
+        for (const r of runs) this.tracePolyline(g, r);
+        g.stroke({
+          color: plan.color, width: 3.6 / zoom, alpha: 0.9 * emphasis,
+          cap: 'round', join: 'round',
+        });
+      }
+
+      // A pip on every assigned province, so a plan whose provinces happen to
+      // share no outward arc -- a garrison deep in the interior -- is still
+      // visible as something the army was told to do.
+      const pip = 3.4 / zoom;
+      for (const id of plan.provinces) {
+        const p = this.index.provinces[id];
+        if (!p) continue;
+        g.circle(p.centerX, p.centerY, pip);
+      }
+      g.fill({ color: plan.color, alpha: 0.75 * emphasis });
+
+      for (const target of plan.targets) {
+        const to = this.index.provinces[target];
+        if (!to) continue;
+        const from = this.nearestOf(plan.provinces, to.centerX, to.centerY);
+        if (!from) continue;
+        this.traceArrow(g, from.centerX, from.centerY, to.centerX, to.centerY, zoom);
+      }
+      if (plan.targets.length > 0) {
+        g.stroke({
+          color: plan.color, width: 3.2 / zoom, alpha: 0.85 * emphasis,
+          cap: 'round', join: 'round',
+        });
+      }
+    }
+  }
+
+  /** The province of `ids` whose centre is closest to a point. */
+  private nearestOf(ids: readonly ProvinceId[], x: number, y: number): Province | null {
+    let best: Province | null = null;
+    let bestDist = Infinity;
+    for (const id of ids) {
+      const p = this.index.provinces[id];
+      if (!p) continue;
+      const dx = p.centerX - x;
+      const dy = p.centerY - y;
+      const d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = p; }
+    }
+    return best;
+  }
+
+  /** A straight shaft with a head, in world units, left unstroked. */
+  private traceArrow(
+    g: Graphics, x0: number, y0: number, x1: number, y1: number, zoom: number,
+  ): void {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-3) return;
+    const ux = dx / len;
+    const uy = dy / len;
+    // Stopped short of the objective so the head does not sit on top of
+    // whatever counter is standing in it.
+    const head = Math.min(len * 0.35, 22 / zoom);
+    const tipX = x1 - ux * head * 0.5;
+    const tipY = y1 - uy * head * 0.5;
+    g.moveTo(x0, y0);
+    g.lineTo(tipX, tipY);
+    g.moveTo(tipX - ux * head + uy * head * 0.55, tipY - uy * head - ux * head * 0.55);
+    g.lineTo(tipX, tipY);
+    g.lineTo(tipX - ux * head - uy * head * 0.55, tipY - uy * head + ux * head * 0.55);
   }
 
   /**

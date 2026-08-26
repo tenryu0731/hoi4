@@ -95,7 +95,15 @@ export const UI = {
     `${law} · 産出の ${share}% を市場へ · 民需工場 1 基につき ${perFactory}／日`,
   cancel: '選択解除',
   /** Shown while a stack is under orders and the next tap sets its objective. */
-  orderHint: (n: number): string => `${n}個師団を選択中 — 移動先をタップ`,
+  orderHint: (n: number): string => `${n}個師団 — 移動先をタップ`,
+  /** The order bar's own buttons, on the map rather than in a panel. */
+  orderAssign: '軍へ編成',
+  orderDrawFront: '戦線を引く',
+  orderNewArmy: '＋新しい軍',
+  orderNeedsArmy: 'まず軍に編成してください',
+  orderNoEnemy: '接する国がありません',
+  /** Tutorial line for the marquee, shown until it has been used once. */
+  boxSelectHint: '長押ししてなぞると、範囲内の師団をまとめて選べます',
   airStrength: '航空戦力',
   resistance: '抵抗運動',
   priorityNames: ['低', '並', '高', '最'] as const,

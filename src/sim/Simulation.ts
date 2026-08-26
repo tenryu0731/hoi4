@@ -32,8 +32,8 @@ import {
 } from './military/movement';
 import { tickSupplyDaily } from './military/supply';
 import {
-  appointCommander, armyById, assignDivisions, createArmy, disbandArmy, setArmyParent,
-  tickCommandReinforcementDaily, tickCommanderExperienceDaily,
+  MAX_ARMIES, appointCommander, armiesOf, armyById, assignDivisions, createArmy, disbandArmy,
+  setArmyParent, tickCommandReinforcementDaily, tickCommanderExperienceDaily,
 } from './military/command';
 import { tickBattlePlansDaily } from './military/frontline';
 import { tickAIDaily } from './ai/ai';
@@ -159,7 +159,13 @@ export class Simulation {
       }
       // --- chain of command -------------------------------------------------
       case 'createArmy': {
-        createArmy(state, cmd.country, cmd.name, cmd.isArmyGroup ?? false);
+        // Capped here as well as in the two places the UI offers it. The
+        // ceiling exists because every army ticks a battle plan, and a rail
+        // that only one of the entry points respects is not a rail.
+        const group = cmd.isArmyGroup ?? false;
+        const held = armiesOf(state, cmd.country).filter((a) => a.isArmyGroup === group);
+        if (held.length >= MAX_ARMIES) return;
+        createArmy(state, cmd.country, cmd.name, group);
         return;
       }
       case 'changeLaw': {

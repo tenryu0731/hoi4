@@ -2,11 +2,12 @@ import type { Game } from '../app/Game';
 import type { MapMode } from '../render/palette';
 import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
-import { PANELS, formatNumber, setSheetCloser, type PanelId } from './panels';
+import { PANELS, formatNumber, frontCandidates, setSheetCloser, type PanelId } from './panels';
 import { HUD_CSS } from './hud.css';
 import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
 import { RESOURCE, RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
+import { MAX_ARMIES, nextArmyName } from '../sim/military/command';
 
 /**
  * The heads-up display.
@@ -243,12 +244,21 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     modeBar.append(b);
   }
 
-  // --- order hint ----------------------------------------------------------
+  // --- order bar -----------------------------------------------------------
   // One gesture has to do two jobs on a touch screen: reading the map and
   // commanding the army. This says which job the next tap will do, and gives
   // the player a way out that is not "tap the counter again and hope".
+  //
+  // It is also where a selection becomes a formation. The chain of command
+  // was reachable only from the 軍 panel, which is a list of armies -- so the
+  // player could put divisions in an army they had already made, and had no
+  // way at all to point at some divisions on the map and say "these are an
+  // army". The two buttons here close that loop without leaving the map.
   const orderHint = el('div', 'hud-order');
+  const orderRow = el('div', 'hud-order-row');
   const orderText = el('span', 'hud-order-text', '');
+  const orderAssign = el('button', 'hud-order-btn', UI.orderAssign);
+  const orderFront = el('button', 'hud-order-btn', UI.orderDrawFront);
   const orderCancel = el('button', 'hud-order-cancel', '✕');
   orderCancel.setAttribute('aria-label', UI.cancel);
   orderCancel.addEventListener('click', () => {
@@ -256,7 +266,109 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     game.selectProvince(null);
     syncOrder();
   });
-  orderHint.append(orderText, orderCancel);
+  // Two rows, not one. Measured on a 412px screen: the caption is about
+  // 160px, each button 80, the dismiss 32 -- 386px of content in the 330 left
+  // once the map-mode column has its corner, and the last button was drawn
+  // off the edge of the phone.
+  orderRow.append(orderText, orderCancel);
+  const orderActs = el('div', 'hud-order-acts');
+  orderActs.append(orderAssign, orderFront);
+  const orderMenu = el('div', 'hud-order-menu');
+  orderHint.append(orderRow, orderActs, orderMenu);
+
+  /** Which button opened the chip row, so pressing it again closes it. */
+  let orderMenuMode: 'army' | 'front' | null = null;
+
+  function closeOrderMenu(): void {
+    orderMenuMode = null;
+    orderMenu.innerHTML = '';
+    orderMenu.classList.remove('is-on');
+    orderAssign.classList.remove('is-on');
+    orderFront.classList.remove('is-on');
+  }
+
+  function orderChip(label: string, onPick: () => void): HTMLElement {
+    const chip = el('button', 'hud-order-chip', label);
+    chip.addEventListener('click', () => {
+      onPick();
+      closeOrderMenu();
+      syncOrder();
+    });
+    return chip;
+  }
+
+  /** The army the whole selection belongs to, or null when it is mixed. */
+  function selectionArmy(): number | null {
+    return game.armyOf(game.selection.divisions);
+  }
+
+  orderAssign.addEventListener('click', () => {
+    if (orderMenuMode === 'army') { closeOrderMenu(); return; }
+    closeOrderMenu();
+    orderMenuMode = 'army';
+    orderAssign.classList.add('is-on');
+    const state = game.state;
+    const me = state.meta.playerCountry;
+    const divisions = [...game.selection.divisions];
+    for (const army of (state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup)) {
+      orderMenu.append(orderChip(
+        `${army.name} · ${army.divisions.length}${UI.divisionsInArmy}`,
+        () => {
+          game.issue({ t: 'assignDivisions', country: me, army: army.id, divisions });
+          game.selectDivisions(divisions, { army: army.id, centre: false });
+        },
+      ));
+    }
+    const ownArmies = (): number[] => (game.state.armies ?? [])
+      .filter((a) => a.owner === me && !a.isArmyGroup)
+      .map((a) => a.id);
+    if (ownArmies().length < MAX_ARMIES) {
+      orderMenu.append(orderChip(UI.orderNewArmy, () => {
+        // The command bus does not hand back what it made, so the new
+        // formation is identified by difference. Not "the highest id": the
+        // ceiling can refuse the command, and taking the newest existing army
+        // then would quietly put the divisions somewhere the player did not
+        // ask for.
+        const before = new Set(ownArmies());
+        game.issue({ t: 'createArmy', country: me, name: nextArmyName(game.state, me) });
+        const raised = ownArmies().find((id) => !before.has(id));
+        if (raised === undefined) return;
+        game.issue({ t: 'assignDivisions', country: me, army: raised, divisions });
+        game.selectDivisions(divisions, { army: raised, centre: false });
+      }));
+    }
+    orderMenu.classList.add('is-on');
+  });
+
+  orderFront.addEventListener('click', () => {
+    if (orderMenuMode === 'front') { closeOrderMenu(); return; }
+    closeOrderMenu();
+    orderMenuMode = 'front';
+    orderFront.classList.add('is-on');
+    const state = game.state;
+    const me = state.meta.playerCountry;
+    const army = selectionArmy();
+    if (army === null) {
+      orderMenu.append(el('span', 'hud-order-note', UI.orderNeedsArmy));
+      orderMenu.classList.add('is-on');
+      return;
+    }
+    const enemies = frontCandidates(game).slice(0, 6);
+    if (enemies.length === 0) {
+      orderMenu.append(el('span', 'hud-order-note', UI.orderNoEnemy));
+      orderMenu.classList.add('is-on');
+      return;
+    }
+    for (const enemy of enemies) {
+      orderMenu.append(orderChip(country(enemy.tag), () => {
+        game.issue({
+          t: 'setArmyOrder', country: me, army,
+          order: { kind: 'front', against: enemy.id },
+        });
+      }));
+    }
+    orderMenu.classList.add('is-on');
+  });
 
   function syncOrder(): void {
     // Counted live rather than from the selection array: the divisions in it
@@ -270,8 +382,26 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       }
       if (live === 0) game.unitSelected = false;
     }
-    orderHint.classList.toggle('is-on', live > 0);
-    if (live > 0) setText(orderText, UI.orderHint(live));
+    const on = live > 0;
+    orderHint.classList.toggle('is-on', on);
+    if (!on) { closeOrderMenu(); return; }
+    setText(orderText, UI.orderHint(live));
+    orderFront.classList.toggle('is-dim', selectionArmy() === null);
+  }
+
+  let marqueeOn = false;
+  function syncMarquee(): void {
+    const box = game.boxSelect;
+    if (!box) {
+      if (marqueeOn) { marqueeOn = false; marquee.classList.remove('is-on'); }
+      return;
+    }
+    marqueeOn = true;
+    marquee.classList.add('is-on');
+    marquee.style.left = `${Math.min(box.x0, box.x1)}px`;
+    marquee.style.top = `${Math.min(box.y0, box.y1)}px`;
+    marquee.style.width = `${Math.abs(box.x1 - box.x0)}px`;
+    marquee.style.height = `${Math.abs(box.y1 - box.y0)}px`;
   }
 
   // --- bottom sheet --------------------------------------------------------
@@ -367,7 +497,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   figures.append(stats, resStrip);
   top.append(topRow, figures, alertRow);
 
-  root.append(top, modeBar, orderHint, toasts, sheet, nav, outcome);
+  // The rubber band, in the document rather than on the canvas: it is a band
+  // on the glass, and drawing it here costs four style writes a frame instead
+  // of a Graphics rebuild.
+  const marquee = el('div', 'hud-marquee');
+  root.append(top, modeBar, marquee, orderHint, toasts, sheet, nav, outcome);
 
   // Everything below the top bar is placed against its measured height rather
   // than a constant. The constant was 78px, chosen when the bar was one row;
@@ -613,7 +747,13 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     }
 
     // Selecting a province opens its panel; clearing it closes.
-    const sel = game.selection.province;
+    //
+    // Except while the selection is an order rather than a question. Putting a
+    // stack under orders also names the province it is standing in, and the
+    // sheet that opened for it covered the bottom half of the map -- which is
+    // where the next tap, the one that says where to go, has to land. Reading
+    // the map opens the sheet; commanding the army does not.
+    const sel = game.unitSelected ? null : game.selection.province;
     if (sel !== lastProvince) {
       lastProvince = sel;
       if (sel === null) {
@@ -629,6 +769,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     }
 
     syncOrder();
+    syncMarquee();
 
     if (openPanel !== null) PANELS[openPanel].refresh?.(game, sheetBody);
 
