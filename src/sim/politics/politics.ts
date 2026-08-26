@@ -41,9 +41,19 @@ export interface LawEffects {
  */
 export const DEFAULT_TRADE_LAW: TradeLaw = 'export_focus';
 
-/** Political power a day at full stability, and the floor at none of it. */
-const PP_AT_FULL_STABILITY = 1.4;
-const PP_AT_NO_STABILITY = 0.4;
+/**
+ * Political power a day at full stability, and the floor at none of it.
+ *
+ * HOI4's scale, because HOI4's prices: a law costs 150 here because it costs
+ * 150 there, and a bought ultimatum 55 -- but the income was a third of what
+ * that game pays out. Measured at 1.4: a stable major earned 1.26 a day and a
+ * player who opened the politics tab could not make a single decision in it
+ * until 30 April 1936, four months of a screen that does nothing. HOI4 pays a
+ * base 2 a day against the same 150, which is the seventy-five days the costs
+ * were written for.
+ */
+const PP_AT_FULL_STABILITY = 2.2;
+const PP_AT_NO_STABILITY = 0.7;
 /** Consumer goods added when a country is coming apart. */
 const INSTABILITY_CONSUMER_GOODS = 0.15;
 

@@ -63,6 +63,7 @@ export const HUD_CSS = `
    but measured on Chromium it does not: a swipe scrolls these rows to 287px
    with the body rule in force and with it removed alike. So these are an
    explicit statement of intent, not a fix for anything. */
+.hud-figures { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .hud-stats, .hud-resources {
   display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
   touch-action: pan-x;
@@ -613,6 +614,15 @@ export const HUD_CSS = `
   /* The map modes would sit on top of the docked panel. */
   .hud-modes { top: auto; bottom: calc(var(--safe-bottom) + 62px); flex-direction: row; }
   .hud-toasts { max-width: 34%; left: auto; right: 10px; }
+  /* The figures go side by side. Measured on its side: 395px of stats and
+     320px of resources, each stacked in its own 853px row, so the bar spent
+     32px of a 412px screen saying nothing. */
+  .hud-figures { flex-direction: row; align-items: flex-start; }
+  .hud-figures > * { flex: 0 1 auto; min-width: 0; }
+  /* Every pixel of bar is a pixel of map. */
+  .hud-top { gap: 3px; padding-bottom: 5px; }
+  .hud-stats > .hud-stat, .hud-resources > .hud-res { padding: 1px 6px 2px; }
+  .hud-chip-c { line-height: 10px; }
 }
 
 button { transition: background 90ms ease, transform 90ms ease, color 90ms ease; }
@@ -631,6 +641,13 @@ button:active { transform: scale(0.96); }
   border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
 .panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
+/* A garrison row the player has picked out of the stack. Splitting one
+   formation off a province was impossible from anywhere before this. */
+.panel-row.is-picked {
+  background: linear-gradient(180deg, rgba(211,171,99,0.16) 0%, rgba(211,171,99,0.05) 100%);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.panel-row.is-picked .panel-row-title { color: var(--accent); }
 /* A state row is the tap target for "build here", so it is a button and needs
    to look like a row rather than like a control. */
 .panel-row.wide-row {
@@ -706,6 +723,139 @@ button:active { transform: scale(0.96); }
 .panel-focus-block { margin-top: 6px; font-size: 12px; color: #f0a294; }
 .panel-focus-meta { margin-top: 4px; font-size: 11px; color: var(--ink-dim); }
 .panel-focus .panel-btn.wide { margin-top: 9px; width: 100%; min-height: 46px; }
+
+/* --- the focus tree ------------------------------------------------------ */
+/* A grid of icons joined by lines, which is what a focus tree is. Three
+   collapsible lists carried the same facts with the shape removed, and the
+   shape is the point: from a list a player cannot see that the one focus they
+   may start leads to the sixteen they may not. */
+.panel-tree-scroll {
+  overflow: auto; scrollbar-width: none;
+  /* The tree is 590px wide on a 412px screen, so it pans in both axes; the
+     sheet under it owns the vertical scroll, so say so explicitly or the two
+     fight over every drag. */
+  touch-action: pan-x pan-y;
+  margin: 0 -12px; padding: 0 12px 4px;
+  background:
+    linear-gradient(180deg, rgba(10,10,9,0.5) 0%, rgba(10,10,9,0.22) 100%);
+  border-top: 1px solid #100f0d; border-bottom: 1px solid #100f0d;
+  box-shadow: inset 0 1px 0 var(--edge-hi);
+}
+.panel-tree-scroll::-webkit-scrollbar { display: none; }
+.panel-tree { position: relative; }
+.panel-tree-links { position: absolute; inset: 0; pointer-events: none; }
+/* Locked branches are drawn, not hidden: seeing where a path goes before it
+   opens is the reason to look at a tree at all. */
+.panel-tree-link { fill: none; stroke: #4a453b; stroke-width: 2; }
+.panel-tree-link.is-open { stroke: var(--good); stroke-width: 2.4; }
+.panel-tree-link.is-exclusive {
+  stroke: var(--danger); stroke-width: 2; stroke-dasharray: 4 4;
+}
+
+.panel-focus-node {
+  position: absolute; width: 84px; height: 72px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 3px; padding: 6px 4px 4px;
+  background: linear-gradient(180deg, #3a352c 0%, #2a261f 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--ink); font: inherit; text-align: center; cursor: pointer;
+}
+.panel-focus-node-icon {
+  display: block; width: 22px; height: 22px; flex: 0 0 auto;
+  background-color: var(--accent);
+  -webkit-mask: var(--icon) center / contain no-repeat;
+          mask: var(--icon) center / contain no-repeat;
+}
+.panel-focus-node-name {
+  font-size: 9px; line-height: 1.25; color: var(--ink);
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.panel-focus-node.is-done { border-color: #4d6b30; }
+.panel-focus-node.is-done .panel-focus-node-icon { background-color: var(--good); }
+.panel-focus-node.is-current {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, #3f3722 0%, #2a2416 100%);
+}
+/* Dimmed by token, not opacity: at the 1936 start every focus but one is
+   locked, and compositing the whole node at half strength made most of the
+   tree unreadable. */
+.panel-focus-node.is-locked {
+  background: linear-gradient(180deg, #262420 0%, #1c1b18 100%);
+}
+.panel-focus-node.is-locked .panel-focus-node-name { color: #8b8371; }
+.panel-focus-node.is-locked .panel-focus-node-icon { background-color: #6d6656; }
+.panel-focus-node.is-picked {
+  box-shadow: var(--bevel), 0 0 0 2px var(--accent);
+}
+.panel-focus-node-bar {
+  display: block; width: 100%; height: 3px; margin-top: auto;
+  background: #16150f; border: 1px solid #100f0d;
+}
+.panel-focus-node-bar > i { display: block; height: 100%; background: var(--accent); }
+
+/* The card under the tree, which is where a focus is actually read and
+   started. A popover over a tree this size would cover the thing it is
+   describing. */
+.panel-focus-detail {
+  padding: 11px 12px; margin-top: 10px;
+  background: linear-gradient(180deg, #3a352c 0%, #2a261f 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+}
+.panel-focus-detail .panel-btn.wide { margin-top: 9px; width: 100%; min-height: 46px; }
+.panel-focus-detail .panel-bar { margin-top: 7px; }
+
+/* --- the technology grid -------------------------------------------------- */
+/* The year across, the branch down, the generations of one weapon joined by a
+   line -- which is how HOI4 draws it, and how the data was already shaped. A
+   branch chooser over a flat list told a player what a technology cost but not
+   that it sat three steps down a chain they had not started. */
+.panel-tech-node {
+  position: absolute; width: 88px; height: 50px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 4px 5px;
+  background: linear-gradient(180deg, #3a352c 0%, #2a261f 100%);
+  border: 1px solid #100f0d; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--ink); font: inherit; text-align: center; cursor: pointer;
+}
+.panel-tech-node-name {
+  font-size: 10px; line-height: 1.25;
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.panel-tech-node.is-done {
+  border-color: #4d6b30;
+  background: linear-gradient(180deg, #313a26 0%, #232a1b 100%);
+}
+.panel-tech-node.is-current {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, #3f3722 0%, #2a2416 100%);
+}
+.panel-tech-node.is-locked {
+  background: linear-gradient(180deg, #262420 0%, #1c1b18 100%);
+}
+.panel-tech-node.is-locked .panel-tech-node-name { color: #8b8371; }
+.panel-tech-node.is-picked { box-shadow: var(--bevel), 0 0 0 2px var(--accent); }
+.panel-tech-node .panel-focus-node-bar { margin-top: 4px; }
+
+/* Headings live inside the scrolled grid so they travel with their column and
+   row rather than drifting off the technologies they name. */
+.panel-tech-year {
+  position: absolute; top: 0; width: 88px; height: 18px;
+  font-size: 11px; color: var(--ink-dim); letter-spacing: var(--track);
+  text-align: center;
+}
+/* The rail does not pan with the grid: inside it, the row labels slid off the
+   left edge the moment the player looked at 1940, which is the one place a row
+   label is needed. */
+.panel-tech-frame { display: flex; align-items: stretch; margin: 0 -12px; padding-left: 12px; }
+.panel-tech-rail { position: relative; flex: 0 0 46px; }
+.panel-tech-frame > .panel-tree-scroll { flex: 1 1 auto; min-width: 0; margin: 0; padding-left: 0; }
+.panel-tech-branch {
+  position: absolute; left: 0; width: 46px; height: 50px;
+  display: flex; align-items: center;
+  font-size: 11px; color: var(--accent); letter-spacing: 0;
+}
 
 /* --- chain of command ---------------------------------------------------- */
 /* The whole card header is the control that opens it, so it is a button with

@@ -3,11 +3,11 @@
   "counts": {
     "flags": 30,
     "resourceIcons": 6,
-    "uiIcons": 20,
+    "uiIcons": 22,
     "unitIcons": 12
   },
-  "totalBytes": 23949,
-  "totalGzipBytes": 14918,
+  "totalBytes": 24461,
+  "totalGzipBytes": 15320,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -190,6 +190,11 @@
       "gzipBytes": 179
     },
     {
+      "path": "assets/icons/ui-annex.svg",
+      "bytes": 228,
+      "gzipBytes": 189
+    },
+    {
       "path": "assets/icons/ui-army.svg",
       "bytes": 236,
       "gzipBytes": 191
@@ -283,6 +288,11 @@
       "path": "assets/icons/ui-war_support.svg",
       "bytes": 263,
       "gzipBytes": 205
+    },
+    {
+      "path": "assets/icons/ui-wargoal.svg",
+      "bytes": 284,
+      "gzipBytes": 213
     },
     {
       "path": "assets/icons/ui-warning.svg",

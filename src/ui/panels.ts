@@ -25,7 +25,7 @@ import { airStrength } from '../sim/military/air';
 import { canDemand, occupationRatio } from '../sim/diplomacy/diplomacy';
 import { availableFocuses } from '../sim/focus';
 import {
-  BRANCH_LIST, researchSummary, researchView, techTree, type TechBranch,
+  BRANCH_LIST, researchSummary, researchView, techTree,
 } from '../sim/research';
 import {
   ARMY_GROUP_LIMIT, COMMAND_LIMIT, MAX_ARMIES, armyById, commandLimit, commanderById,
@@ -79,6 +79,23 @@ function tally(names: string[]): string {
   return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join('・');
 }
 
+/**
+ * Shuts the bottom sheet, set by the HUD that owns it.
+ *
+ * A panel occasionally has to get out of the player's way -- putting an army
+ * under orders is the case: what happens next is a tap on the map, and the
+ * sheet is sitting on the map.
+ */
+let closeSheetImpl: () => void = () => {};
+
+export function setSheetCloser(fn: () => void): void {
+  closeSheetImpl = fn;
+}
+
+function closeSheet(): void {
+  closeSheetImpl();
+}
+
 function setText(node: HTMLElement, value: string): void {
   if (node.textContent !== value) node.textContent = value;
 }
@@ -86,6 +103,10 @@ function setText(node: HTMLElement, value: string): void {
 /** Assets are served from the base path, which is not "/" on GitHub Pages. */
 function flagUrl(tag: string): string {
   return `${import.meta.env.BASE_URL}assets/flags/${tag}.svg`;
+}
+
+function iconUrl(name: string): string {
+  return `${import.meta.env.BASE_URL}assets/icons/${name}.svg`;
 }
 
 export function formatNumber(n: number): string {
@@ -667,6 +688,16 @@ export const diplomacyPanel: Panel = {
 // Province
 // ---------------------------------------------------------------------------
 
+/**
+ * The two tiers, told apart.
+ *
+ * A province is where a division stands and what it marches through; a state
+ * is what holds the factories, the population and the building slots, and
+ * several provinces share one. Reading both off a single undifferentiated card
+ * meant a player could never tell which tier a number belonged to -- 「今ステ
+ * ートしかない」 was about the map, and this is the same complaint about the
+ * panel. The switch changes what the card says *and* what the map outlines.
+ */
 export const provincePanel: Panel = {
   id: 'province',
   title: '州',
@@ -681,18 +712,99 @@ export const provincePanel: Panel = {
     const geo = game.index.get(id);
     const p = state.provinces[id];
     const stateData = game.index.data.states[geo.stateId];
+    const st = state.states[geo.stateId];
     const owner = state.countries[p.owner];
     const controller = state.countries[p.controller];
+    const scope = game.selection.scope;
+    const rebuild = (): void => provincePanel.build(game, root);
 
+    // --- which tier -------------------------------------------------------
+    const tabs = el('div', 'panel-chips');
+    // Just the tier. The names went in the labels first and wrapped the pair
+    // onto two lines on a 412px screen; the sheet title already says which
+    // place is selected.
+    for (const [value, label] of [
+      ['province', UI.tierProvince],
+      ['state', UI.tierState],
+    ] as const) {
+      const chip = el('button', 'panel-chip', label);
+      chip.classList.toggle('is-on', scope === value);
+      chip.addEventListener('click', () => {
+        game.setSelectionScope(value);
+        rebuild();
+      });
+      tabs.append(chip);
+    }
+    root.append(tabs);
+
+    if (scope === 'state') {
+      const head = el('div', 'panel-head');
+      head.append(
+        stat(UI.civFactories, String(stateData.civilianFactories)),
+        stat(UI.milFactories, String(stateData.militaryFactories)),
+        stat(UI.buildSlots, String(stateData.buildingSlots)),
+        stat(UI.infrastructure, String(stateData.infrastructure)),
+      );
+      if (st.owner !== st.controller) {
+        head.append(stat(UI.resistance, `${Math.round(st.resistance * 100)}%`));
+      }
+      root.append(head);
+
+      root.append(el('div', 'panel-sub',
+        `${country(state.countries[st.owner].tag)} · ${stateData.provinces.length}${UI.provinceCount}`
+        + (st.owner === st.controller
+          ? '' : ` · ${country(state.countries[st.controller].tag)}が占領中`)));
+
+      const resources = Object.entries(stateData.resources)
+        .filter(([, v]) => (v ?? 0) > 0)
+        .map(([k, v]) => `${RESOURCE_LABEL[k as ResourceType]} ${v}`)
+        .join('、') || 'なし';
+      const grid = el('div', 'panel-kvs');
+      for (const [k, v] of [
+        [UI.population, formatNumber(stateData.manpower * 1000)],
+        [UI.dockyards, String(stateData.dockyards)],
+        [UI.resources, resources],
+      ] as [string, string][]) {
+        const row = el('div', 'panel-kv');
+        row.append(el('span', 'panel-k', k), el('span', 'panel-v', v));
+        grid.append(row);
+      }
+      root.append(grid);
+
+      // The provinces as rows, not as a sentence. Eight names joined by 、 in
+      // a key/value cell is a wall of text in a 180px column, and the one
+      // thing a player wants from that list is to go to one of them.
+      root.append(el('div', 'panel-label', UI.provincesHere));
+      const members = el('div', 'panel-list');
+      for (const q of stateData.provinces) {
+        const g2 = game.index.get(q);
+        const row = el('button', 'panel-row wide-row');
+        row.classList.toggle('is-picked', q === id);
+        const main = el('div', 'panel-row-main');
+        const held = state.provinces[q];
+        main.append(
+          el('div', 'panel-row-title', g2.name),
+          el('div', 'panel-row-sub',
+            `${TERRAIN[g2.terrain]} · ${UI.victoryPoints} ${g2.vp}`
+            + (held.divisions.length > 0 ? ` · ${held.divisions.length}${UI.divisionsHere}` : '')),
+        );
+        row.append(main);
+        row.addEventListener('click', () => {
+          game.selectProvince(q);
+          game.setSelectionScope('province');
+          rebuild();
+        });
+        members.append(row);
+      }
+      root.append(members);
+      return;
+    }
+
+    // --- the province -----------------------------------------------------
     const head = el('div', 'panel-head');
     head.dataset.role = 'prov-head';
     head.append(stat(UI.victoryPoints, String(geo.vp)), stat(UI.supplyLevel, '—'),
       stat(UI.totalDivisions, '0'));
-    // Only where it applies: home ground never resists.
-    const st = state.states[geo.stateId];
-    if (st.owner !== st.controller) {
-      head.append(stat(UI.resistance, `${Math.round(st.resistance * 100)}%`));
-    }
     root.append(head);
 
     const sub = el('div', 'panel-sub');
@@ -702,50 +814,87 @@ export const provincePanel: Panel = {
     root.append(sub);
 
     const grid = el('div', 'panel-kvs');
-    const resources = Object.entries(stateData.resources)
-      .filter(([, v]) => (v ?? 0) > 0)
-      .map(([k, v]) => `${RESOURCE_LABEL[k as ResourceType]} ${v}`)
-      .join('、') || 'なし';
-    // The two tiers, named and related. A province is what a division stands
-    // in; the state is what the factories and the population belong to, and
-    // several provinces share one -- which is invisible unless it is said.
-    const rows: [string, string][] = [
-      ['所属ステート', `${stateData.name}（${stateData.provinces.length}プロヴィンス）`],
-      [UI.infrastructure, String(stateData.infrastructure)],
-      ['人口', formatNumber(stateData.manpower * 1000)],
-      ['工場（州全体）', `民需 ${stateData.civilianFactories} / 軍需 ${stateData.militaryFactories}`],
-      ['建設枠（州全体）', String(stateData.buildingSlots)],
-      [UI.resources, resources],
+    for (const [k, v] of [
+      [UI.terrainLabel, TERRAIN[geo.terrain]],
+      [UI.fortLevel, String(p.fortLevel)],
+      [UI.coastal, geo.coastal ? UI.yes : UI.no],
       ['占領率', `${country(owner.tag)}の${Math.round(occupationRatio(state, p.owner) * 100)}%`],
-    ];
-    for (const [k, v] of rows) {
+    ] as [string, string][]) {
       const row = el('div', 'panel-kv');
       row.append(el('span', 'panel-k', k), el('span', 'panel-v', v));
       grid.append(row);
     }
     root.append(grid);
 
+    // --- the garrison, as something you can pick from ---------------------
     const divisions = p.divisions
       .map((d) => state.divisions[d])
       .filter((d) => d && !d.dead);
-    if (divisions.length > 0) {
-      root.append(el('div', 'panel-label', UI.garrison));
-      const list = el('div', 'panel-list');
-      list.dataset.role = 'garrison';
-      for (const d of divisions) {
-        const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
-        const row = el('div', 'panel-row');
-        row.dataset.div = String(d.id);
-        const main = el('div', 'panel-row-main');
-        main.append(
-          el('div', 'panel-row-title', `${country(state.countries[d.owner].tag)} ${tpl?.name ?? '師団'}`),
-          el('div', 'panel-row-sub', ''),
-        );
-        row.append(main);
-        list.append(row);
+    if (divisions.length === 0) return;
+
+    const me = state.meta.playerCountry;
+    const mine = divisions.filter((d) => d.owner === me);
+    root.append(el('div', 'panel-label', UI.garrison));
+
+    if (mine.length > 0) {
+      const picked = new Set(game.selection.divisions);
+      const tools = el('div', 'panel-chips');
+      const all = el('button', 'panel-chip', UI.selectAllHere);
+      all.addEventListener('click', () => {
+        game.selectDivisions(mine.map((d) => d.id), { centre: false });
+        rebuild();
+      });
+      tools.append(all);
+      // Putting a division into a formation is what turns a garrison into an
+      // army, so it belongs beside the garrison rather than three panels away.
+      for (const army of (state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup)) {
+        const chip = el('button', 'panel-chip', `${army.name}${UI.assignTo}`);
+        chip.disabled = picked.size === 0;
+        chip.addEventListener('click', () => {
+          game.issue({
+            t: 'assignDivisions', country: me, army: army.id,
+            divisions: [...game.selection.divisions],
+          });
+          rebuild();
+        });
+        tools.append(chip);
       }
-      root.append(list);
+      root.append(tools);
     }
+
+    const list = el('div', 'panel-list');
+    list.dataset.role = 'garrison';
+    for (const d of divisions) {
+      const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
+      const own = d.owner === me;
+      const row = el(own ? 'button' : 'div', 'panel-row');
+      row.dataset.div = String(d.id);
+      if (own) {
+        row.classList.add('wide-row');
+        row.classList.toggle('is-picked', game.selection.divisions.includes(d.id));
+      }
+      const army = d.armyId === null ? null : (state.armies ?? []).find((a) => a.id === d.armyId);
+      const main = el('div', 'panel-row-main');
+      main.append(
+        el('div', 'panel-row-title',
+          `${country(state.countries[d.owner].tag)} ${tpl?.name ?? '師団'}`),
+        el('div', 'panel-row-sub', own ? (army?.name ?? UI.unassigned) : ''),
+      );
+      row.append(main);
+      if (own) {
+        // One division at a time: a stack tap takes the whole province, and
+        // splitting one formation off it was impossible from anywhere.
+        row.addEventListener('click', () => {
+          const now = new Set(game.selection.divisions);
+          if (now.has(d.id)) now.delete(d.id);
+          else now.add(d.id);
+          game.selectDivisions([...now], { centre: false });
+          rebuild();
+        });
+      }
+      list.append(row);
+    }
+    root.append(list);
   },
   refresh(game, root) {
     const id = game.selection.province;
@@ -1376,6 +1525,20 @@ export const commandPanel: Panel = {
         }
         card.append(orderControls(game, army, rebuild));
 
+        // What turns a formation into something you can move. Without this an
+        // army was a note in a panel: the map only ever knew about whatever
+        // happened to be standing in one province, which is a garrison, not an
+        // order of battle.
+        const take = el('button', 'panel-btn wide primary', UI.commandArmy);
+        take.disabled = army.divisions.length === 0;
+        take.addEventListener('click', () => {
+          game.selectDivisions([...army.divisions], { army: army.id });
+          // Close the sheet rather than open another: the next thing the
+          // player does is tap the ground, and the sheet is over the ground.
+          closeSheet();
+        });
+        card.append(take);
+
         const drop = el('button', 'panel-btn wide danger', UI.disband);
         drop.addEventListener('click', () => {
           game.issue({ t: 'disbandArmy', country: me.id, army: army.id });
@@ -1478,6 +1641,75 @@ export const commandPanel: Panel = {
  * historical order, so a column reads as a chronology: what is running, what
  * can be started now, and what is waiting and on what.
  */
+/**
+ * The focus tree.
+ *
+ * HOI4's national focus screen is a tree: icons on a grid, joined by lines
+ * that show what unlocks what. This was three collapsible lists -- available,
+ * locked, done -- which is the same information with the shape taken out of
+ * it, and the shape is the whole point. A player cannot plan two focuses ahead
+ * from a list, because a list does not say which of the sixteen locked entries
+ * the one available entry leads to.
+ *
+ * `FocusView` already carried `x`, `y`, `prerequisites` and `exclusive`; the
+ * panel simply was not reading them.
+ */
+
+/** Node box and grid pitch, in CSS pixels. */
+const FOCUS_W = 84;
+const FOCUS_H = 72;
+const FOCUS_COL = 96;
+const FOCUS_ROW = 86;
+const FOCUS_PAD = 10;
+
+/**
+ * Which icon a focus wears.
+ *
+ * HOI4 draws a bespoke illustration for every focus; there are 82 here and
+ * bespoke art for each is not on the table. The next most useful thing an
+ * icon can say is what the focus *does*, so it is chosen from the effect that
+ * dominates it -- and that is information the list form never showed at all.
+ */
+const FOCUS_EFFECT_ICON: Record<string, string> = {
+  annex: 'ui-annex',
+  cede: 'ui-annex',
+  wargoal: 'ui-wargoal',
+  guarantee: 'ui-diplomacy',
+  opinion: 'ui-diplomacy',
+  factory: 'ui-factory',
+  warEconomy: 'ui-factory',
+  buildingSlots: 'ui-construction',
+  infrastructure: 'ui-construction',
+  constructionSpeed: 'ui-construction',
+  fort: 'ui-construction',
+  research: 'ui-research',
+  researchSpeed: 'ui-research',
+  researchSlot: 'ui-research',
+  equipment: 'ui-production',
+  manpower: 'ui-manpower',
+  worldTension: 'ui-warning',
+  politicalPower: 'ui-political_power',
+  dailyPoliticalPower: 'ui-political_power',
+};
+
+/** Effects in the order they best describe a focus, most telling first. */
+const FOCUS_ICON_ORDER = [
+  'annex', 'cede', 'wargoal', 'guarantee', 'factory', 'equipment', 'research',
+  'researchSlot', 'researchSpeed', 'manpower', 'buildingSlots', 'infrastructure',
+  'constructionSpeed', 'fort', 'warEconomy', 'opinion', 'worldTension',
+  'politicalPower', 'dailyPoliticalPower',
+];
+
+function focusIcon(v: { effects: { k: string }[] }): string {
+  for (const kind of FOCUS_ICON_ORDER) {
+    if (v.effects.some((e) => e.k === kind)) return FOCUS_EFFECT_ICON[kind];
+  }
+  return 'ui-political_power';
+}
+
+/** The focus the detail card is showing, remembered across rebuilds. */
+let focusSelected: string | null = null;
+
 export const focusPanel: Panel = {
   id: 'focus',
   title: UI.navFocus,
@@ -1487,6 +1719,7 @@ export const focusPanel: Panel = {
     const me = state.countries[state.meta.playerCountry];
     const views = availableFocuses(state, me.id);
     const current = views.find((v) => v.current) ?? null;
+    const byId = new Map(views.map((v) => [v.id, v] as const));
 
     const head = el('div', 'panel-head');
     head.append(
@@ -1496,78 +1729,168 @@ export const focusPanel: Panel = {
     );
     root.append(head);
 
-    if (current) {
-      root.append(el('div', 'panel-label', UI.currentFocus));
-      const row = el('div', 'panel-focus is-current');
-      row.append(
-        el('div', 'panel-focus-name', current.name),
-        el('div', 'panel-focus-desc', current.desc),
-      );
-      const bar = el('div', 'panel-bar');
-      const fill = el('i', 'panel-bar-fill');
-      fill.style.width = `${(current.fraction * 100).toFixed(1)}%`;
-      bar.append(fill);
-      row.append(bar);
-      row.append(el('div', 'panel-focus-meta',
-        `${Math.round(current.progress)} / ${current.days}${UI.days}`));
-      const stop = el('button', 'panel-btn wide', UI.cancelFocus);
-      stop.addEventListener('click', () => {
-        game.issue({ t: 'cancelFocus', country: me.id });
-        focusPanel.build(game, root);
-      });
-      row.append(stop);
-      root.append(row);
+    // Default to whatever the player is most likely to want to read: the focus
+    // under way, else the first one they could start.
+    if (focusSelected === null || !byId.has(focusSelected)) {
+      focusSelected = current?.id
+        ?? views.find((v) => v.selectable && !v.completed)?.id
+        ?? views[0]?.id
+        ?? null;
     }
 
-    const open = views.filter((v) => !v.current && !v.completed && v.selectable);
-    const locked = views.filter((v) => !v.current && !v.completed && !v.selectable);
-    const done = views.filter((v) => v.completed);
+    const cols = Math.max(1, ...views.map((v) => v.x + 1));
+    const rows = Math.max(1, ...views.map((v) => v.y + 1));
+    const width = FOCUS_PAD * 2 + (cols - 1) * FOCUS_COL + FOCUS_W;
+    const height = FOCUS_PAD * 2 + (rows - 1) * FOCUS_ROW + FOCUS_H;
 
-    const card = (v: (typeof views)[number]): HTMLElement => {
-      const row = el('div', 'panel-focus');
-      row.classList.toggle('is-done', v.completed);
-      row.classList.toggle('is-locked', !v.selectable && !v.completed);
-      row.append(
-        el('div', 'panel-focus-name', `${v.completed ? '✔ ' : ''}${v.name}`),
-        el('div', 'panel-focus-desc', v.desc),
-      );
-      if (v.effectText.length > 0) {
-        row.append(el('div', 'panel-focus-effect', v.effectText.join(' · ')));
+    const scroller = el('div', 'panel-tree-scroll');
+    const tree = el('div', 'panel-tree');
+    tree.style.width = `${width}px`;
+    tree.style.height = `${height}px`;
+
+    const cx = (v: { x: number }): number => FOCUS_PAD + v.x * FOCUS_COL + FOCUS_W / 2;
+    const top = (v: { y: number }): number => FOCUS_PAD + v.y * FOCUS_ROW;
+    const bottom = (v: { y: number }): number => top(v) + FOCUS_H;
+
+    // --- the lines ---------------------------------------------------------
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'panel-tree-links');
+    svg.setAttribute('width', String(width));
+    svg.setAttribute('height', String(height));
+    const line = (d: string, cls: string): void => {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('class', cls);
+      svg.append(path);
+    };
+
+    for (const v of views) {
+      for (const group of v.prerequisites) {
+        for (const id of group) {
+          const from = byId.get(id);
+          if (!from) continue;
+          // An elbow, as the real tree draws it: down out of the parent, across
+          // at the midpoint, then down into the child.
+          const y0 = bottom(from);
+          const y1 = top(v);
+          const mid = y0 + (y1 - y0) / 2;
+          const done = from.completed;
+          line(
+            `M${cx(from)} ${y0} V${mid} H${cx(v)} V${y1}`,
+            `panel-tree-link${done ? ' is-open' : ''}`,
+          );
+        }
       }
-      if (v.completed) {
-        // Nothing more to say; the tick and the effect line are the record.
+      // Exclusives are drawn once, from the lower id, so the pair gets one line.
+      for (const other of v.exclusive) {
+        if (other <= v.id) continue;
+        const o = byId.get(other);
+        if (!o) continue;
+        line(`M${cx(v)} ${top(v) + FOCUS_H / 2} H${cx(o)}`, 'panel-tree-link is-exclusive');
+      }
+    }
+    tree.append(svg);
+
+    // --- the nodes ---------------------------------------------------------
+    const detail = el('div', 'panel-focus-detail');
+
+    const drawDetail = (): void => {
+      detail.innerHTML = '';
+      const v = focusSelected === null ? null : byId.get(focusSelected);
+      if (!v) return;
+      detail.append(el('div', 'panel-focus-name', v.name));
+      detail.append(el('div', 'panel-focus-desc', v.desc));
+      if (v.effectText.length > 0) {
+        detail.append(el('div', 'panel-focus-effect', v.effectText.join(' · ')));
+      }
+      if (v.current) {
+        const bar = el('div', 'panel-bar');
+        const fill = el('i', 'panel-bar-fill');
+        fill.style.width = `${(v.fraction * 100).toFixed(1)}%`;
+        bar.append(fill);
+        detail.append(bar);
+        detail.append(el('div', 'panel-focus-meta',
+          `${Math.round(v.progress)} / ${v.days}${UI.days}`));
+        const stop = el('button', 'panel-btn wide', UI.cancelFocus);
+        stop.addEventListener('click', () => {
+          game.issue({ t: 'cancelFocus', country: me.id });
+          focusPanel.build(game, root);
+        });
+        detail.append(stop);
+      } else if (v.completed) {
+        detail.append(el('div', 'panel-focus-meta', UI.focusCompleted));
       } else if (v.selectable) {
-        const go = el('button', 'panel-btn wide', `${UI.startFocus}（${v.days}${UI.days}）`);
+        const go = el('button', 'panel-btn wide primary',
+          `${UI.startFocus}（${v.days}${UI.days}）`);
         go.addEventListener('click', () => {
           game.issue({ t: 'startFocus', country: me.id, focus: v.id });
           focusPanel.build(game, root);
         });
-        row.append(go);
+        detail.append(go);
       } else {
-        row.append(el('div', 'panel-focus-block', v.blockText ?? UI.locked));
+        detail.append(el('div', 'panel-focus-block', v.blockText ?? UI.locked));
       }
-      return row;
     };
 
-    for (const [key, label, items, byDefault] of [
-      ['focus.open', UI.focusAvailable, open, true],
-      ['focus.locked', UI.focusLocked, locked, false],
-      ['focus.done', UI.focusCompleted, done, false],
-    ] as const) {
-      if (items.length === 0) continue;
-      const sec = section(key, label, items.length, byDefault);
-      for (const v of items) sec.body.append(card(v));
-      root.append(sec.head, sec.body);
+    const nodes = new Map<string, HTMLElement>();
+    for (const v of views) {
+      const node = el('button', 'panel-focus-node');
+      node.dataset.focus = v.id;
+      node.style.left = `${FOCUS_PAD + v.x * FOCUS_COL}px`;
+      node.style.top = `${top(v)}px`;
+      node.classList.toggle('is-done', v.completed);
+      node.classList.toggle('is-current', v.current);
+      node.classList.toggle('is-locked', !v.selectable && !v.completed && !v.current);
+      const icon = el('i', 'panel-focus-node-icon');
+      icon.style.setProperty('--icon', `url("${iconUrl(focusIcon(v))}")`);
+      node.append(icon, el('span', 'panel-focus-node-name', v.name));
+      if (v.current) {
+        const bar = el('i', 'panel-focus-node-bar');
+        const fill = el('i', '');
+        fill.style.width = `${(v.fraction * 100).toFixed(1)}%`;
+        bar.append(fill);
+        node.append(bar);
+      }
+      node.addEventListener('click', () => {
+        focusSelected = v.id;
+        for (const [id, n] of nodes) n.classList.toggle('is-picked', id === v.id);
+        drawDetail();
+      });
+      nodes.set(v.id, node);
+      tree.append(node);
+    }
+    if (focusSelected !== null) nodes.get(focusSelected)?.classList.add('is-picked');
+
+    scroller.append(tree);
+    // The card goes above the tree, not below it. Below, reading a focus meant
+    // scrolling past all six rows to reach the text describing the node you
+    // had just tapped -- and then scrolling back to tap the next one.
+    drawDetail();
+    root.append(detail, scroller);
+
+    // Bring the interesting part of the tree into view rather than the corner:
+    // on a 412px screen a six-column tree is 590px wide, and the focus that
+    // matters is rarely the top-left one. Snapped to the column pitch, so the
+    // left edge never lands halfway through a node.
+    const focusNode = focusSelected === null ? null : nodes.get(focusSelected);
+    if (focusNode) {
+      const want = focusNode.offsetLeft - scroller.clientWidth / 2 + FOCUS_W / 2;
+      scroller.scrollLeft = Math.max(0, Math.round(want / FOCUS_COL) * FOCUS_COL);
     }
   },
   refresh(game, root) {
     // The tree only changes on a completion or a command, both of which rebuild.
-    const bar = root.querySelector<HTMLElement>('.panel-focus.is-current .panel-bar-fill');
-    if (!bar) return;
     const me = game.state.countries[game.state.meta.playerCountry];
     const cur = availableFocuses(game.state, me.id).find((v) => v.current);
-    if (!cur) { focusPanel.build(game, root); return; }
-    bar.style.width = `${(cur.fraction * 100).toFixed(1)}%`;
+    const nodeBar = root.querySelector<HTMLElement>('.panel-focus-node.is-current > .panel-focus-node-bar > i');
+    const detailBar = root.querySelector<HTMLElement>('.panel-focus-detail .panel-bar-fill');
+    if (!cur) {
+      if (nodeBar || detailBar) focusPanel.build(game, root);
+      return;
+    }
+    const width = `${(cur.fraction * 100).toFixed(1)}%`;
+    if (nodeBar) nodeBar.style.width = width;
+    if (detailBar) detailBar.style.width = width;
   },
 };
 
@@ -1575,8 +1898,17 @@ export const focusPanel: Panel = {
 // Research
 // ---------------------------------------------------------------------------
 
-let researchBranch: TechBranch = 'industry';
 let researchSlot = 0;
+/** The technology the detail card is showing, remembered across rebuilds. */
+let researchPicked: string | null = null;
+
+/** Grid metrics for the technology tree, in CSS pixels. */
+const TECH_W = 88;
+const TECH_H = 50;
+const TECH_COL = 98;
+const TECH_ROW = 58;
+/** Room for the year headings across the top of the grid. */
+const TECH_HEAD_H = 20;
 
 export const researchPanel: Panel = {
   id: 'research',
@@ -1642,41 +1974,161 @@ export const researchPanel: Panel = {
     }
 
     // --- the tree for the selected slot ---
+    //
+    // A grid, the way HOI4 draws one: the year across, the branch down, the
+    // generations of one weapon joined by a line. This was a branch chooser
+    // over a flat list, which tells a player what a technology costs but not
+    // that it is three steps down a chain they have not started, nor that the
+    // 1944 entries are a decade of research away.
     root.append(el('div', 'panel-label', `${UI.slot}${researchSlot + 1} — ${UI.chooseTech}`));
-    const chips = el('div', 'panel-chips');
-    for (const b of BRANCH_LIST) {
-      const chip = el('button', 'panel-chip', b.name);
-      chip.classList.toggle('is-on', b.id === researchBranch);
-      chip.addEventListener('click', () => {
-        researchBranch = b.id;
-        researchPanel.build(game, root);
-      });
-      chips.append(chip);
-    }
-    root.append(chips);
 
-    const list = el('div', 'panel-list');
-    for (const t of techTree(state, me.id, researchBranch)) {
-      const row = el('button', 'panel-row wide-row');
-      row.disabled = !t.researchable;
-      row.classList.toggle('is-blocked', !t.researchable);
-      const main = el('div', 'panel-row-main');
-      main.append(
-        el('div', 'panel-row-title', `${t.completed ? '✔ ' : ''}${t.name}`),
-        el('div', 'panel-row-sub',
-          `${t.year}年 · ${t.requiredDays}${UI.days}` +
-          (t.researchable ? '' : ` · ${t.reasonText}`)),
-      );
-      row.append(main, el('span', 'panel-row-tag', t.researchable ? '▶' : ''));
-      row.addEventListener('click', () => {
-        game.issue({
-          t: 'startResearch', country: me.id, slot: researchSlot, tech: t.id,
+    const rows = BRANCH_LIST.map((b) => ({ branch: b, techs: techTree(state, me.id, b.id) }))
+      .filter((r) => r.techs.length > 0);
+    const allTechs = rows.flatMap((r) => r.techs);
+    const years = [...new Set(allTechs.map((t) => t.year))].sort((a, b) => a - b);
+    const yearAt = new Map(years.map((y, i) => [y, i] as const));
+    const byId = new Map(allTechs.map((t) => [t.id, t] as const));
+
+    // Where every technology sits, and how deep each branch band has to be.
+    const place = new Map<string, { x: number; y: number }>();
+    const bandTop: number[] = [];
+    let cursor = TECH_HEAD_H;
+    for (const r of rows) {
+      const cells = new Map<number, number>();
+      let depth = 1;
+      for (const t of r.techs) {
+        const n = cells.get(t.year) ?? 0;
+        cells.set(t.year, n + 1);
+        depth = Math.max(depth, n + 1);
+        place.set(t.id, {
+          x: (yearAt.get(t.year) ?? 0) * TECH_COL,
+          y: cursor + n * TECH_ROW,
         });
-        researchPanel.build(game, root);
-      });
-      list.append(row);
+      }
+      bandTop.push(cursor);
+      cursor += depth * TECH_ROW;
     }
-    root.append(list);
+    const gridW = Math.max(1, years.length) * TECH_COL;
+    const gridH = cursor;
+
+    const scroller = el('div', 'panel-tree-scroll');
+    const grid = el('div', 'panel-tree');
+    grid.style.width = `${gridW}px`;
+    grid.style.height = `${gridH}px`;
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'panel-tree-links');
+    svg.setAttribute('width', String(gridW));
+    svg.setAttribute('height', String(gridH));
+    for (const t of allTechs) {
+      const to = place.get(t.id);
+      if (!to) continue;
+      for (const pid of t.prerequisites) {
+        const from = place.get(pid);
+        if (!from) continue;
+        // Generations run left to right along a row, so the elbow goes out of
+        // the parent's right edge and into the child's left.
+        const x0 = from.x + TECH_W;
+        const x1 = to.x;
+        const y0 = from.y + TECH_H / 2;
+        const y1 = to.y + TECH_H / 2;
+        const mid = x0 + (x1 - x0) / 2;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', `M${x0} ${y0} H${mid} V${y1} H${x1}`);
+        path.setAttribute(
+          'class',
+          `panel-tree-link${byId.get(pid)?.completed ? ' is-open' : ''}`,
+        );
+        svg.append(path);
+      }
+    }
+    grid.append(svg);
+
+    for (const y of years) {
+      const head = el('div', 'panel-tech-year', String(y));
+      head.style.left = `${(yearAt.get(y) ?? 0) * TECH_COL}px`;
+      grid.append(head);
+    }
+    // The branch names sit outside the scroller, on a rail that does not pan.
+    // Inside it they slid off the left edge the moment the player looked at
+    // 1940, which is the one place a row label is actually needed.
+    const rail = el('div', 'panel-tech-rail');
+    rail.style.height = `${gridH}px`;
+    rows.forEach((r, i) => {
+      const head = el('div', 'panel-tech-branch', r.branch.name);
+      head.style.top = `${bandTop[i]}px`;
+      rail.append(head);
+    });
+
+    const detail = el('div', 'panel-focus-detail');
+    const drawDetail = (): void => {
+      detail.innerHTML = '';
+      const t = researchPicked === null ? null : byId.get(researchPicked);
+      if (!t) {
+        detail.append(el('div', 'panel-focus-desc', UI.pickTech));
+        return;
+      }
+      detail.append(el('div', 'panel-focus-name', t.name));
+      detail.append(el('div', 'panel-focus-desc',
+        `${t.branchName} · ${t.year}${UI.year} · ${t.requiredDays}${UI.days}`
+        + (t.aheadPenaltyDays > 0 ? ` (${UI.aheadPenalty} +${t.aheadPenaltyDays}${UI.days})` : '')));
+      if (t.effects.length > 0) {
+        detail.append(el('div', 'panel-focus-effect',
+          t.effects.map((e) => `${e.label} ${e.value}`).join(' · ')));
+      }
+      if (t.completed) {
+        detail.append(el('div', 'panel-focus-meta', UI.researchedAlready));
+      } else if (t.researchable) {
+        const go = el('button', 'panel-btn wide primary',
+          `${UI.slot}${researchSlot + 1}${UI.researchHere}`);
+        go.addEventListener('click', () => {
+          game.issue({ t: 'startResearch', country: me.id, slot: researchSlot, tech: t.id });
+          researchPanel.build(game, root);
+        });
+        detail.append(go);
+      } else {
+        detail.append(el('div', 'panel-focus-block', t.reasonText));
+      }
+    };
+
+    const nodes = new Map<string, HTMLElement>();
+    for (const t of allTechs) {
+      const at = place.get(t.id);
+      if (!at) continue;
+      const node = el('button', 'panel-tech-node');
+      node.style.left = `${at.x}px`;
+      node.style.top = `${at.y}px`;
+      node.classList.toggle('is-done', t.completed);
+      node.classList.toggle('is-current', t.slot !== null);
+      node.classList.toggle('is-locked', !t.researchable && !t.completed && t.slot === null);
+      node.append(el('span', 'panel-tech-node-name', t.name));
+      if (t.slot !== null) {
+        const bar = el('i', 'panel-focus-node-bar');
+        const fill = el('i', '');
+        fill.style.width = `${((slots[t.slot]?.percent ?? 0) * 100).toFixed(1)}%`;
+        bar.append(fill);
+        node.append(bar);
+      }
+      node.addEventListener('click', () => {
+        researchPicked = t.id;
+        for (const [id, n] of nodes) n.classList.toggle('is-picked', id === t.id);
+        drawDetail();
+      });
+      nodes.set(t.id, node);
+      grid.append(node);
+    }
+    if (researchPicked !== null) nodes.get(researchPicked)?.classList.add('is-picked');
+
+    scroller.append(grid);
+    const frame = el('div', 'panel-tech-frame');
+    frame.append(rail, scroller);
+    drawDetail();
+    root.append(detail, frame);
+
+    // Open on the year the country is actually working in, not on 1936.
+    const now = state.clock.year;
+    const col = yearAt.get(years.find((y) => y >= now) ?? years[0]) ?? 0;
+    scroller.scrollLeft = Math.max(0, col * TECH_COL - TECH_COL);
   },
   refresh(game, root) {
     const bars = root.querySelectorAll<HTMLElement>('.panel-bar-fill');

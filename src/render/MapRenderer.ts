@@ -44,6 +44,12 @@ export interface MapRendererOptions {
 /** Zoom thresholds at which line weights and label sets change. */
 const LOD_STEPS = [0.045, 0.075, 0.13, 0.24, 0.45, 0.9];
 
+/**
+ * Which of the map's two tiers an outline belongs to. A province is where a
+ * division stands; a state is what gets built in.
+ */
+export type SelectionScope = 'province' | 'state';
+
 export class MapRenderer {
   readonly app: Application;
   readonly camera: Camera;
@@ -61,6 +67,7 @@ export class MapRenderer {
   private borderLayer = new Graphics();
   private grain!: TilingSprite;
   private selectionLayer = new Graphics();
+  private selectScope: SelectionScope = 'province';
   private frontLayer = new Graphics();
   private cityLayer = new Graphics();
   /** Exposed for the visual-determinism probe in the e2e suite. */
@@ -384,8 +391,18 @@ export class MapRenderer {
     return this.mode;
   }
 
-  setSelection(id: ProvinceId | null, ordering = false): void {
+  /**
+   * What the outline is drawn around.
+   *
+   * `scope` is the difference between the two tiers the map has: a province is
+   * where a division stands and a state is what gets built in, and a player
+   * asking about one is not asking about the other. At province scope only the
+   * tapped province is outlined; at state scope every province of its state is,
+   * which is the only way to see on the map how far a state reaches.
+   */
+  setSelection(id: ProvinceId | null, ordering = false, scope: SelectionScope = 'province'): void {
     this.selected = id;
+    this.selectScope = scope;
     this.units.setSelection(id, ordering);
   }
 
@@ -594,10 +611,20 @@ export class MapRenderer {
       g.stroke({ color: 0xffffff, width: 2.2 / zoom, alpha: 0.4, join: 'round' });
     }
     if (this.selected !== null) {
-      const p = this.index.provinces[this.selected];
-      for (const ring of p.rings) this.traceFloatRing(g, ring);
+      const chosen = this.index.provinces[this.selected];
+      const members = this.selectScope === 'state'
+        ? (this.index.data.states[chosen.stateId]?.provinces ?? [this.selected])
+        : [this.selected];
+      const trace = (): void => {
+        for (const id of members) {
+          const p = this.index.provinces[id];
+          if (!p) continue;
+          for (const ring of p.rings) this.traceFloatRing(g, ring);
+        }
+      };
+      trace();
       g.stroke({ color: PALETTE.selection, width: 6 / zoom, alpha: 0.35 * pulse, join: 'round' });
-      for (const ring of p.rings) this.traceFloatRing(g, ring);
+      trace();
       g.stroke({ color: PALETTE.selection, width: 2.4 / zoom, alpha: 0.95, join: 'round' });
     }
   }
