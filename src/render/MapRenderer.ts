@@ -906,6 +906,33 @@ export class MapRenderer {
   }
 
   /**
+   * Nudges a point off the land, along the perpendicular given.
+   *
+   * The passage is drawn as a straight line between two harbours, and a
+   * straight line between two harbours goes over a headland as often as not --
+   * a ship drawn inland is worse than no ship. Stepping sideways until the
+   * point is over water follows the coast closely enough at map scale, and
+   * costs a handful of point-in-province tests per convoy.
+   */
+  private afloat(
+    x: number, y: number, px: number, py: number,
+  ): { x: number; y: number } {
+    if (this.index.pick(x, y) === null) return { x, y };
+    const len = Math.sqrt(px * px + py * py) || 1;
+    const ux = px / len;
+    const uy = py / len;
+    const step = 26;
+    for (let i = 1; i <= 8; i++) {
+      for (const side of [1, -1]) {
+        const nx = x + ux * step * i * side;
+        const ny = y + uy * step * i * side;
+        if (this.index.pick(nx, ny) === null) return { x: nx, y: ny };
+      }
+    }
+    return { x, y };
+  }
+
+  /**
    * Divisions on the water.
    *
    * 「海を移動してる感じ出して」. A division at sea keeps the quay it left as its
@@ -941,12 +968,12 @@ export class MapRenderer {
       const key = `${d.provinceId}:${to}:${t}`;
       const lane = lanes.get(key);
       if (lane) { lane.n++; continue; }
-      lanes.set(key, {
-        x: a.centerX + (b.centerX - a.centerX) * t,
-        y: a.centerY + (b.centerY - a.centerY) * t,
-        n: 1,
-        owner: d.owner,
-      });
+      const at = this.afloat(
+        a.centerX + (b.centerX - a.centerX) * t,
+        a.centerY + (b.centerY - a.centerY) * t,
+        b.centerY - a.centerY, -(b.centerX - a.centerX),
+      );
+      lanes.set(key, { x: at.x, y: at.y, n: 1, owner: d.owner });
     }
     if (lanes.size === 0) return;
 
