@@ -637,6 +637,7 @@ export class Game {
     // The camera stays where the player put it. Centring on the first
     // division would move the map out from under a box they just finished
     // drawing, which is the one moment they are certain where things are.
+    this.forceShouldOpen = true;
     if (raising && this.raiseArmy(divisions)) return;
     this.selectDivisions(divisions, { army: this.armyOf(divisions), centre: false });
   }
@@ -701,6 +702,29 @@ export class Game {
   transportBlock: TransportBlock | null = null;
 
   /**
+   * Asks the selection list to fold itself away.
+   *
+   * Set when an order has been given, cleared by the list when it reads it.
+   * The list stands over the left of the map, and the map is what the player
+   * taps next -- this is the same lesson the map-mode strip and the order bar
+   * both taught: a panel that eats a tap meant for the ground underneath it is
+   * worse than no panel.
+   */
+  forceShouldShut = false;
+
+  /**
+   * Asks the selection list to open itself.
+   *
+   * Set only by a rectangle. Tapping a counter says "I know what this is and I
+   * want to order it", and the next thing that happens is a tap on the ground;
+   * drawing a rectangle asks "what did I catch?", and the next thing that
+   * happens is reading the answer. The list is the answer to the second
+   * question and an obstacle to the first, so it opens for one and not the
+   * other.
+   */
+  forceShouldOpen = false;
+
+  /**
    * Sends the selection somewhere, by whatever road or sea lane exists.
    *
    * 「陸続きじゃない所に師団移動出したら勝手に港を経由するように、海上輸送は
@@ -713,6 +737,10 @@ export class Game {
     const divisions = [...this.selection.divisions];
     if (divisions.length === 0) return;
     this.issue({ t: 'moveDivisions', divisions, target });
+    // The list of what is selected is an editor, and the editing is over: the
+    // player has said where these are going. It folds to its header so the
+    // ground it was standing on is ground again.
+    this.forceShouldShut = true;
     const moving = divisions.some((id) => {
       const d = this.state.divisions[id];
       return d && (d.path.length > 0 || d.provinceId === target);

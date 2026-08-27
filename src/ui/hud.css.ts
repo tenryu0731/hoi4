@@ -708,7 +708,7 @@ export const HUD_CSS = `
   position: absolute; left: 0;
   top: calc(var(--hud-top-h, 160px) + 6px);
   bottom: calc(var(--hud-foot-h, 0px) + 56px);
-  width: min(58vw, 244px);
+  width: min(48vw, 200px);
   display: none; flex-direction: column;
   background: linear-gradient(180deg, rgba(44,42,36,0.97) 0%, rgba(28,26,22,0.97) 100%);
   border: 1px solid #0d0c0a; border-left: none; border-radius: 0 4px 4px 0;
@@ -718,7 +718,8 @@ export const HUD_CSS = `
 .hud-force.is-on { display: flex; }
 /* Shut, it is just its own header: a strip the player can push out of the way
    without losing the selection underneath it. */
-.hud-force.is-shut { bottom: auto; }
+/* Folded: a strip in the corner, only as wide as what it says. */
+.hud-force.is-shut { bottom: auto; width: auto; max-width: min(70vw, 260px); }
 .hud-force.is-shut .hud-force-tools,
 .hud-force.is-shut .hud-force-list { display: none; }
 .hud-force-head {

@@ -659,13 +659,27 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
   function forceButton(label: string, onPick: () => void): HTMLButtonElement {
     const btn = el('button', 'hud-force-btn', label);
-    btn.addEventListener('click', onPick);
+    btn.addEventListener('click', () => {
+      // The list changing the selection is not a reason for the list to fold
+      // away: the player is editing, and the next thing they want is the row
+      // below the one they just used.
+      game.forceShouldOpen = true;
+      onPick();
+    });
     return btn;
   }
+
+  /** The set of divisions the list last opened itself for. */
+  let lastForceSet = '';
 
   function syncForce(): void {
     const state = game.state;
     const me = state.meta.playerCountry;
+    if (game.forceShouldShut) {
+      game.forceShouldShut = false;
+      force.classList.add('is-shut');
+      measureBand();
+    }
     const live = game.selection.divisions
       .map((id) => state.divisions[id])
       .filter((d) => d && !d.dead && d.owner === me);
@@ -677,6 +691,19 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     const key = `${army?.id ?? -1}:${army?.name ?? ''}:${live
       .map((d) => `${d.id}:${d.provinceId}:${d.combatId !== null ? 'c' : ''}${d.detached ? 'd' : ''}`)
       .join(',')}`;
+    // A rectangle opens the list; everything else leaves it folded to its
+    // header. The header alone is what says the selection happened -- which is
+    // the thing that was missing -- and it costs 40px of the corner instead of
+    // half the map. Keyed on the set of divisions rather than the whole row
+    // state: the key below changes every time a division crosses a province,
+    // and a list that reopened itself for that could not be put away.
+    const set = live.map((d) => d.id).join(',');
+    if (set !== lastForceSet) {
+      lastForceSet = set;
+      force.classList.toggle('is-shut', !game.forceShouldOpen);
+      game.forceShouldOpen = false;
+      measureBand();
+    }
     if (key === lastForceKey) return;
     lastForceKey = key;
 
@@ -731,6 +758,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       // of a list you can see: a rectangle catches more than you meant, and
       // this is where the extras come off.
       row.addEventListener('click', () => {
+        game.forceShouldOpen = true;
         const next = game.selection.divisions.filter((id) => id !== d.id);
         game.selectDivisions(next, { army: game.armyOf(next), centre: false });
         if (next.length === 0) game.unitSelected = false;
