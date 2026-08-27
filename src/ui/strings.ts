@@ -248,7 +248,10 @@ export const UI = {
   divisionName: (ordinal: number, template: string): string => `第${ordinal}${template}`,
   orderOfBattle: '隷下師団',
   selectAll: '全選択',
-  selectNone: '選択解除',
+  /* Not 「選択解除」: that is what the ✕ on the order bar is called, and two
+     controls with the same name is two controls a screen reader cannot tell
+     apart. This one is the counterpart of 全選択 and reads as one. */
+  selectNone: '全解除',
   selectedCount: (n: number): string => `${n}個選択中`,
   dropFromArmy: '軍から外す',
   newArmyFromBox: '範囲選択して新しい軍',

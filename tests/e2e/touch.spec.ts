@@ -1147,7 +1147,8 @@ test.describe('touch input', () => {
     });
     expect(expected.length).toBeGreaterThan(0);
 
-    const cards = page.locator('.hud-officer');
+    // Army cards carry the army's id; the ＋ that raises a new one does not.
+    const cards = page.locator('.hud-officer[data-army]');
     await expect(cards).toHaveCount(expected.length);
 
     // The count each card carries is the army's, against what its general can
@@ -1338,7 +1339,7 @@ test.describe('touch input', () => {
     await rows.first().click();
     expect(await page.evaluate(() => window.__game!.selection.divisions.length)).toBe(all);
 
-    await page.getByRole('button', { name: '選択解除' }).click();
+    await page.getByRole('button', { name: '全解除' }).click();
     expect(await page.evaluate(() => window.__game!.selection.divisions.length)).toBe(0);
   });
 
