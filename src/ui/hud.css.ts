@@ -699,6 +699,81 @@ export const HUD_CSS = `
 }
 .hud-nav-icon { width: 22px; height: 22px; }
 
+/* --- the force panel -------------------------------------------------------- */
+/* Beside the map, the way the reference docks its army panel. It is where a
+   selection becomes visible: without it a rectangle drawn on the map produced
+   nothing on screen, which reads as the rectangle not having worked. Left
+   rather than right because the map-mode column already owns the right edge. */
+.hud-force {
+  position: absolute; left: 0;
+  top: calc(var(--hud-top-h, 160px) + 6px);
+  bottom: calc(var(--hud-foot-h, 0px) + 56px);
+  width: min(58vw, 244px);
+  display: none; flex-direction: column;
+  background: linear-gradient(180deg, rgba(44,42,36,0.97) 0%, rgba(28,26,22,0.97) 100%);
+  border: 1px solid #0d0c0a; border-left: none; border-radius: 0 4px 4px 0;
+  box-shadow: 3px 0 14px rgba(0,0,0,0.55), inset 0 1px 0 var(--edge-hi);
+  pointer-events: auto; overflow: hidden;
+}
+.hud-force.is-on { display: flex; }
+/* Shut, it is just its own header: a strip the player can push out of the way
+   without losing the selection underneath it. */
+.hud-force.is-shut { bottom: auto; }
+.hud-force.is-shut .hud-force-tools,
+.hud-force.is-shut .hud-force-list { display: none; }
+.hud-force-head {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  min-height: 40px; padding: 5px 9px;
+  background: linear-gradient(180deg, #3d382c 0%, #2a2620 100%);
+  border: none; border-bottom: 1px solid #0d0c0a;
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.hud-force-title {
+  flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hud-force-count {
+  flex: 0 0 auto; font-size: 12px; font-weight: 700;
+  font-variant-numeric: tabular-nums; color: var(--accent);
+}
+.hud-force-tools {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  padding: 5px 6px; border-bottom: 1px solid #0d0c0a;
+}
+.hud-force-n { font-size: 11px; color: var(--ink-dim); margin-right: 2px; }
+.hud-force-btn {
+  min-height: 30px; padding: 3px 7px; font-size: 11px;
+  background: linear-gradient(180deg, #3b352a 0%, #2a2620 100%);
+  border: 1px solid #100f0c; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--ink-dim); cursor: pointer;
+}
+.hud-force-list { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.hud-force-row {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  min-height: 38px; padding: 3px 8px;
+  background: none; border: none; border-bottom: 1px solid rgba(0,0,0,0.35);
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.hud-force-row:active { background: rgba(255,255,255,0.06); }
+.hud-force-row.is-fighting { box-shadow: inset 2px 0 0 #d8574a; }
+.hud-force-sym {
+  flex: 0 0 auto; width: 22px; height: 15px; color: var(--ink-dim);
+  -webkit-mask-image: var(--icon); mask-image: var(--icon);
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  background: currentColor;
+}
+.hud-force-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.hud-force-name {
+  font-size: 11px; line-height: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hud-force-sub {
+  font-size: 10px; line-height: 12px; color: var(--ink-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* --- the battle-plan bar --------------------------------------------------- */
 /* Above the officers, along the foot, the way the reference lays it out. The
    tools scroll sideways rather than wrapping: a second row would take another
@@ -923,6 +998,44 @@ button:active { transform: scale(0.96); }
 .panel-chip.is-stop:not(:disabled) { color: #e2796c; border-color: #6b2f28; }
 .panel-chip.is-go:not(:disabled) { color: #b6c77e; border-color: #4d5730; }
 .panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
+
+/* --- the resource table ---------------------------------------------------- */
+/* One column per resource, one row per figure, the way the reference lays out
+   its market screen. Six collapsible sections each carrying a sentence could
+   not be compared with each other, and comparing is the only thing anybody
+   does on this screen. Scrolls sideways rather than wrapping: a table that
+   reflows is not a table. */
+.panel-restable {
+  margin-bottom: 10px; padding: 4px;
+  background: rgba(0,0,0,0.24); border: 1px solid #100f0d; border-radius: 3px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.panel-restable::-webkit-scrollbar { display: none; }
+.panel-resgrid {
+  display: grid; grid-template-columns: auto repeat(var(--cols, 6), minmax(42px, 1fr));
+  gap: 1px 0; min-width: 100%;
+}
+.panel-res-h {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 3px 2px 4px; border-bottom: 1px solid #0d0c0a;
+}
+.panel-res-icon { width: 15px; height: 15px; display: block; opacity: 0.85; }
+.panel-res-net {
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.panel-res-net.is-short { color: #f0a294; }
+/* The row labels: dim and small, because the numbers are the content. */
+.panel-res-rowl {
+  padding: 2px 8px 2px 3px; font-size: 10px; color: var(--ink-dim);
+  white-space: nowrap; align-self: center;
+}
+.panel-res-v {
+  padding: 2px 4px; text-align: right;
+  font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-dim);
+}
+.panel-res-v.is-good { color: #a9c98a; }
+.panel-res-v.is-bad { color: #d9a08e; }
+
 
 /* --- production ---------------------------------------------------------- */
 /* One card per line, three bands: who and what, the figures beside the

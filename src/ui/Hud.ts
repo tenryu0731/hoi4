@@ -12,7 +12,7 @@ import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
 import { RESOURCE, RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
 import {
-  COMMAND_LIMIT, MAX_ARMIES, commandLimit, commanderById,
+  COMMAND_LIMIT, MAX_ARMIES, armyById, commandLimit, commanderById,
 } from '../sim/military/command';
 
 /**
@@ -132,6 +132,21 @@ const TRANSPORT_WHY: Record<Exclude<TransportBlock, 'ok'>, string> = {
   noShipping: UI.transportNoShipping,
   noRoad: UI.transportNoRoad,
 };
+
+/**
+ * The NATO symbol a division is drawn with.
+ *
+ * The same reading the counters on the map use, so a division is the same
+ * shape in the list as it is on the ground. Armour wins, because armour is
+ * what a player needs to pick out of a line.
+ */
+function symbolOf(battalions: readonly string[]): string {
+  if (battalions.includes('medium_armor') || battalions.includes('light_armor')) return 'armor';
+  if (battalions.includes('mountaineers')) return 'mountaineers';
+  if (battalions.includes('motorized')) return 'motorized';
+  if (battalions.includes('artillery') && !battalions.includes('infantry')) return 'artillery';
+  return 'infantry';
+}
 
 export function mountHud(game: Game, root: HTMLElement): () => void {
   root.innerHTML = '';
@@ -616,6 +631,116 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     }
   }
 
+  // --- the force panel -----------------------------------------------------
+  // 「範囲選択したら横に出るんだよ」. The reference keeps a list of what is under
+  // orders beside the map, and that list is where a formation is put together:
+  // tick rows, drop rows, raise an army out of what is ticked. Without it a
+  // rectangle drawn on the map produced a selection that was nowhere on
+  // screen -- the order bar said 「24個師団」 and that was all -- which is what
+  // 「全然範囲選択できてないやん」 was about. The box worked; nothing showed for it.
+  const force = el('div', 'hud-force');
+  const forceHead = el('button', 'hud-force-head');
+  const forceTitle = el('span', 'hud-force-title', '');
+  const forceCount = el('span', 'hud-force-count', '');
+  forceHead.append(forceTitle, forceCount);
+  forceHead.addEventListener('click', () => {
+    force.classList.toggle('is-shut');
+    forceHead.setAttribute(
+      'aria-label', force.classList.contains('is-shut') ? UI.forceExpand : UI.forceCollapse,
+    );
+    measureBand();
+  });
+  const forceTools = el('div', 'hud-force-tools');
+  const forceList = el('div', 'hud-force-list');
+  force.append(forceHead, forceTools, forceList);
+
+  /** Keyed on everything drawn, so the list is left alone between changes. */
+  let lastForceKey = '';
+
+  function forceButton(label: string, onPick: () => void): HTMLButtonElement {
+    const btn = el('button', 'hud-force-btn', label);
+    btn.addEventListener('click', onPick);
+    return btn;
+  }
+
+  function syncForce(): void {
+    const state = game.state;
+    const me = state.meta.playerCountry;
+    const live = game.selection.divisions
+      .map((id) => state.divisions[id])
+      .filter((d) => d && !d.dead && d.owner === me);
+    const on = live.length > 0;
+    force.classList.toggle('is-on', on);
+    if (!on) { lastForceKey = ''; return; }
+
+    const army = game.selection.army === null ? null : armyById(state, game.selection.army);
+    const key = `${army?.id ?? -1}:${army?.name ?? ''}:${live
+      .map((d) => `${d.id}:${d.provinceId}:${d.combatId !== null ? 'c' : ''}${d.detached ? 'd' : ''}`)
+      .join(',')}`;
+    if (key === lastForceKey) return;
+    lastForceKey = key;
+
+    const commander = army ? commanderById(state, army.commander) : null;
+    const limit = commander ? commandLimit(commander) : COMMAND_LIMIT;
+    setText(forceTitle, army
+      ? `${army.name}${commander ? ` · ${commander.name}` : ''}`
+      : UI.forceTitle);
+    setText(forceCount, army ? `${army.divisions.length}/${limit}` : String(live.length));
+
+    forceTools.innerHTML = '';
+    forceTools.append(el('span', 'hud-force-n', UI.selectedCount(live.length)));
+    // Raising a formation out of whatever is ticked, wherever those divisions
+    // came from: 「他に所属してる師団だったら抜けて新たに」. `assignDivisions`
+    // moves a division between armies, so one command does both halves.
+    if ((state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup).length < MAX_ARMIES) {
+      forceTools.append(forceButton(UI.forceNewArmy, () => {
+        game.raiseArmy(live.map((d) => d.id));
+        syncForce();
+      }));
+    }
+    if (live.some((d) => d.armyId !== null)) {
+      forceTools.append(forceButton(UI.forceDetach, () => {
+        game.issue({
+          t: 'assignDivisions', country: me, army: null, divisions: live.map((d) => d.id),
+        });
+        syncForce();
+      }));
+    }
+    forceTools.append(forceButton(UI.forceClear, () => {
+      game.selectDivisions([], { centre: false });
+      game.unitSelected = false;
+      syncForce();
+      syncOrder();
+    }));
+
+    forceList.innerHTML = '';
+    for (const d of live) {
+      const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
+      const row = el('button', 'hud-force-row');
+      row.append(iconNode('hud-force-sym', `units/${symbolOf(tpl?.battalions ?? [])}.svg`));
+      const main = el('span', 'hud-force-main');
+      main.append(el('span', 'hud-force-name',
+        UI.divisionName(d.ordinal, tpl?.name ?? UI.newTemplate)));
+      const tag = d.combatId !== null ? UI.inCombat
+        : d.detached ? UI.detached
+          : d.path.length > 0 ? UI.onTheMove : game.index.get(d.provinceId).name;
+      main.append(el('span', 'hud-force-sub', tag));
+      row.append(main);
+      if (d.combatId !== null) row.classList.add('is-fighting');
+      // Tapping a row drops it out of the selection, which is the whole point
+      // of a list you can see: a rectangle catches more than you meant, and
+      // this is where the extras come off.
+      row.addEventListener('click', () => {
+        const next = game.selection.divisions.filter((id) => id !== d.id);
+        game.selectDivisions(next, { army: game.armyOf(next), centre: false });
+        if (next.length === 0) game.unitSelected = false;
+        syncForce();
+        syncOrder();
+      });
+      forceList.append(row);
+    }
+  }
+
   // --- the battle-plan bar -------------------------------------------------
   // 「下の戦闘計画のタブから色々できる」. The reference hangs a row of tools
   // along the foot of the screen, above the officers, and every plan on the
@@ -632,7 +757,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     ['spearhead', UI.toolSpearhead, UI.toolSpearheadHint, 'plan-spearhead'],
     ['garrison', UI.toolGarrison, UI.toolGarrisonHint, 'plan-garrison'],
     ['invade', UI.toolInvade, UI.toolInvadeHint, 'plan-invade'],
-    ['transport', UI.toolTransport, UI.toolTransportHint, 'plan-transport'],
+    // No 海上輸送 tool. 「海上輸送は作戦じゃない」 -- a transfer by sea is what a
+    // move order does when there is no road, not a plan the player draws, so
+    // it lives in `orderMove` and nowhere on this bar.
   ];
   const toolNodes = new Map<Exclude<PlanTool, null>, HTMLButtonElement>();
   for (const [tool, label, hint, icon] of TOOLS) {
@@ -774,8 +901,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // of a Graphics rebuild.
   const marquee = el('div', 'hud-marquee');
   root.append(
-    top, modeBar, armedHint, marquee, orderHint, planBar, toasts, officers, sheet,
-    outcome,
+    top, modeBar, force, armedHint, marquee, orderHint, planBar, toasts, officers,
+    sheet, outcome,
   );
 
   // Everything below the top bar is placed against its measured height rather
@@ -1066,6 +1193,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     }
 
     syncOrder();
+    syncForce();
     syncMarquee();
     // The tool disarms itself when a rectangle is finished, and the button has
     // to stop looking armed at the same moment.

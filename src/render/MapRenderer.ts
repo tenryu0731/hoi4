@@ -15,6 +15,7 @@ import {
 import { NATIONS } from '../sim/scenario/nations';
 import { supplyCapacity } from '../sim/military/supply';
 import { ports } from '../sim/military/ports';
+import { isVoyage } from '../sim/military/movement';
 import { FONT_PLAN, LabelLayer } from './layers/LabelLayer';
 import { UnitLayer, type DragOrder } from './layers/UnitLayer';
 import { country } from '../ui/strings';
@@ -87,6 +88,9 @@ export class MapRenderer {
   readonly app: Application;
   readonly camera: Camera;
   readonly index: ProvinceIndex;
+
+  /** Divisions at sea, drawn on the water rather than at either quay. */
+  private convoyLayer = new Graphics();
 
   private world = new Container();
   private oceanSprite!: TilingSprite;
@@ -238,6 +242,7 @@ export class MapRenderer {
     this.world.addChild(this.units.container);
     // Front-line tags go over the counters. They name a formation, and a
     // formation is exactly what the counters underneath are part of.
+    this.world.addChild(this.convoyLayer);
     this.world.addChild(this.planLabels);
     this.world.addChild(this.labels.topContainer);
   }
@@ -669,6 +674,7 @@ export class MapRenderer {
         this.staticMode ? 1e6 : dtMs);
       this.drawFrontline(state);
       this.drawPlans(state);
+      this.drawConvoys(state);
     }
     this.labels.update(cam, reserved);
 
@@ -897,6 +903,76 @@ export class MapRenderer {
     }
 
     this.placePlanLabels(labels, zoom);
+  }
+
+  /**
+   * Divisions on the water.
+   *
+   * 「海を移動してる感じ出して」. A division at sea keeps the quay it left as its
+   * province -- it has not arrived anywhere, so it cannot be anywhere else --
+   * and the counter therefore sat on the coast for the whole crossing, next to
+   * the garrison that stayed behind. Nothing on the map said a corps was at
+   * sea. This draws the convoy where it actually is: a hull on the line
+   * between the two harbours, at the fraction of the passage it has made, with
+   * a wake behind it.
+   *
+   * Its own mark rather than the counter moved, because the counter is a
+   * formation standing on ground and this is a formation that is on none.
+   */
+  private drawConvoys(state: GameState): void {
+    const g = this.convoyLayer;
+    g.clear();
+    const zoom = Math.max(0.02, this.camera.zoom);
+    const u = 1 / zoom;
+
+    // One mark per crossing, not per division: twelve divisions in one convoy
+    // are one convoy.
+    const lanes = new Map<string, { x: number; y: number; n: number; owner: CountryId }>();
+    for (const d of state.divisions) {
+      if (d.dead || d.path.length === 0) continue;
+      const to = d.path[0];
+      if (!isVoyage(this.index, d.provinceId, to)) continue;
+      const a = this.index.provinces[d.provinceId];
+      const b = this.index.provinces[to];
+      if (!a || !b) continue;
+      // Rounded, so the whole convoy shares one mark instead of smearing into
+      // a line of hulls a pixel apart.
+      const t = Math.round(Math.min(1, Math.max(0, d.moveProgress)) * 24) / 24;
+      const key = `${d.provinceId}:${to}:${t}`;
+      const lane = lanes.get(key);
+      if (lane) { lane.n++; continue; }
+      lanes.set(key, {
+        x: a.centerX + (b.centerX - a.centerX) * t,
+        y: a.centerY + (b.centerY - a.centerY) * t,
+        n: 1,
+        owner: d.owner,
+      });
+    }
+    if (lanes.size === 0) return;
+
+    for (const lane of lanes.values()) {
+      const r = Math.min(9 * u, 26);
+      // A wake: two short strokes trailing the hull, which is what says the
+      // thing is under way rather than anchored.
+      g.moveTo(lane.x - r * 2.2, lane.y - r * 0.5);
+      g.lineTo(lane.x - r * 0.7, lane.y - r * 0.5);
+      g.moveTo(lane.x - r * 1.7, lane.y + r * 0.5);
+      g.lineTo(lane.x - r * 0.6, lane.y + r * 0.5);
+    }
+    g.stroke({ color: 0xd8ecf4, width: 1.6 * u, alpha: 0.5, cap: 'round' });
+
+    for (const lane of lanes.values()) {
+      const r = Math.min(9 * u, 26);
+      // A hull, seen from above: a blunt stern and a pointed bow.
+      g.moveTo(lane.x - r, lane.y - r * 0.42);
+      g.lineTo(lane.x + r * 0.45, lane.y - r * 0.42);
+      g.lineTo(lane.x + r, lane.y);
+      g.lineTo(lane.x + r * 0.45, lane.y + r * 0.42);
+      g.lineTo(lane.x - r, lane.y + r * 0.42);
+      g.closePath();
+    }
+    g.fill({ color: 0x1d2a30, alpha: 0.92 });
+    g.stroke({ color: 0xd8ecf4, width: 1.2 * u, alpha: 0.85, join: 'round' });
   }
 
   /**

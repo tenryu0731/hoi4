@@ -1376,7 +1376,7 @@ test.describe('touch input', () => {
 
     const route = await page.evaluate((s) => {
       const g = window.__game!;
-      g.orderTransport(s.overseas);
+      g.sendTo(s.overseas);
       const d = g.state.divisions.find((x) => x.id === s.division)!;
       let prev = d.provinceId;
       let voyages = 0;

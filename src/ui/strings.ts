@@ -83,6 +83,13 @@ export const UI = {
   tradeSell: '購入を減らす',
   tradeNoSellers: '売り手がいません',
   /** Production, imports, exports and the day's shortfall, in one line. */
+  /* The resource table, as the reference lays it out: one column per resource
+     and one row per figure, so the whole position reads at once instead of
+     six collapsible sections' worth of prose. */
+  resMined: '採掘量',
+  resImported: '輸入量',
+  resExported: '輸出枠',
+  resNeeded: '必要量',
   tradeBalance: (own: number, imported: number, exported: number, short: number): string => {
     const parts = [`自国 ${own}`];
     if (imported > 0) parts.push(`輸入 +${imported}`);
@@ -235,9 +242,7 @@ export const UI = {
   toolGarrison: '駐屯',
   toolGarrisonHint: '自国領をなぞって駐屯地にする',
   toolInvade: '強襲上陸',
-  toolInvadeHint: '敵の海岸を一箇所たたいて強襲上陸する（組織率を大きく失う）',
-  toolTransport: '海上輸送',
-  toolTransportHint: '味方の港へ一箇所たたいて船で送る（港から港へ）',
+  toolInvadeHint: '海の向こうの一箇所をたたいて送る（敵地なら強襲上陸）',
   toolClear: '削除',
   toolClearHint: '計画を消す',
   planNeedsArmy: 'まず軍を選んでください',
@@ -258,6 +263,16 @@ export const UI = {
   /** A division's name: the 12 in 第12歩兵師団. */
   divisionName: (ordinal: number, template: string): string => `第${ordinal}${template}`,
   orderOfBattle: '隷下師団',
+  /* The force panel: the list that stands beside the map whenever something is
+     selected. 「範囲選択したら横に出るんだよ」 */
+  forceTitle: '選択中の部隊',
+  forceCollapse: '折りたたむ',
+  forceExpand: 'ひらく',
+  forceClear: '選択を解除',
+  forceNewArmy: '新しい軍にする',
+  forceDetach: '軍から外す',
+  forceMixed: '複数の軍',
+  forceNone: '未所属',
   selectAll: '全選択',
   /* Not 「選択解除」: that is what the ✕ on the order bar is called, and two
      controls with the same name is two controls a screen reader cannot tell

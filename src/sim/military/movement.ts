@@ -225,12 +225,12 @@ export function orderMove(
     d.order = null;
     return false;
   }
-  const path = ctx.index.path(d.provinceId, target, {
-    allowSea: true,
+  // A border is a wall unless there is a reason for it not to be. Checked on
+  // the route as well as the destination: marching *through* a neutral is the
+  // same trespass as stopping in one.
+  const walk = (allowSea: boolean): ProvinceId[] | null => ctx.index.path(d.provinceId, target, {
+    allowSea,
     seaMultiplier: 6,
-    // A border is a wall unless there is a reason for it not to be. Checked on
-    // the route as well as the destination: marching *through* a neutral is
-    // the same trespass as stopping in one.
     blocked: (id) => !hasAccess(state, d.owner, id),
     cost: (id) => {
       const terrain = TERRAIN[ctx.index.get(id).terrain];
@@ -238,6 +238,24 @@ export function orderMove(
       return (1 / terrain.speed) * (hostile ? 3.5 : 1);
     },
   });
+
+  // Dry land first. 「陸続きじゃない所に師団移動出したら勝手に港を経由するように、
+  // 海上輸送は作戦じゃない」 -- a transfer by sea is not a plan the player draws,
+  // it is what a move order does when there is no road. So: walk if you can;
+  // if you cannot, go by ship from a harbour; and only if there is no harbour
+  // to sail between does the order fall back to crossing at a strait, which is
+  // an assault and is what the 強襲上陸 tool is for.
+  let path = walk(false);
+  if (!path || path.length < 2) {
+    const ship = planTransport(state, ctx.index, d.owner, d.provinceId, target);
+    if (ship.block === 'ok') {
+      d.path = ship.path;
+      d.moveProgress = 0;
+      d.order = { kind: 'move', target };
+      return true;
+    }
+    path = walk(true);
+  }
   if (!path || path.length < 2) {
     d.path = [];
     return false;
@@ -320,18 +338,6 @@ export function planTransport(
   // march ++ voyage ++ march. The first element of each leg is where the
   // previous one ended, so it is dropped.
   return { block: 'ok', path: [...toQuay.slice(1), debark, ...inland.slice(1)] };
-}
-
-export function orderTransport(
-  state: GameState, ctx: MilitaryContext, d: Division, target: ProvinceId,
-): TransportBlock {
-  if (d.dead) return 'sameCoast';
-  const { block, path } = planTransport(state, ctx.index, d.owner, d.provinceId, target);
-  if (block !== 'ok') return block;
-  d.path = path;
-  d.moveProgress = 0;
-  d.order = { kind: 'move', target };
-  return 'ok';
 }
 
 export function stopDivision(d: Division): void {

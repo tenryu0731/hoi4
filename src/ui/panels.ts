@@ -1957,7 +1957,6 @@ export const tradePanel: Panel = {
 
     const body = el('div', 'panel-list');
     body.dataset.role = 'trade-body';
-    root.append(body);
 
     const rebuild = (): void => { tradePanel.build(game, root); };
 
@@ -1967,6 +1966,48 @@ export const tradePanel: Panel = {
     const home = computeResourceOutput(state, game.index, me.id);
     const traffic = tradeFlow(state, ctx, me.id);
     const shipped = dealUnits(state, ctx);
+
+    // The whole position as one table, the way the reference draws it: a
+    // column per resource, a row per figure. Six collapsible sections each
+    // carrying a sentence of prose could not be compared -- and comparing is
+    // the only thing a player does on this screen. 「資源は写真の用に見やすく」
+    const table = el('div', 'panel-restable');
+    const grid = el('div', 'panel-resgrid');
+    grid.style.setProperty('--cols', String(RESOURCE_TYPES.length));
+    grid.append(el('span', 'panel-res-rowl'));
+    for (const r of RESOURCE_TYPES) {
+      const cell = el('span', 'panel-res-h');
+      cell.title = RESOURCE_LABEL[r];
+      const icon = el('img', 'panel-res-icon') as HTMLImageElement;
+      icon.alt = '';
+      icon.src = iconUrl(`resource-${r}`);
+      icon.addEventListener('error', () => { icon.removeAttribute('src'); });
+      cell.append(icon);
+      const flow = me.economy.resources[r];
+      const net = Math.round(home[r] + traffic.imports[r] - traffic.exports[r] - flow.consumed);
+      const v = el('span', 'panel-res-net', net > 0 ? `+${net}` : String(net));
+      if (flow.deficit > 0.5) v.classList.add('is-short');
+      cell.append(v);
+      grid.append(cell);
+    }
+    const rows: [string, (r: ResourceType) => number, string][] = [
+      [UI.resMined, (r) => home[r], 'is-good'],
+      [UI.resImported, (r) => traffic.imports[r], 'is-good'],
+      [UI.resExported, (r) => -traffic.exports[r], 'is-bad'],
+      [UI.resNeeded, (r) => -me.economy.resources[r].consumed, 'is-bad'],
+    ];
+    for (const [label, pick, tone] of rows) {
+      grid.append(el('span', 'panel-res-rowl', label));
+      for (const r of RESOURCE_TYPES) {
+        const n = Math.round(pick(r));
+        const cell = el('span', 'panel-res-v', n === 0 ? '0' : String(n));
+        if (n !== 0) cell.classList.add(tone);
+        grid.append(cell);
+      }
+    }
+    table.append(grid);
+    root.append(table);
+    root.append(body);
 
     for (const r of RESOURCE_TYPES) {
       const flow = me.economy.resources[r];
