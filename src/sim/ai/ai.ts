@@ -16,6 +16,7 @@ import {
   occupationRatio, opinionOf, startJustification,
 } from '../diplomacy/diplomacy';
 import { orderMove } from '../military/movement';
+import { stackLimit } from '../military/supply';
 import { canChangeLaw, changeLaw } from '../politics/politics';
 import { fuelRatio } from '../economy/fuel';
 import {
@@ -474,6 +475,96 @@ function declareArmyIntent(state: GameState, ctx: AIContext, c: Country): void {
   });
 }
 
+/** How far a crowded division will walk to get off the pile. */
+const DISPERSE_HOPS = 5;
+
+/** Divisions of one country standing in a province. */
+function friendlyStack(state: GameState, owner: CountryId, id: ProvinceId): number {
+  let n = 0;
+  for (const divId of state.provinces[id]?.divisions ?? []) {
+    const d = state.divisions[divId];
+    if (d && !d.dead && d.owner === owner) n++;
+  }
+  return n;
+}
+
+/**
+ * Room left in a province, counting what is standing there and what has been
+ * ordered there today.
+ *
+ * `stackLimit` is the figure `applyThroughput` charges supply against, so this
+ * is the mechanic itself rather than a number picked to dodge it.
+ */
+function roomAt(
+  state: GameState, ctx: AIContext, owner: CountryId,
+  booked: Map<ProvinceId, number>, id: ProvinceId,
+): number {
+  return stackLimit(ctx.index, id) - friendlyStack(state, owner, id) - (booked.get(id) ?? 0);
+}
+
+/**
+ * The nearest of our provinces with room, searched outward.
+ *
+ * Bounded rather than global: a division that has to cross the continent to
+ * find space is not dispersing, it is deserting, and walking every province
+ * for every division would cost more than the rest of the AI put together.
+ */
+function nearestRoom(
+  state: GameState, ctx: AIContext, owner: CountryId,
+  booked: Map<ProvinceId, number>, from: ProvinceId,
+): ProvinceId | null {
+  const seen = new Set<ProvinceId>([from]);
+  let frontier: ProvinceId[] = [from];
+  for (let hop = 0; hop < DISPERSE_HOPS && frontier.length > 0; hop++) {
+    const next: ProvinceId[] = [];
+    for (const id of frontier) {
+      for (const nb of ctx.index.get(id).neighbors) {
+        if (seen.has(nb)) continue;
+        seen.add(nb);
+        if (state.provinces[nb]?.controller !== owner) continue;
+        if (roomAt(state, ctx, owner, booked, nb) > 0) return nb;
+        next.push(nb);
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+/**
+ * Stands a division down where it is, or moves it off a pile if it is on one.
+ *
+ * An army with nowhere to go used to be told to hold, which is right, and left
+ * standing wherever it had accumulated, which is not: measured in a 1946
+ * campaign the Soviet Union had 114 divisions in one province on the heel of
+ * Italy. That province carries about six. Supply reached it at 0.47 and was
+ * divided down to 0.06 by the stack itself, so every one of them fell under
+ * the organisation the AI needs to attack with and 176 of its 183 divisions
+ * sat on `defend` -- unable to move because they had no supply, and without
+ * supply because they would not move. Four years passed without the map
+ * changing hands.
+ */
+function standDown(
+  state: GameState, ctx: AIContext, c: Country,
+  booked: Map<ProvinceId, number>, d: Division,
+): void {
+  const here = d.provinceId;
+  if (roomAt(state, ctx, c.id, booked, here) > 0) {
+    d.path = [];
+    d.order = { kind: 'defend' };
+    return;
+  }
+  const room = nearestRoom(state, ctx, c.id, booked, here);
+  if (room === null) {
+    d.path = [];
+    d.order = { kind: 'defend' };
+    return;
+  }
+  booked.set(room, (booked.get(room) ?? 0) + 1);
+  const heading = d.order?.kind === 'move' ? d.order.target : null;
+  if (heading !== room) orderMove(state, ctx, d, room);
+}
+
 export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
 
@@ -543,21 +634,37 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
   const spare = available.filter((d) => unassigned.has(d.id));
   if (spare.length === 0) return;
   if (standingOnTheDefensive(state, c)) {
+    const holding = new Map<ProvinceId, number>();
     for (const d of spare) {
       if (d.path.length > 0) continue;
-      d.order = { kind: 'defend' };
+      standDown(state, ctx, c, holding, d);
     }
     return;
   }
 
+  // What has been ordered where, so that six armies of one country do not all
+  // pick the same province. Counted from the ground as well as from today's
+  // orders, so it survives across days.
+  const booked = new Map<ProvinceId, number>();
+
   const targets = frontTargets(state, ctx, c);
   if (targets.length === 0) {
+    // Nothing on this continent to walk to. Send what the far shore can hold
+    // and stand the rest down -- marching the whole army at one unreachable
+    // capital only builds the pile that starves it.
     const enemyCapital = c.atWarWith
       .map((id) => state.countries[id])
       .filter((e) => !e.capitulated)
       .map((e) => e.capital)[0];
-    if (enemyCapital !== undefined) {
-      for (const d of spare) if (d.path.length === 0) orderMove(state, ctx, d, enemyCapital);
+    for (const d of spare) {
+      if (d.path.length > 0) continue;
+      if (enemyCapital !== undefined
+        && roomAt(state, ctx, c.id, booked, enemyCapital) > 0) {
+        booked.set(enemyCapital, (booked.get(enemyCapital) ?? 0) + 1);
+        orderMove(state, ctx, d, enemyCapital);
+        continue;
+      }
+      standDown(state, ctx, c, booked, d);
     }
     return;
   }
@@ -573,9 +680,9 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
     const orgFraction = tpl ? d.org / Math.max(1, tpl.maxOrg) : 1;
 
     if (orgFraction < RETREAT_ORG) {
-      // Spent: hold where it is and recover rather than feed it in piecemeal.
-      d.path = [];
-      d.order = { kind: 'defend' };
+      // Spent: recover rather than being fed in piecemeal -- but not on top of
+      // everyone else, because a stack is why it is spent.
+      standDown(state, ctx, c, booked, d);
       continue;
     }
     if (d.path.length > 0) continue;
@@ -584,6 +691,9 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
     let chosenDistance = Infinity;
     for (const t of targets) {
       if (t.overseas && overseasBudget <= 0) continue;
+      // A province that is already carrying as much as it can move is not a
+      // place to send another division: the whole stack starves together.
+      if (roomAt(state, ctx, c.id, booked, t.province) <= 0) continue;
       const dist = ctx.index.distance(d.provinceId, t.province);
       const power = divisionPower(state, d) * ATTACK_RATIO;
       // Attack when locally strong, otherwise close up and wait.
@@ -591,11 +701,11 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
       if (dist < chosenDistance) { chosen = t; chosenDistance = dist; }
     }
     if (!chosen) {
-      d.path = [];
-      d.order = { kind: 'defend' };
+      standDown(state, ctx, c, booked, d);
       continue;
     }
     if (chosen.overseas) overseasBudget--;
+    booked.set(chosen.province, (booked.get(chosen.province) ?? 0) + 1);
     orderMove(state, ctx, d, chosen.province);
   }
 }

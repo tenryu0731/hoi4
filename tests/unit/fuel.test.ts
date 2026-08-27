@@ -7,6 +7,8 @@ import {
 import { movementSpeed } from '../../src/sim/military/movement';
 import { Simulation } from '../../src/sim/Simulation';
 import { TimeEngine } from '../../src/sim/time/TimeEngine';
+import { canTradeWith, maxPurchase, openTrade, tradeFlow } from '../../src/sim/economy/trade';
+import { computeResourceOutput } from '../../src/sim/economy/production';
 import { makeFixture } from './helpers/fixture';
 
 describe('fuel', () => {
@@ -88,19 +90,69 @@ describe('fuel', () => {
     expect(dry / full).toBeCloseTo(DRY_SPEED, 4);
   });
 
-  it('leaves Germany short and the oil powers comfortable', () => {
+  it('makes the countries with no wells depend on somebody else for fuel', () => {
     // The historical shape of the thing: Germany and Italy have no oil of
-    // their own, the Soviet Union, Romania and Britain do.
+    // their own, the Soviet Union and Romania do.
+    //
+    // This used to assert flatly that both of them ran dry, which stopped
+    // being true the moment a traded factory bought a useful quantity: two
+    // years in, Italy imports 24 a day on three factories and is comfortable
+    // while Germany imports nothing and is empty. Comfort has to be *paid
+    // for* -- that is the claim worth holding, and it holds however the
+    // campaign happens to fall out.
     const f = makeFixture();
     const sim = new Simulation(f.state, f.index);
     const time = new TimeEngine(f.state.clock.totalHours);
     time.on((c) => sim.tick(c));
     time.step(24 * 365 * 2);
 
+    const ctx = { index: f.index };
     const ratio = (tag: string) => fuelRatio(f.country(tag));
-    expect(ratio('GER')).toBeLessThan(0.5);
-    expect(ratio('ITA')).toBeLessThan(0.5);
+    const wells = (tag: string) => computeResourceOutput(f.state, f.index, f.country(tag).id).oil;
+    const bought = (tag: string) => tradeFlow(f.state, ctx, f.country(tag).id).imports.oil;
+
+    for (const tag of ['GER', 'ITA']) {
+      expect(wells(tag), tag).toBe(0);
+      if (ratio(tag) >= 0.5) expect(bought(tag), `${tag} is comfortable`).toBeGreaterThan(0);
+    }
+    // Not vacuous: somebody on that list is actually going without.
+    expect(Math.min(ratio('GER'), ratio('ITA'))).toBeLessThan(0.5);
+
+    expect(wells('SOV')).toBeGreaterThan(0);
+    expect(wells('ROM')).toBeGreaterThan(0);
     expect(ratio('SOV')).toBe(1);
     expect(ratio('ROM')).toBe(1);
+  }, 60_000);
+
+  it('lets a country with no wells buy some of its way out of the shortage', () => {
+    // The other half, tested directly rather than left to whether the AI
+    // happens to shop. Some of the way, not all of it: by 1938 the rest of
+    // Europe has already contracted for the oil, and everything still on the
+    // market is 4.8 a day between every seller who will deal with Germany --
+    // which measures out at a fuel ratio of 0.00 before and 0.167 after. That
+    // is the right shape for this one. Germany's fuel problem was not a
+    // problem it could shop its way out of either.
+    const f = makeFixture();
+    const sim = new Simulation(f.state, f.index);
+    const time = new TimeEngine(f.state.clock.totalHours);
+    time.on((c) => sim.tick(c));
+    time.step(24 * 365 * 2);
+
+    const ctx = { index: f.index };
+    const ger = f.country('GER');
+    const before = fuelRatio(ger);
+    expect(before).toBeLessThan(0.1);
+
+    let factories = 0;
+    for (const seller of f.state.countries) {
+      if (seller.id === ger.id || !canTradeWith(f.state, ger.id, seller.id)) continue;
+      const take = maxPurchase(f.state, ctx, ger.id, seller.id, 'oil');
+      if (take > 0 && openTrade(f.state, ctx, ger.id, seller.id, 'oil', take)) factories += take;
+    }
+    expect(factories).toBeGreaterThan(0);
+    expect(tradeFlow(f.state, ctx, ger.id).imports.oil).toBeGreaterThan(0);
+
+    time.step(24 * 60);
+    expect(fuelRatio(ger)).toBeGreaterThan(before + 0.1);
   }, 60_000);
 });

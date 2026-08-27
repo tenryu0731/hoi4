@@ -11,7 +11,8 @@ import {
   retreat, sealiftCapacity, tickMilitaryHourly, tickReinforcementDaily,
 } from '../../src/sim/military/movement';
 import {
-  SUPPLY_RANGE, computeSupply, encircledProvinces, supplySources, tickSupplyDaily,
+  SUPPLY_HUB_VP, SUPPLY_RANGE, computeSupply, encircledProvinces, stackLimit, supplySources,
+  tickSupplyDaily,
 } from '../../src/sim/military/supply';
 import {
   deriveTemplate, spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY,
@@ -717,6 +718,73 @@ describe('encirclement', () => {
       const c = f.country(tag);
       const pocket = encircledProvinces(f.state, f.index, c.id);
       expect([...pocket].map((p) => f.index.get(p).name), tag).toEqual([]);
+    }
+  });
+
+  it('makes a captured city feed the army that took it', () => {
+    // Conquest used to add ground and never add supply, so a successful
+    // advance starved itself at a fixed radius from its own capital: measured
+    // in a 1945 campaign, Germany's median division stood 3189 world units
+    // from Berlin against a range of 1200, at supply 0.08, holding 78
+    // provinces taken from somebody else.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const sov = f.country('SOV');
+    declareWar(f.state, ger.id, sov.id);
+
+    // A Soviet city far enough from Berlin that no supply reaches it, plus a
+    // corridor of Soviet ground for Germany to have walked in along.
+    const city = f.index.provinces
+      .filter((p) => p.ownerTag === 'SOV' && p.vp >= SUPPLY_HUB_VP)
+      .sort((a, b) => f.index.distance(b.id, ger.capital) - f.index.distance(a.id, ger.capital))[0];
+    expect(city).toBeTruthy();
+    // Far enough that Berlin alone can never reach it, which is what makes
+    // this a test of the depot rather than of the range.
+    expect(f.index.distance(city.id, ger.capital)).toBeGreaterThan(SUPPLY_RANGE);
+
+    const dry = computeSupply(f.state, f.index, ger.id, supplySources(f.state, f.index, ger.id));
+    expect(dry[city.id]).toBe(0);
+
+    // Germany takes it, and everything between it and home.
+    for (const p of f.index.provinces) {
+      if (p.ownerTag === 'SOV' || p.ownerTag === 'POL') f.state.provinces[p.id].controller = ger.id;
+    }
+    const sources = supplySources(f.state, f.index, ger.id);
+    expect(sources.some((s) => s.province === city.id)).toBe(true);
+    const wet = computeSupply(f.state, f.index, ger.id, sources);
+    expect(wet[city.id]).toBeGreaterThan(0.2);
+  });
+
+  it('gives a pocket no supply however many cities are inside it', () => {
+    // The depots must not undo the one mechanic that makes an encirclement
+    // worth making: a city only feeds an army that can trace a line home.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const sov = f.country('SOV');
+    declareWar(f.state, ger.id, sov.id);
+
+    // Hand Germany a Soviet city and nothing else -- no corridor to it.
+    const city = f.index.provinces.find(
+      (p) => p.ownerTag === 'SOV' && p.vp >= SUPPLY_HUB_VP && !p.coastal,
+    )!;
+    f.state.provinces[city.id].controller = ger.id;
+
+    expect(encircledProvinces(f.state, f.index, ger.id).has(city.id)).toBe(true);
+    const sources = supplySources(f.state, f.index, ger.id);
+    expect(sources.some((s) => s.province === city.id)).toBe(false);
+    tickSupplyDaily(f.state, f.index);
+    expect(f.state.provinces[city.id].supply).toBe(0);
+  });
+
+  it('sizes a stack against what the ground under it can move', () => {
+    const f = makeFixture();
+    // The figure the AI reads before it sends another division somewhere. It
+    // has to be the same one applyThroughput charges against, or the AI is
+    // planning around a number the simulation does not use.
+    for (const p of f.index.provinces.slice(0, 50)) {
+      const limit = stackLimit(f.index, p.id);
+      expect(limit).toBeGreaterThanOrEqual(2);
+      expect(limit).toBeLessThanOrEqual(12);
     }
   });
 

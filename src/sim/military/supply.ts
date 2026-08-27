@@ -12,15 +12,33 @@ import type { ProvinceIndex } from '../map/ProvinceIndex';
  * behaviours the period needs: a deep advance runs out of steam, and a pocket
  * that has been cut off withers instead of fighting on forever.
  *
- * A country has three kinds of supply head:
+ * A country has four kinds of supply head:
  *   - its capital, at full strength;
  *   - allied capitals, slightly weaker, because a coalition shares its rear;
  *   - a port in any theatre the capital cannot reach overland, weaker again,
- *     standing in for convoy traffic.
+ *     standing in for convoy traffic;
+ *   - every city in the same theatre as one of those, weaker again still, and
+ *     weaker the more restive it is.
  *
- * That last one matters more than it looks. Without it, French North Africa and
+ * The port matters more than it looks. Without it, French North Africa and
  * British Egypt begin the scenario at zero supply and start starving on day one,
  * despite being connected to home by the sea lanes the whole war was fought over.
+ *
+ * The city is what makes an offensive possible at all past its first year.
+ * Without it a country had exactly one supply head and conquest added ground
+ * without ever adding supply, so a *successful* advance starved itself at a
+ * fixed radius from its own capital and never recovered. Measured in January
+ * 1945 on the campaign the scenario suite runs:
+ *
+ *   GER  95 provinces held, 78 of them taken from someone else,
+ *        median division 3189 units from Berlin, supply 0.08, 38 divisions
+ *   SOV  337 held, median division 1539 out, supply 0.06, 65 divisions
+ *   HUN  316 held, 301 of them conquered, median division 1566 out, supply 0.37
+ *
+ * -- against a SUPPLY_RANGE of 1200. Nobody could attack, nobody could be
+ * attacked, and the map did not change hands once between 1944 and 1948 with
+ * 771 divisions standing on it. Depots are the mechanism the period actually
+ * ran on and the one this was missing.
  */
 
 /** How much a fully developed rail network extends reach. */
@@ -61,7 +79,53 @@ export const SUPPLY_STRENGTH = {
   alliedCapital: 0.8,
   /** A port sustaining a theatre the capital cannot reach by land. */
   overseasPort: 0.6,
+  /**
+   * A city acting as a depot.
+   *
+   * Deliberately below every other head: a depot keeps an army in the field,
+   * it does not keep it as well supplied as its own capital would. What it
+   * buys is reach -- an offensive that takes cities can go on taking them,
+   * and one that outruns them still runs dry.
+   */
+  depot: 0.55,
 } as const;
+
+/**
+ * Victory points that make a province a city worth calling a depot.
+ *
+ * 148 of the map's 1,266 provinces clear this, roughly one in nine, which is
+ * about the density of supply hubs the real game puts on the same ground. The
+ * threshold matters more than the strength: at 2 it is 183 and at 8 it is 94,
+ * so the difference between a supply network and a scattering of them is a
+ * couple of points either way.
+ */
+export const SUPPLY_HUB_VP = 5;
+
+/**
+ * What a depot still moves when the city around it is in open revolt.
+ *
+ * Resistance is an economic figure: it says how much of a conquered state's
+ * output its occupier actually collects, and at its worst that is a quarter.
+ * Applying the same fraction to the railhead was wrong, and measurably so --
+ * every occupied state in a 1946 campaign sits at resistance 1.00, because
+ * holding one down needs a division per three provinces and nobody who has
+ * conquered a continent can afford that. So every captured depot came out at
+ * 0.55 x 0.25 = 0.14, which is not a supply line, and the armies went on
+ * starving with the depots in place.
+ *
+ * A hostile city costs an occupier its factories and its mines. It does not
+ * stop the trains: the yard is guarded, the sidings work, and the army is
+ * standing in the street. Half strength at total resistance says that.
+ */
+const DEPOT_UNDER_RESISTANCE = 0.5;
+
+/** How much of a depot's strength a city of this state actually delivers. */
+function depotYield(state: GameState, stateId: number): number {
+  const st = state.states[stateId];
+  if (!st) return 1;
+  if (st.owner === st.controller) return 1;
+  return DEPOT_UNDER_RESISTANCE + (1 - DEPOT_UNDER_RESISTANCE) * (1 - st.resistance);
+}
 
 export interface SupplySource {
   province: ProvinceId;
@@ -97,10 +161,18 @@ export function supplySources(
 
   const out: SupplySource[] = [];
   const visited = new Set<ProvinceId>();
+  // Ground that can trace a line back to a head of its own. Depots are added
+  // only inside it, which is what keeps a pocket a pocket: an encircled army
+  // sitting on a city has to wither, and a city that supplied it regardless
+  // would undo the one mechanic that makes an encirclement worth making.
+  const supplied = new Set<ProvinceId>();
 
   if (friendly(c.capital)) {
     out.push({ province: c.capital, strength: SUPPLY_STRENGTH.capital });
-    for (const id of index.reachable(c.capital, friendly, { includeSea: true })) visited.add(id);
+    for (const id of index.reachable(c.capital, friendly, { includeSea: true })) {
+      visited.add(id);
+      supplied.add(id);
+    }
   }
 
   if (c.factionId !== null) {
@@ -112,6 +184,7 @@ export function supplySources(
       out.push({ province: member.capital, strength: SUPPLY_STRENGTH.alliedCapital });
       for (const id of index.reachable(member.capital, friendly, { includeSea: true })) {
         visited.add(id);
+        supplied.add(id);
       }
     }
   }
@@ -133,9 +206,43 @@ export function supplySources(
       if (!geo.coastal) continue;
       if (geo.vp > bestVp) { bestVp = geo.vp; port = id; }
     }
-    if (port >= 0) out.push({ province: port, strength: SUPPLY_STRENGTH.overseasPort });
+    if (port >= 0) {
+      out.push({ province: port, strength: SUPPLY_STRENGTH.overseasPort });
+      for (const id of component) supplied.add(id);
+    }
   }
 
+  // Depots. Every city in a theatre that already has a head of its own feeds
+  // the army standing near it, scaled by how quiet it is: a city still
+  // fighting its new owner runs at half a railhead, and one that has been
+  // garrisoned and digested runs at all of it.
+  const alreadyAHead = new Set(out.map((h) => h.province));
+  for (const id of cityProvinces(index)) {
+    if (!supplied.has(id) || !friendly(id)) continue;
+    // A capital is a city too, and listing it twice at a lower strength is
+    // work the propagation would only throw away.
+    if (alreadyAHead.has(id)) continue;
+    const strength = SUPPLY_STRENGTH.depot * depotYield(state, index.get(id).stateId);
+    if (strength > 0.02) out.push({ province: id, strength });
+  }
+
+  return out;
+}
+
+/**
+ * The map's cities, found once.
+ *
+ * Walked for every country every day otherwise, and the answer never changes:
+ * victory points are terrain, not state.
+ */
+const CITY_CACHE = new WeakMap<ProvinceIndex, ProvinceId[]>();
+
+function cityProvinces(index: ProvinceIndex): ProvinceId[] {
+  const hit = CITY_CACHE.get(index);
+  if (hit) return hit;
+  const out: ProvinceId[] = [];
+  for (const p of index.provinces) if (p.vp >= SUPPLY_HUB_VP) out.push(p.id);
+  CITY_CACHE.set(index, out);
   return out;
 }
 
@@ -284,6 +391,28 @@ export const MAX_THROUGHPUT = BASE_THROUGHPUT + 5 * THROUGHPUT_PER_INFRASTRUCTUR
 export function supplyCapacity(index: ProvinceIndex, province: ProvinceId): number {
   const infra = index.data.states[index.get(province).stateId]?.infrastructure ?? 1;
   return (BASE_THROUGHPUT + infra * THROUGHPUT_PER_INFRASTRUCTURE) / MAX_THROUGHPUT;
+}
+
+/** Roughly what an infantry division draws, for sizing a stack against a road. */
+const TYPICAL_SUPPLY_USE = 0.5;
+
+/**
+ * How many divisions this province carries before the stack starves itself.
+ *
+ * The operational limit, read off the same numbers `applyThroughput` charges
+ * against rather than guessed at: four on roadless ground, ten on a rail hub.
+ * Exported because the AI has to know it. Left to itself it put 114 divisions
+ * on the heel of Italy, which divided that province's supply by twenty and
+ * left every one of them too disorganised to attack -- a deadlock it could
+ * not get out of, because getting out of it needed the supply the stack was
+ * destroying.
+ */
+export function stackLimit(index: ProvinceIndex, province: ProvinceId): number {
+  const infra = index.data.states[index.get(province).stateId]?.infrastructure ?? 1;
+  return Math.max(
+    2,
+    Math.floor((BASE_THROUGHPUT + infra * THROUGHPUT_PER_INFRASTRUCTURE) / TYPICAL_SUPPLY_USE),
+  );
 }
 
 function applyThroughput(state: GameState, index: ProvinceIndex): void {

@@ -5,6 +5,7 @@ import type {
 } from '../core/types';
 import { armyById, commandModifiers, commanderById, overloadScale } from './command';
 import { orderMove, type MilitaryContext } from './movement';
+import { stackLimit } from './supply';
 
 /**
  * Battle plans: front lines, offensives, and the bonus for having thought
@@ -117,11 +118,34 @@ export function assignToFront(
   }
 }
 
+/** Divisions of one country standing in a province. */
+function friendlyStack(state: GameState, owner: CountryId, id: ProvinceId): number {
+  let n = 0;
+  for (const divId of state.provinces[id]?.divisions ?? []) {
+    const d = state.divisions[divId];
+    if (d && !d.dead && d.owner === owner) n++;
+  }
+  return n;
+}
+
 /**
  * Pushes an army at its objectives.
  *
- * Every division is sent at the nearest target rather than being spread over
- * them: an offensive that divides itself between two objectives takes neither.
+ * Divisions go at the nearest objective that still has room, and once the
+ * objectives are full the rest fan out over the ground the attack is mounted
+ * from. What they must not do is all go to the same place: measured in a 1946
+ * campaign, the Soviet AI had six armies on offensive orders and every one of
+ * them sent every division at the single nearest target, which put **114
+ * divisions in one province** on the heel of Italy. That province carries
+ * about six. Its supply came out of the map at 0.47 and was divided down to
+ * 0.06 by the stack standing on it, so all 114 fell below the organisation
+ * the AI needs to attack with, and 176 of the country's 183 divisions were
+ * sitting on `defend` -- unable to attack because they had no supply, and
+ * with no supply because they were all standing in one place. The map did not
+ * change hands again for four years.
+ *
+ * `stackLimit` is the same figure `applyThroughput` charges against, so the
+ * ceiling here is the mechanic rather than a number chosen to dodge it.
  */
 export function pressOffensive(
   state: GameState, ctx: MilitaryContext, army: Army, targets: ProvinceId[],
@@ -131,18 +155,47 @@ export function pressOffensive(
     return p && p.controller !== army.owner;
   });
   if (live.length === 0) return;
+
+  // The ground the attack goes in from: ours, and touching an objective.
+  const staging: ProvinceId[] = [];
+  const seen = new Set<ProvinceId>();
+  for (const t of live) {
+    for (const nb of ctx.index.get(t).neighbors) {
+      if (seen.has(nb)) continue;
+      seen.add(nb);
+      if (state.provinces[nb]?.controller === army.owner) staging.push(nb);
+    }
+  }
+
+  // Counted from the divisions actually on the ground, so the armies of one
+  // country stay out of each other's way without being told about each other.
+  const booked = new Map<ProvinceId, number>();
+  const room = (id: ProvinceId): number =>
+    stackLimit(ctx.index, id) - friendlyStack(state, army.owner, id) - (booked.get(id) ?? 0);
+
+  const nearest = (from: ProvinceId, choices: readonly ProvinceId[]): ProvinceId | null => {
+    const here = ctx.index.get(from);
+    let best: ProvinceId | null = null;
+    let bestCost = Infinity;
+    for (const id of choices) {
+      if (room(id) <= 0) continue;
+      const to = ctx.index.get(id);
+      const cost = Math.hypot(here.centerX - to.centerX, here.centerY - to.centerY);
+      if (cost < bestCost) { bestCost = cost; best = id; }
+    }
+    return best;
+  };
+
   for (const id of army.divisions) {
     const div = state.divisions.find((d) => d.id === id);
     if (!div || div.dead || div.combatId !== null || div.detached) continue;
-    let best = live[0];
-    let bestCost = Infinity;
-    const from = ctx.index.get(div.provinceId);
-    for (const target of live) {
-      const to = ctx.index.get(target);
-      const distance = Math.hypot(from.centerX - to.centerX, from.centerY - to.centerY);
-      if (distance < bestCost) { bestCost = distance; best = target; }
-    }
-    reorder(state, ctx, div, best);
+    // An objective first, the ground in front of it second, and if both are
+    // full then nowhere: a division that cannot be fed at the front is worth
+    // more standing where it is than starving on top of the ones that can.
+    const target = nearest(div.provinceId, live) ?? nearest(div.provinceId, staging);
+    if (target === null) continue;
+    booked.set(target, (booked.get(target) ?? 0) + 1);
+    reorder(state, ctx, div, target);
   }
 }
 
