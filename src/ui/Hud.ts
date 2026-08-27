@@ -11,7 +11,7 @@ import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
 import { RESOURCE, RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
 import {
-  COMMAND_LIMIT, MAX_ARMIES, commandLimit, commanderById, nextArmyName,
+  COMMAND_LIMIT, MAX_ARMIES, commandLimit, commanderById,
 } from '../sim/military/command';
 
 /**
@@ -268,6 +268,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     selectTool.classList.toggle('is-active', game.boxSelectArmed);
     selectTool.setAttribute('aria-pressed', String(game.boxSelectArmed));
     armedHint.classList.toggle('is-on', game.boxSelectArmed);
+    if (!game.boxRaisesArmy) setText(armedHint, UI.boxSelectArmed);
   }
 
   // Says what the armed tool will do. The button alone cannot: two Japanese
@@ -365,19 +366,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       .filter((a) => a.owner === me && !a.isArmyGroup)
       .map((a) => a.id);
     if (ownArmies().length < MAX_ARMIES) {
-      orderMenu.append(orderChip(UI.orderNewArmy, () => {
-        // The command bus does not hand back what it made, so the new
-        // formation is identified by difference. Not "the highest id": the
-        // ceiling can refuse the command, and taking the newest existing army
-        // then would quietly put the divisions somewhere the player did not
-        // ask for.
-        const before = new Set(ownArmies());
-        game.issue({ t: 'createArmy', country: me, name: nextArmyName(game.state, me) });
-        const raised = ownArmies().find((id) => !before.has(id));
-        if (raised === undefined) return;
-        game.issue({ t: 'assignDivisions', country: me, army: raised, divisions });
-        game.selectDivisions(divisions, { army: raised, centre: false });
-      }));
+      orderMenu.append(orderChip(UI.orderNewArmy, () => { game.raiseArmy(divisions); }));
     }
     orderMenu.classList.add('is-on');
   });
@@ -590,6 +579,25 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
         game.selectDivisions([...army.divisions], { army: army.id });
       });
       officers.append(card);
+    }
+
+    // The ＋ at the end of the row, which the reference has at both ends of
+    // its own. Pressing it arms the marquee in "raise a formation" mode: the
+    // rectangle that follows becomes the army, whatever those divisions
+    // belonged to before. 「下の追加から範囲選択して未所属、他の軍に所属してる
+    // 師団を新たに一つの軍にできたりとか、今一個ずつタップで編成に加えてる」.
+    if (mine.length < MAX_ARMIES) {
+      const add = el('button', 'hud-officer hud-officer-add');
+      add.title = UI.newArmyFromBox;
+      add.setAttribute('aria-label', UI.newArmyFromBox);
+      add.append(el('span', 'hud-officer-plus', '＋'), el('span', 'hud-officer-name', UI.orderNewArmy));
+      add.addEventListener('click', () => {
+        game.boxSelectArmed = true;
+        game.boxRaisesArmy = true;
+        syncSelectTool();
+        setText(armedHint, UI.newArmyArmed);
+      });
+      officers.append(add);
     }
   }
 

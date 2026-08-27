@@ -815,6 +815,13 @@ export const HUD_CSS = `
    a share of his bonuses, and this is the only place that says so without the
    command panel being open. */
 .hud-officer.is-over .hud-officer-count { color: #f0a49a; }
+/* The ＋ at the end of the strip: raise a formation from a box on the map. */
+.hud-officer-add {
+  justify-content: center; gap: 3px;
+  border-style: dashed; border-color: #5a5342; border-bottom: none;
+  background: linear-gradient(180deg, #2b2823 0%, #1e1c18 100%);
+}
+.hud-officer-plus { font-size: 22px; line-height: 22px; color: var(--accent); }
 .hud-officer.is-over { border-color: #6b2f28; }
 
 /* --- outcome ------------------------------------------------------------- */
@@ -898,6 +905,19 @@ button:active { transform: scale(0.96); }
   border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
 .panel-chip:disabled { opacity: 0.4; }
+/* The order of battle as a list you tick. */
+.panel-oob-head {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 5px;
+}
+.panel-oob-count { font-size: 11px; color: var(--ink-dim); }
+.panel-tick {
+  flex: 0 0 auto; width: 18px; height: 18px; margin-right: 7px;
+  display: grid; place-items: center;
+  font-size: 12px; line-height: 1; color: #1a1811;
+  background: #14130f; border: 1px solid #5a5342; border-radius: 2px;
+}
+.panel-oob-row.is-picked .panel-tick { background: var(--accent); border-color: #6d5730; }
+.panel-oob-row.is-picked { border-color: #6d5730; }
 /* The plan pair. The red halt on the left of the arrow, as the reference has
    them, and coloured so which is which reads before the label does. */
 .panel-chip.is-stop:not(:disabled) { color: #e2796c; border-color: #6b2f28; }

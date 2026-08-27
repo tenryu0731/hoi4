@@ -1264,6 +1264,84 @@ test.describe('touch input', () => {
     }, setup.army)).toBeGreaterThan(0);
   });
 
+  test('a box of divisions becomes an army in one act', async ({ page }) => {
+    await bootGame(page);
+    // 「下の追加から範囲選択して未所属、他の軍に所属してる師団を新たに一つの軍に
+    // できたりとか、今一個ずつタップで編成に加えてる」. Boxing and forming used to
+    // be two acts with a menu between them.
+    const before = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      return (g.state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup).length;
+    });
+
+    await page.locator('.hud-officer-add').click();
+    expect(await page.evaluate(() => ({
+      armed: window.__game!.boxSelectArmed, raises: window.__game!.boxRaisesArmy,
+    }))).toEqual({ armed: true, raises: true });
+
+    // A rectangle over the middle of the map band.
+    const band = await page.evaluate(() => {
+      const top = document.querySelector('.hud-top')!.getBoundingClientRect().bottom;
+      const foot = document.querySelector('.hud-plan-tools')!.getBoundingClientRect().top;
+      return { top, foot };
+    });
+    const y0 = band.top + 40;
+    const y1 = band.foot - 40;
+    await page.mouse.move(40, y0);
+    await page.mouse.down();
+    await page.mouse.move(360, (y0 + y1) / 2, { steps: 8 });
+    await page.mouse.move(360, y1, { steps: 8 });
+    await page.mouse.up();
+
+    const after = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const armies = (g.state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup);
+      const raised = armies.find((a) => a.id === g.selection.army);
+      return {
+        count: armies.length,
+        held: raised?.divisions.length ?? 0,
+        selected: g.selection.divisions.length,
+        armed: g.boxSelectArmed,
+        raises: g.boxRaisesArmy,
+      };
+    });
+    expect(after.count).toBe(before + 1);
+    expect(after.held).toBeGreaterThan(0);
+    expect(after.held).toBe(after.selected);
+    // And the tool puts itself down, as the marquee always has.
+    expect(after.armed).toBe(false);
+    expect(after.raises).toBe(false);
+  });
+
+  test('the order of battle is a list that ticks', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+    await page.evaluate(() => window.__game!.openPanel!('command'));
+    await page.locator('.panel-army-head').first().click();
+
+    const rows = page.locator('.panel-oob-row');
+    expect(await rows.count()).toBeGreaterThan(1);
+
+    // 「軍の師団のやつが縦に並んで選択したり外したりできたり」: the tick is the
+    // map selection, so the panel and the map never disagree about what is
+    // under orders.
+    await page.getByRole('button', { name: '全選択' }).click();
+    const all = await page.evaluate(() => window.__game!.selection.divisions.length);
+    expect(all).toBe(await rows.count());
+    await expect(page.locator('.panel-oob-row.is-picked')).toHaveCount(all);
+
+    // One row off, rather than the tap replacing the whole selection with it.
+    await rows.first().click();
+    expect(await page.evaluate(() => window.__game!.selection.divisions.length)).toBe(all - 1);
+    await rows.first().click();
+    expect(await page.evaluate(() => window.__game!.selection.divisions.length)).toBe(all);
+
+    await page.getByRole('button', { name: '選択解除' }).click();
+    expect(await page.evaluate(() => window.__game!.selection.divisions.length)).toBe(0);
+  });
+
   test('a plan waits on the officer card until the arrow is pressed', async ({ page }) => {
     await bootGame(page);
 

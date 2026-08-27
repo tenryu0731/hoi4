@@ -10,6 +10,7 @@ import type { MapMode } from '../render/palette';
 import { TouchController } from '../input/TouchController';
 import { ZOOM_AGGREGATE_STATES } from '../render/layers/UnitLayer';
 import { sealiftCapacity } from '../sim/military/movement';
+import { nextArmyName } from '../sim/military/command';
 import { UI } from '../ui/strings';
 
 /**
@@ -124,6 +125,17 @@ export class Game {
    * to leave is a mode they will be stuck in.
    */
   boxSelectArmed = false;
+
+  /**
+   * Whether the rectangle being drawn raises a formation instead of selecting.
+   *
+   * 「下の追加から範囲選択して未所属、他の軍に所属してる師団を新たに一つの軍に
+   * できたりとか、今一個ずつタップで編成に加えてる」. Boxing and then forming
+   * were two separate acts with a menu between them, so building an army out
+   * of odds and ends meant tapping each division in. The ＋ on the officer
+   * strip sets this, and the box that follows is the army.
+   */
+  boxRaisesArmy = false;
 
   /**
    * The battle-plan tool the player has picked up, or null.
@@ -596,12 +608,15 @@ export class Game {
     if (phase === 'cancel') {
       this.boxSelect = null;
       this.boxSelectArmed = false;
+      this.boxRaisesArmy = false;
       return;
     }
     this.boxSelect = { x0, y0, x1, y1 };
     if (phase !== 'end') return;
     this.boxSelect = null;
     this.boxSelectArmed = false;
+    const raising = this.boxRaisesArmy;
+    this.boxRaisesArmy = false;
 
     const divisions = this.divisionsInRect(x0, y0, x1, y1);
     if (divisions.length === 0) {
@@ -614,6 +629,7 @@ export class Game {
     // The camera stays where the player put it. Centring on the first
     // division would move the map out from under a box they just finished
     // drawing, which is the one moment they are certain where things are.
+    if (raising && this.raiseArmy(divisions)) return;
     this.selectDivisions(divisions, { army: this.armyOf(divisions), centre: false });
   }
 
@@ -707,6 +723,34 @@ export class Game {
         : tool === 'garrison' ? { kind: 'garrison' as const, provinces: drawn }
           : { kind: 'spearhead' as const, target: drawn[0] };
     this.issue({ t: 'setArmyOrder', country: me, army, order });
+    return true;
+  }
+
+  /**
+   * Raises a formation and puts these divisions in it.
+   *
+   * Whatever they belonged to before: unassigned, or another army. Moving a
+   * division between armies is what `assignDivisions` does, and the point of
+   * doing it in one act is that a new army is usually made out of pieces of
+   * old ones.
+   *
+   * The command bus does not hand back what it made, so the formation is
+   * identified by difference rather than by "the highest id": the army ceiling
+   * can refuse the command, and taking the newest existing army then would
+   * quietly put the divisions somewhere the player did not ask for.
+   */
+  raiseArmy(divisions: readonly number[]): boolean {
+    if (divisions.length === 0) return false;
+    const me = this.state.meta.playerCountry;
+    const mine = (): number[] => (this.state.armies ?? [])
+      .filter((a) => a.owner === me && !a.isArmyGroup)
+      .map((a) => a.id);
+    const before = new Set(mine());
+    this.issue({ t: 'createArmy', country: me, name: nextArmyName(this.state, me) });
+    const raised = mine().find((id) => !before.has(id));
+    if (raised === undefined) return false;
+    this.issue({ t: 'assignDivisions', country: me, army: raised, divisions: [...divisions] });
+    this.selectDivisions([...divisions], { army: raised, centre: false });
     return true;
   }
 

@@ -247,6 +247,12 @@ export const UI = {
   /** A division's name: the 12 in 第12歩兵師団. */
   divisionName: (ordinal: number, template: string): string => `第${ordinal}${template}`,
   orderOfBattle: '隷下師団',
+  selectAll: '全選択',
+  selectNone: '選択解除',
+  selectedCount: (n: number): string => `${n}個選択中`,
+  dropFromArmy: '軍から外す',
+  newArmyFromBox: '範囲選択して新しい軍',
+  newArmyArmed: '地図をなぞると、囲んだ師団で新しい軍を編成します',
   onTheMove: '移動中',
   detached: '独立行動',
   rejoinPlan: '計画に復帰',
