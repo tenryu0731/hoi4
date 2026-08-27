@@ -478,7 +478,7 @@ export const COUNTRY: Record<string, string> = {
   POR: 'ポルトガル', SWI: 'スイス', BEL: 'ベルギー', HOL: 'オランダ',
   LUX: 'ルクセンブルク', DEN: 'デンマーク', NOR: 'ノルウェー', SWE: 'スウェーデン',
   FIN: 'フィンランド', EST: 'エストニア', LAT: 'ラトビア', LIT: 'リトアニア',
-  IRE: 'アイルランド', ICE: 'アイスランド',
+  IRE: 'アイルランド', ICE: 'アイスランド', PER: 'ペルシャ', SAU: 'サウジアラビア',
 };
 
 export const EQUIPMENT: Record<EquipmentType, string> = {

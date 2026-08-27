@@ -904,6 +904,37 @@ export const COMMANDERS: readonly CommanderDef[] = [
     skill: 1, attack: 1, defence: 2, planning: 2, logistics: 2,
     traits: [],
   },
+
+  // --- PER ----------------------------------------------------------------
+  // Reza Shah's army was his own creation and he commanded it himself; Ahmadi
+  // ran the Tehran garrison until the purge of 1939.
+  {
+    id: 'per_reza_pahlavi', tag: 'PER', name: 'レザー・シャー・パフラヴィー',
+    latin: 'Reza Shah Pahlavi', rank: 'field_marshal',
+    skill: 3, attack: 3, defence: 3, planning: 2, logistics: 2,
+    traits: ['organiser'],
+  },
+  {
+    id: 'per_ahmadi', tag: 'PER', name: 'アフマド・アフマディ',
+    latin: 'Ahmad Ahmadi', rank: 'general',
+    skill: 2, attack: 2, defence: 3, planning: 2, logistics: 2,
+    traits: [],
+  },
+
+  // --- SAU ----------------------------------------------------------------
+  // The kingdom fought its wars with tribal levies under the king's sons.
+  {
+    id: 'sau_saud', tag: 'SAU', name: 'サウード・ビン・アブドゥルアズィーズ',
+    latin: 'Saud bin Abdulaziz', rank: 'field_marshal',
+    skill: 2, attack: 3, defence: 2, planning: 1, logistics: 2,
+    traits: ['infantry_leader'],
+  },
+  {
+    id: 'sau_faisal', tag: 'SAU', name: 'ファイサル・ビン・アブドゥルアズィーズ',
+    latin: 'Faisal bin Abdulaziz', rank: 'general',
+    skill: 2, attack: 2, defence: 2, planning: 3, logistics: 2,
+    traits: [],
+  },
 ];
 
 // ---------------------------------------------------------------------------

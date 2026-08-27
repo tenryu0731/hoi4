@@ -16,19 +16,27 @@ const BUDGET = {
   /** Every generated asset, uncompressed. */
   totalAssetBytes: 300 * 1024,
   /**
-   * The baked map. It roughly doubled when provinces stopped being invented
-   * and became cells of the world's real administrative units: 1704 provinces
-   * inside 484 states, carrying every border a cartographer actually drew.
-   * 1.6 MB uncompressed is 475 KB over the wire, which the first-load budget
-   * below has room for.
+   * The baked map, uncompressed on disk.
+   *
+   * It has grown twice. First when provinces stopped being invented and became
+   * cells of the world's real administrative units; then again when their
+   * number was matched to the reference's, which is 4,351 provinces inside 425
+   * states. 2.1 MB flat is 571 KB gzipped, and GitHub Pages -- what actually
+   * serves this -- gzips. The preview server the first-load budget below is
+   * measured against does not, which is why that number is the larger of the
+   * two.
    */
-  mapBytes: 1800 * 1024,
+  mapBytes: 2400 * 1024,
   /** Largest single asset. */
   largestAssetBytes: 8 * 1024,
   /** Wall time from navigation to a playable game, on a mobile viewport. */
   bootMs: 12_000,
-  /** Network bytes for the whole first load. */
-  firstLoadBytes: 3 * 1024 * 1024,
+  /**
+   * Network bytes for the whole first load, off the uncompressed preview
+   * server. A real host gzips: the same load is about 1 MB from GitHub Pages,
+   * of which 571 KB is the map.
+   */
+  firstLoadBytes: 4 * 1024 * 1024,
 };
 
 interface Manifest {

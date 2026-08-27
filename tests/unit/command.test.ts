@@ -319,7 +319,11 @@ describe('battle plans', () => {
         const d = at(id);
         if (!d || d.dead) continue;
         const was = where.get(id);
-        if (was !== undefined && army.frontProvinces.includes(was)
+        // Not one that is fighting. A division pinned in a battle keeps
+        // whatever order it had when it was drawn in, so it stands on its post
+        // with a stale path behind it -- which is the opposite of being
+        // shuffled, and on a border this fine there is usually one.
+        if (was !== undefined && d.combatId === null && army.frontProvinces.includes(was)
           && d.path.length > 0 && d.path[d.path.length - 1] !== was) churn++;
         where.set(id, d.provinceId);
       }

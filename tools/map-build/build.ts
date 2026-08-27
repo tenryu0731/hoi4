@@ -130,7 +130,16 @@ function project(ring: Ring): Ring {
   return ring.map((p) => projectLcc(p[0], p[1], PROJ));
 }
 
-function flatten(ring: Ring, decimals = 1): number[] {
+/**
+ * Coordinates go out at whole kilometres.
+ *
+ * A tenth of a kilometre is a hundred metres, and the map is six and a half
+ * thousand kilometres across: at the closest zoom the player can reach that
+ * hundred metres is under a fifth of a pixel, so every one of those decimal
+ * places was two characters of a two-megabyte file spent on something nobody
+ * can see. Dropping them took the baked map from 2.7 MB to 2.0.
+ */
+function flatten(ring: Ring, decimals = 0): number[] {
   const f = 10 ** decimals;
   const out = new Array<number>(ring.length * 2);
   for (let i = 0; i < ring.length; i++) {
@@ -138,6 +147,13 @@ function flatten(ring: Ring, decimals = 1): number[] {
     out[i * 2 + 1] = Math.round(ring[i][1] * f) / f;
   }
   return out;
+}
+
+/** How many of a ring's points are not repeats of another, to a metre. */
+function distinctPoints(ring: Ring): number {
+  const seen = new Set<string>();
+  for (const p of ring) seen.add(`${Math.round(p[0] * 1000)},${Math.round(p[1] * 1000)}`);
+  return seen.size;
 }
 
 /** Clips a lon/lat ring to the map window and projects it. Empty when outside. */
@@ -169,8 +185,14 @@ export async function buildMap(): Promise<MapDataJson> {
       // only the outlying ones. A unit's largest ring is the unit: dropping it
       // by area punched holes in the map wherever a city was its own admin
       // unit, and Paris, Basel and Bristol all fell through one.
-      const kept = rings.filter((r, i) =>
-        i === 0 || ringArea(r) >= MIN_ISLAND_AREA || ISLAND_ALLOWLIST.has(u.adm0));
+      const kept = rings
+        .filter((r, i) =>
+          i === 0 || ringArea(r) >= MIN_ISLAND_AREA || ISLAND_ALLOWLIST.has(u.adm0))
+        // Simplification can collapse a ring smaller than its own threshold
+        // into a line -- Gibraltar's six square kilometres came out as four
+        // points, two of them the same point, and the cell built on it had no
+        // inside for its own centre to be in.
+        .filter((r) => distinctPoints(r) >= 3 && ringArea(r) >= 1);
       return { ...u, rings: kept };
     })
     .filter((u) => u.rings.length > 0);
@@ -284,6 +306,12 @@ export async function buildMap(): Promise<MapDataJson> {
   markCoastal(provinces, landGeom);
   addSeaNeighbors(provinces, landGeom);
   connectIsolatedComponents(provinces);
+  // Anything that can only be reached by sea is on the sea, whatever the
+  // coastline test made of it. Gibraltar is four square kilometres and the
+  // test missed it, so the only British province on the strait could neither
+  // take a convoy nor feed one, and Britain sailed into 1936 with a pocket.
+  for (const p of provinces) if (p.seaNeighbors.length > 0) p.coastal = true;
+
   const lakeRings: number[][] = [];
   for (const f of lakes.features) {
     for (const poly of polygonsOf(f)) {

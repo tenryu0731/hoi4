@@ -7,8 +7,9 @@ import {
 } from './geo';
 import type { CityJson, ProvinceGeoJson, StateGeoJson } from '../../src/sim/map/MapData';
 import type { TerrainType } from '../../src/sim/core/types';
-import { NATION_BY_TAG } from '../../src/sim/scenario/nations';
+import { NATION_BY_TAG, NATIONS } from '../../src/sim/scenario/nations';
 import type { StateGroup } from './states';
+import { referenceKmPerProvince, referenceStateAt } from './reference';
 import type { BuiltProvinces } from './build';
 
 /**
@@ -34,20 +35,27 @@ export interface SubdivideInput {
 }
 
 /** Square kilometres of a European state per province, before clamping. */
-const AREA_PER_PROVINCE = 5_600;
+const AREA_PER_PROVINCE = 2_600;
 /**
  * The same for colonial and desert holdings. Sparsely held ground does not
  * deserve the same granularity as the Ruhr, and without this France ends up
  * with more provinces in the Sahara than in France.
  */
-const COLONIAL_AREA_PER_PROVINCE = 30_000;
+const COLONIAL_AREA_PER_PROVINCE = 15_000;
 /**
  * Even the smallest state is cut in two. A single-province state has no
  * interior, so a front can never run through it and the fighting happens
  * entirely on its borders.
  */
 const MIN_PROVINCES_PER_STATE = 2;
-const MAX_PROVINCES_PER_STATE = 14;
+const MAX_PROVINCES_PER_STATE = 64;
+/**
+ * What fraction of the cells asked for actually survive to the map -- rounding
+ * down, the sliver floor and the per-state ceiling each shave one here and
+ * there. Measured against the reference and corrected for, which brings every
+ * region of Europe inside a few percent of the count the real game uses.
+ */
+const REFERENCE_YIELD = 0.93;
 /** Cells smaller than this are merged away rather than shipped as slivers. */
 const MIN_PROVINCE_AREA = 260;
 
@@ -174,11 +182,14 @@ function makeSeeds(
   rings: Ring[], cities: CityJson[], count: number, proj: LccParams,
 ): Seed[] {
   const seeds: Seed[] = [];
+  // Two cities closer together than a cell is wide would produce a sliver
+  // between them, so the spacing follows the cell size rather than a constant.
+  const spacing = Math.sqrt(AREA_PER_PROVINCE) * 0.55;
   const sorted = [...cities].sort((a, b) => b.pop - a.pop);
   for (const c of sorted) {
     if (seeds.length >= count) break;
     // Two cities in the same valley would produce a sliver between them.
-    if (seeds.some((s) => Math.hypot(s.x - c.x, s.y - c.y) < 45)) continue;
+    if (seeds.some((s) => Math.hypot(s.x - c.x, s.y - c.y) < spacing)) continue;
     const [lon, lat] = unprojectLcc(c.x, c.y, proj);
     seeds.push({ x: c.x, y: c.y, lon, lat, pop: c.pop, cityName: c.name });
   }
@@ -344,8 +355,16 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   groups.forEach((group, stateIdx) => {
     const area = group.area;
     const centre = centreOf(group.rings, 8);
-    const [, centreLat] = unprojectLcc(centre[0], centre[1], projection);
-    const density = centreLat < 37 ? COLONIAL_AREA_PER_PROVINCE : AREA_PER_PROVINCE;
+    const [centreLon, centreLat] = unprojectLcc(centre[0], centre[1], projection);
+    // How finely the real game cuts this part of the world, where it says.
+    // Measured against it, an area rule alone came out at 0.81 of the
+    // reference overall and much further off in places -- 0.59 in Scandinavia,
+    // 0.70 in Germany and Poland, 1.13 in the Balkans.
+    // Asking for exactly the reference's number lands about a tenth short:
+    // rounding down, the sliver floor, and the ceiling per state all shave a
+    // cell here and there. The shortfall is measured, so it is corrected for.
+    const density = (referenceKmPerProvince(centreLon, centreLat)
+      ?? (centreLat < 37 ? COLONIAL_AREA_PER_PROVINCE : AREA_PER_PROVINCE)) * REFERENCE_YIELD;
     const byDensity = Math.min(
       MAX_PROVINCES_PER_STATE,
       Math.max(MIN_PROVINCES_PER_STATE, Math.round(area / density)),
@@ -443,17 +462,20 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   // --- 2. Name the provinces that have no city of their own ----------------
   nameProvinces(raw, cities);
 
-  // --- 3. Emit states and provinces ----------------------------------------
-  // Ids follow the group order, which is nation then descending area, so a
-  // rebuild that adds a city somewhere does not renumber the whole map.
+  // --- 3. Group the cells into states, following the reference -------------
+  const blockOf = new Int32Array(raw.length).fill(-1);
+  membersOfState.forEach((list, b) => { for (const i of list) blockOf[i] = b; });
+  const stateGroups = regroupByReference(raw, blockOf, projection);
+
   const stateOfProvince = new Int32Array(raw.length).fill(-1);
-  const states: StateGeoJson[] = groups.map((group, id) => {
-    for (const idx of membersOfState[id]) stateOfProvince[idx] = id;
-    const nation = NATION_BY_TAG.get(group.tag);
+  const states: StateGeoJson[] = stateGroups.map((members, id) => {
+    for (const idx of members) stateOfProvince[idx] = id;
+    const tag = raw[members[0]].tag;
+    const nation = NATION_BY_TAG.get(tag);
     return {
       id,
-      name: group.name,
-      ownerTag: group.tag,
+      name: stateNameFor(raw, members),
+      ownerTag: tag,
       provinces: [],           // filled once province ids are final
       manpower: 0,
       resources: {},
@@ -503,6 +525,205 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   computeGeometricAdjacency(provinces);
 
   return { provinces, states };
+}
+
+
+// ---------------------------------------------------------------------------
+// Grouping cells into states
+// ---------------------------------------------------------------------------
+
+/** How many points inside a cell are put to the reference before it decides. */
+const REFERENCE_SAMPLES = 9;
+/** A state below this many square kilometres is folded into a neighbour. */
+const MIN_STATE_KM = 2_400;
+
+/**
+ * Which of the reference's states a cell belongs to.
+ *
+ * Put to a vote rather than read off the centre: the georeference is good to a
+ * couple of pixels and a pixel is eleven kilometres, so a cell whose centre
+ * happens to land on a border line would otherwise be handed to whichever side
+ * the rounding fell on. Nine points spread over the cell make that a tie-break
+ * instead of a coin toss.
+ */
+function referenceStateOf(p: RawProvince, proj: LccParams): number {
+  const votes = new Map<number, number>();
+  const outer = p.rings[0];
+  const put = (x: number, y: number): void => {
+    const [lon, lat] = unprojectLcc(x, y, proj);
+    const cell = referenceStateAt(lon, lat);
+    if (cell > 0) votes.set(cell, (votes.get(cell) ?? 0) + 1);
+  };
+  put(p.centre[0], p.centre[1]);
+  const step = Math.max(1, Math.floor(outer.length / (REFERENCE_SAMPLES - 1)));
+  for (let i = 0; i < outer.length; i += step) {
+    // Pulled well inside, so a vertex on the coast does not vote for the sea.
+    put(p.centre[0] + (outer[i][0] - p.centre[0]) * 0.55,
+        p.centre[1] + (outer[i][1] - p.centre[1]) * 0.55);
+  }
+  let best = 0;
+  let bestN = 0;
+  for (const [cell, n] of votes) if (n > bestN || (n === bestN && cell < best)) { best = cell; bestN = n; }
+  return best;
+}
+
+/**
+ * States, as the reference groups them.
+ *
+ * A state is a set of provinces, so following the reference is a matter of
+ * asking each cell which of its states it stands in and collecting the answers
+ * -- the borders that come out are our own province edges, not eleven-kilometre
+ * pixel staircases traced off a screenshot.
+ *
+ * Three repairs after the vote, in order: a group split between two owners is
+ * split with it, because a state cannot be half German; a group that is not
+ * joined up is broken into its pieces, because a state with a detached half is
+ * not a state; and anything left too small to be worth a name is folded into
+ * the neighbour it shares the most border with.
+ */
+function regroupByReference(
+  raw: RawProvince[], blockOf: Int32Array, proj: LccParams,
+): number[][] {
+  const key = new Array<string>(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    const cell = referenceStateOf(raw[i], proj);
+    // Off the edge of the reference -- the Atlantic islands, the deep Sahara,
+    // the ground east of it -- the administrative blocks stand in.
+    key[i] = cell > 0 ? `r${cell}|${raw[i].tag}` : `b${blockOf[i]}|${raw[i].tag}`;
+  }
+
+  const buckets = new Map<string, number[]>();
+  for (let i = 0; i < raw.length; i++) {
+    const list = buckets.get(key[i]);
+    if (list) list.push(i);
+    else buckets.set(key[i], [i]);
+  }
+
+  // Adjacency between cells, from the rings themselves.
+  const touching = adjacencyOf(raw);
+
+  const out: number[][] = [];
+  for (const members of buckets.values()) {
+    const set = new Set(members);
+    const seen = new Set<number>();
+    for (const seed of members) {
+      if (seen.has(seed)) continue;
+      const comp: number[] = [];
+      const stack = [seed];
+      seen.add(seed);
+      while (stack.length > 0) {
+        const cur = stack.pop()!;
+        comp.push(cur);
+        for (const nb of touching[cur]) {
+          if (set.has(nb) && !seen.has(nb)) { seen.add(nb); stack.push(nb); }
+        }
+      }
+      out.push(comp);
+    }
+  }
+
+  // Fold the runts into whichever neighbouring state they touch most.
+  const stateOf = new Int32Array(raw.length).fill(-1);
+  out.forEach((members, i) => { for (const m of members) stateOf[m] = i; });
+  const areaOfState = out.map((m) => m.reduce((s, i) => s + raw[i].area, 0));
+  const order = out.map((_, i) => i).sort((a, b) => areaOfState[a] - areaOfState[b]);
+  const dead = new Set<number>();
+  for (const i of order) {
+    if (dead.has(i) || areaOfState[i] >= MIN_STATE_KM) continue;
+    const tally = new Map<number, number>();
+    for (const m of out[i]) {
+      for (const nb of touching[m]) {
+        const s = stateOf[nb];
+        if (s < 0 || s === i || dead.has(s)) continue;
+        if (raw[nb].tag !== raw[m].tag) continue;
+        tally.set(s, (tally.get(s) ?? 0) + 1);
+      }
+    }
+    let host = -1;
+    let bestN = 0;
+    for (const [s, n] of tally) if (n > bestN) { host = s; bestN = n; }
+    if (host < 0) continue;
+    for (const m of out[i]) { out[host].push(m); stateOf[m] = host; }
+    areaOfState[host] += areaOfState[i];
+    out[i] = [];
+    dead.add(i);
+  }
+
+  const kept = out.filter((m) => m.length > 0);
+  // Nation first, then north to south, so ids move as little as possible when
+  // the map is rebuilt.
+  const tagOrder = new Map<string, number>(NATIONS.map((n, i) => [n.tag, i]));
+  kept.sort((a, b) => {
+    const ta = tagOrder.get(raw[a[0]].tag) ?? 999;
+    const tb = tagOrder.get(raw[b[0]].tag) ?? 999;
+    if (ta !== tb) return ta - tb;
+    const ya = a.reduce((s, i) => s + raw[i].centre[1], 0) / a.length;
+    const yb = b.reduce((s, i) => s + raw[i].centre[1], 0) / b.length;
+    return ya - yb;
+  });
+  return kept;
+}
+
+/** Cell-to-cell adjacency, by shared ring geometry. */
+function adjacencyOf(raw: RawProvince[]): number[][] {
+  const out: number[][] = raw.map(() => []);
+  const bboxes = raw.map((p) => {
+    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+    for (const ring of p.rings) {
+      const [x0, y0, x1, y1] = bboxOfRing(ring);
+      a = Math.min(a, x0); b = Math.min(b, y0); c = Math.max(c, x1); d = Math.max(d, y1);
+    }
+    return [a, b, c, d] as const;
+  });
+  // Bucket by a coarse grid so this stays linear in the number of cells.
+  const CELL = 120;
+  const grid = new Map<string, number[]>();
+  for (let i = 0; i < raw.length; i++) {
+    const [a, b, c, d] = bboxes[i];
+    for (let gx = Math.floor(a / CELL); gx <= Math.floor(c / CELL); gx++) {
+      for (let gy = Math.floor(b / CELL); gy <= Math.floor(d / CELL); gy++) {
+        const k = `${gx},${gy}`;
+        const list = grid.get(k);
+        if (list) list.push(i);
+        else grid.set(k, [i]);
+      }
+    }
+  }
+  const seen = new Set<number>();
+  for (const list of grid.values()) {
+    for (let a = 0; a < list.length; a++) {
+      for (let b = a + 1; b < list.length; b++) {
+        const i = list[a];
+        const j = list[b];
+        const pk = i < j ? i * 1e6 + j : j * 1e6 + i;
+        if (seen.has(pk)) continue;
+        seen.add(pk);
+        const [ax0, ay0, ax1, ay1] = bboxes[i];
+        const [bx0, by0, bx1, by1] = bboxes[j];
+        if (ax1 < bx0 - ADJACENCY_TOLERANCE || bx1 < ax0 - ADJACENCY_TOLERANCE) continue;
+        if (ay1 < by0 - ADJACENCY_TOLERANCE || by1 < ay0 - ADJACENCY_TOLERANCE) continue;
+        if (!ringsTouch(raw[i].rings, raw[j].rings, ADJACENCY_TOLERANCE)) continue;
+        out[i].push(j);
+        out[j].push(i);
+      }
+    }
+  }
+  return out;
+}
+
+/** A state is called after the largest place inside it. */
+function stateNameFor(raw: RawProvince[], members: readonly number[]): string {
+  let best = members[0];
+  let bestPop = -1;
+  for (const m of members) {
+    const pop = raw[m].seed.pop;
+    if (pop > bestPop) { bestPop = pop; best = m; }
+  }
+  if (bestPop > 0 && raw[best].seed.cityName) return raw[best].seed.cityName!;
+  // Nothing but empty ground: fall back to the block the largest cell came from.
+  let widest = members[0];
+  for (const m of members) if (raw[m].area > raw[widest].area) widest = m;
+  return raw[widest].stateName;
 }
 
 /**
@@ -560,7 +781,16 @@ function romanish(n: number): string {
   return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][n - 1] ?? String(n + 1);
 }
 
-function flatten(ring: Ring, decimals = 1): number[] {
+/**
+ * Coordinates go out at whole kilometres.
+ *
+ * A tenth of a kilometre is a hundred metres, and the map is six and a half
+ * thousand kilometres across: at the closest zoom the player can reach that
+ * hundred metres is under a fifth of a pixel, so every one of those decimal
+ * places was two characters of a two-megabyte file spent on something nobody
+ * can see. Dropping them took the baked map from 2.7 MB to 2.0.
+ */
+function flatten(ring: Ring, decimals = 0): number[] {
   const f = 10 ** decimals;
   const out = new Array<number>(ring.length * 2);
   for (let i = 0; i < ring.length; i++) {

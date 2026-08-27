@@ -143,6 +143,15 @@ export class LabelLayer {
    */
   readonly topContainer = new Container();
   readonly countryLabels: LabelEntry[] = [];
+  /**
+   * State names, which are the tier the map was missing.
+   *
+   * 「プロヴィンスとステートがしっかり区分けされてない」. A state you cannot see
+   * the name of is not a tier the player can read, and the map went straight
+   * from country names to province names -- so at the zoom where the reference
+   * captions Pommern and Schlesien, this captioned NORTH-EAST STETTIN.
+   */
+  readonly stateLabels: LabelEntry[] = [];
   readonly provinceLabels: LabelEntry[] = [];
   readonly cityLabels: LabelEntry[] = [];
   private step = 0;
@@ -200,11 +209,33 @@ export class LabelLayer {
         this.countryLabels,
       );
     }
-    // Province names take over as the map gets closer.
+    // State names next, and provinces only once the map is closer still.
+    for (const st of this.index.data.states) {
+      if (st.provinces.length === 0) continue;
+      let anchor = this.index.get(st.provinces[0]);
+      let area = 0;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const id of st.provinces) {
+        const p = this.index.get(id);
+        area += p.area;
+        if (p.area > anchor.area) anchor = p;
+        minX = Math.min(minX, p.bbox[0]); minY = Math.min(minY, p.bbox[1]);
+        maxX = Math.max(maxX, p.bbox[2]); maxY = Math.max(maxY, p.bbox[3]);
+      }
+      this.makeLabel(
+        st.name.toUpperCase(), FONT_PROVINCE,
+        anchor.centerX, anchor.centerY, 2, 13, area,
+        maxX - minX, maxY - minY,
+        this.stateLabels,
+      );
+    }
     for (const p of this.index.provinces) {
       this.makeLabel(
         p.name.toUpperCase(), FONT_PROVINCE,
-        p.centerX, p.centerY, 3, 10, p.area,
+        p.centerX, p.centerY, 4, 9, p.area,
         p.bbox[2] - p.bbox[0], p.bbox[3] - p.bbox[1],
         this.provinceLabels,
       );
@@ -220,6 +251,7 @@ export class LabelLayer {
     // Draw order follows priority so that if two do overlap, the more important
     // one is on top rather than whichever happened to be built last.
     this.countryLabels.sort((a, b) => b.priority - a.priority);
+    this.stateLabels.sort((a, b) => b.priority - a.priority);
     this.provinceLabels.sort((a, b) => b.priority - a.priority);
     this.cityLabels.sort((a, b) => b.priority - a.priority);
   }
@@ -379,6 +411,12 @@ export class LabelLayer {
     }
     // Everything below a country name yields to the counters.
     for (const r of reserved) this.claim(r.x, r.y, r.w, r.h);
+    // States before provinces: where both would fit, the bigger tier wins the
+    // ground, which is the order a map is read in.
+    for (const e of this.stateLabels) {
+      const ok = place(e, true);
+      e.text.visible = ok;
+    }
     for (const e of this.provinceLabels) {
       const ok = place(e, true);
       e.text.visible = ok;

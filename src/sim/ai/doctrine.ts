@@ -190,6 +190,7 @@ export const DEFAULT_DOCTRINE: Doctrine = { majorWarFrom: '1945-01', patience: 1
 export const DEFENSIVE = [
   'POL', 'CZE', 'AUS', 'YUG', 'GRE', 'TUR', 'SPR', 'POR', 'SWE', 'NOR', 'DEN',
   'HOL', 'BEL', 'LUX', 'SWI', 'IRE', 'ICE', 'ALB', 'EST', 'LAT', 'LIT',
+  'PER', 'SAU',
 ] as const;
 for (const tag of DEFENSIVE) DOCTRINE[tag] = DEFAULT_DOCTRINE;
 

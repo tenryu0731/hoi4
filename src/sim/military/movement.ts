@@ -170,13 +170,49 @@ export function sealiftCapacity(state: GameState, owner: CountryId): number {
 }
 
 /** Divisions of this country currently mid-crossing. */
+/**
+ * Hulls at sea, per country, counted once an hour instead of once a division.
+ *
+ * The count is over every division in the game, and it was being asked for
+ * inside the per-division movement loop -- so a hundred divisions waiting on a
+ * quay walked the whole roster a hundred times each hour. Quadratic in the
+ * size of the war, which is the one thing that only grows.
+ */
+const sealiftCache = new WeakMap<GameState, { hour: number; byOwner: Map<CountryId, number> }>();
+
 function sealiftInUse(state: GameState, ctx: MilitaryContext, owner: CountryId): number {
-  let n = 0;
-  for (const d of state.divisions) {
-    if (d.dead || d.owner !== owner || d.path.length === 0) continue;
-    if (isVoyage(ctx.index, d.provinceId, d.path[0])) n++;
+  const hour = state.clock.totalHours;
+  let entry = sealiftCache.get(state);
+  if (!entry || entry.hour !== hour) {
+    const byOwner = new Map<CountryId, number>();
+    for (const d of state.divisions) {
+      if (d.dead || d.path.length === 0) continue;
+      // Under way, not merely waiting. A division on the quay has no hull, and
+      // counting it as though it had one made the queue block itself: six
+      // divisions ordered to East Prussia from Bavaria each waited for a ship
+      // that the other five were holding, and none of them ever sailed. They
+      // were still standing in Nürnberg a hundred and twenty days later.
+      if (d.moveProgress <= 0) continue;
+      if (!isVoyage(ctx.index, d.provinceId, d.path[0])) continue;
+      byOwner.set(d.owner, (byOwner.get(d.owner) ?? 0) + 1);
+    }
+    entry = { hour, byOwner };
+    sealiftCache.set(state, entry);
   }
-  return n;
+  return entry.byOwner.get(owner) ?? 0;
+}
+
+/**
+ * Books a hull for the rest of the hour.
+ *
+ * Without this the count would be the one taken at the top of the hour and
+ * every division on the quay would read the same number, so the whole army
+ * would cast off together -- which is the thing the capacity exists to stop.
+ */
+function takeSealift(state: GameState, owner: CountryId): void {
+  const entry = sealiftCache.get(state);
+  if (!entry || entry.hour !== state.clock.totalHours) return;
+  entry.byOwner.set(owner, (entry.byOwner.get(owner) ?? 0) + 1);
 }
 
 /**
@@ -596,9 +632,9 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
   // Shipping is a live resource: a division waits on the quay until a hull is
   // free, which is what stops an entire army crossing in one tide.
   const crossing = isVoyage(ctx.index, d.provinceId, next);
-  if (crossing && d.moveProgress === 0
-      && sealiftInUse(state, ctx, d.owner) >= sealiftCapacity(state, d.owner)) {
-    return;
+  if (crossing && d.moveProgress === 0) {
+    if (sealiftInUse(state, ctx, d.owner) >= sealiftCapacity(state, d.owner)) return;
+    takeSealift(state, d.owner);
   }
   const distance = Math.max(1, ctx.index.distance(d.provinceId, next));
   // A ship's speed over water, the division's own on land: a motorised
