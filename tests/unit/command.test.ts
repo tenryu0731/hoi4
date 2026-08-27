@@ -474,11 +474,15 @@ describe('battle plans', () => {
     }
 
     // Take the ground in front of it and the line comes with, without the
-    // player redrawing anything.
+    // player redrawing anything. Everything in front, not just the Polish
+    // half: on the 1936 map a German border province can face Poland and
+    // Czechoslovakia at once, and a post that still faces somebody is a post
+    // that has correctly not moved.
     const before = [...army.frontProvinces].sort().join(',');
     for (const p of [...army.frontProvinces]) {
       for (const n of f.index.get(p).neighbors) {
-        if (f.state.provinces[n]?.controller === pol.id) f.state.provinces[n].controller = ger.id;
+        const held = f.state.provinces[n];
+        if (held && held.controller !== ger.id) held.controller = ger.id;
       }
     }
     tickBattlePlansDaily(f.state, ctx);
@@ -828,10 +832,17 @@ describe('the AI in the chain of command', () => {
     expect(aiArmies.length).toBeGreaterThan(4);
     const withOrder = aiArmies.filter((a) => a.order !== null);
     expect(withOrder.length / aiArmies.length).toBeGreaterThan(0.8);
-    // And the front it declared is real, not an empty list.
-    const atWar = withOrder.filter((a) => f.state.countries[a.owner].atWarWith.length > 0);
-    if (atWar.length > 0) {
-      expect(atWar.some((a) => a.frontProvinces.length > 0)).toBe(true);
+    // And the front it declared is real, not an empty list -- asked only of
+    // the armies that could have one. A campaign whose only wars are between
+    // countries with no shared border (this seed reaches 1941 with the Soviet
+    // Union at war with Britain and France and nobody's tanks able to reach
+    // anybody) has no land front to declare, and an empty list is the right
+    // answer there.
+    const touching = withOrder.filter((a) => f.state.countries[a.owner].atWarWith.some(
+      (enemy) => frontProvinces(f.state, f.index, a.owner, enemy).length > 0,
+    ));
+    if (touching.length > 0) {
+      expect(touching.some((a) => a.frontProvinces.length > 0)).toBe(true);
     }
   }, 90_000);
 });

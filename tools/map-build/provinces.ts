@@ -5,36 +5,36 @@ import {
   type LccParams, type Pt, type Ring,
   bboxOfRing, poleOfInaccessibility, pointInRing, ringArea,
 } from './geo';
-import type { ArcRef } from './topology';
 import type { CityJson, ProvinceGeoJson, StateGeoJson } from '../../src/sim/map/MapData';
 import type { TerrainType } from '../../src/sim/core/types';
-import { NATION_BY_TAG, NATIONS } from '../../src/sim/scenario/nations';
+import { NATION_BY_TAG } from '../../src/sim/scenario/nations';
+import type { StateGroup } from './states';
 import type { BuiltProvinces } from './build';
 
 /**
- * Iteration 2 of the map: nations cut into provinces, provinces grouped into
- * states.
+ * Provinces: the cells a state is cut into.
  *
- * Provinces are Voronoi cells seeded from real cities and clipped to the
- * nation's own outline. Seeding from cities rather than a regular lattice means
+ * States come from the world's real administrative map (see `states.ts`), and
+ * every province is carved out of exactly one of them, so the two tiers nest
+ * the way Hearts of Iron's do -- a state is a named region you can see, and
+ * the provinces inside it are where divisions actually stand.
+ *
+ * The cells themselves are Voronoi, seeded from real cities and clipped to the
+ * state's own outline. Seeding from cities rather than a regular lattice means
  * the cells follow where people actually lived: dense in the Ruhr and the Po
  * valley, coarse across the steppe, which is exactly the granularity the
  * gameplay wants.
- *
- * Country-level play made every nation a single indivisible cell, so one lost
- * battle was total conquest. Subdivision is what turns the campaign into a
- * front that moves.
  */
 
 export interface SubdivideInput {
-  units: { code: string; tag: string; rings: Ring[]; ringRefs: ArcRef[][] }[];
+  /** The 1936 states, already merged out of real administrative units. */
+  states: StateGroup[];
   cities: CityJson[];
-  target: number;
   projection: LccParams;
 }
 
-/** Square kilometres of European territory per province, before clamping. */
-const AREA_PER_PROVINCE = 6_000;
+/** Square kilometres of a European state per province, before clamping. */
+const AREA_PER_PROVINCE = 5_600;
 /**
  * The same for colonial and desert holdings. Sparsely held ground does not
  * deserve the same granularity as the Ruhr, and without this France ends up
@@ -42,14 +42,14 @@ const AREA_PER_PROVINCE = 6_000;
  */
 const COLONIAL_AREA_PER_PROVINCE = 30_000;
 /**
- * Even the smallest nation gets more than one province. A single-province
- * country capitulates the moment one battle goes against it, which made the
- * country-level map unplayable.
+ * Even the smallest state is cut in two. A single-province state has no
+ * interior, so a front can never run through it and the fighting happens
+ * entirely on its borders.
  */
-const MIN_PROVINCES_PER_UNIT = 2;
-const MAX_PROVINCES_PER_UNIT = 90;
+const MIN_PROVINCES_PER_STATE = 2;
+const MAX_PROVINCES_PER_STATE = 14;
 /** Cells smaller than this are merged away rather than shipped as slivers. */
-const MIN_PROVINCE_AREA = 500;
+const MIN_PROVINCE_AREA = 260;
 
 // ---------------------------------------------------------------------------
 // Terrain zones
@@ -97,9 +97,6 @@ const TERRAIN_ZONES: TerrainZone[] = [
  * single admin unit. At province granularity it can, so East Prussia goes back
  * to Germany rather than sitting inside the Soviet Union.
  */
-const HISTORICAL_OVERRIDES: { name: string; box: [number, number, number, number]; tag: string }[] = [
-  { name: 'East Prussia', box: [19.4, 53.8, 23.0, 55.4], tag: 'GER' },
-];
 
 function classifyTerrain(lon: number, lat: number, cityPop: number): TerrainType {
   if (cityPop >= 900) return 'urban';
@@ -147,15 +144,21 @@ function unprojectLcc(x: number, y: number, p: LccParams): [number, number] {
   return [lon, lat];
 }
 
-function largestRing(rings: Ring[]): Ring {
-  let best = rings[0];
-  let bestArea = -Infinity;
-  for (const r of rings) {
-    const a = ringArea(r);
-    if (a > bestArea) { bestArea = a; best = r; }
-  }
-  return best;
+/**
+ * The point furthest from any edge -- but of the polygon, not of its outline.
+ *
+ * A cell clipped out of a state that wraps an enclave comes back with holes in
+ * it, and a pole of inaccessibility computed from the outer ring alone happily
+ * lands in the middle of one. Udine, Saint Gallen and East Skopje all did, and
+ * a province whose own centre is not inside it cannot be tapped.
+ */
+function centreOf(rings: Ring[], precision = 3): Pt {
+  const sorted = [...rings].sort((a, b) => ringArea(b) - ringArea(a));
+  const outer = sorted[0];
+  const holes = sorted.slice(1).filter((r) => pointInRing(r[0][0], r[0][1], outer));
+  return poleOfInaccessibility([outer, ...holes], precision);
 }
+
 
 function pointInRings(x: number, y: number, rings: Ring[]): boolean {
   let winding = 0;
@@ -247,6 +250,8 @@ interface RawProvince {
   terrain: TerrainType;
   /** Filled in by `nameProvinces`. */
   name: string;
+  /** The state this cell was carved out of, used when naming it. */
+  stateName: string;
 }
 
 /**
@@ -326,22 +331,25 @@ function clipCellToUnit(cell: Pt[], unit: MultiRing[]): Ring[] {
   }
 }
 
-export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
-  const { units, cities, projection } = input;
-  const stateTarget = Math.max(8, input.target);
 
-  // --- 1. Voronoi cells per admin unit ------------------------------------
+
+export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
+  const { states: groups, cities, projection } = input;
+
+  // --- 1. Voronoi cells inside each state ----------------------------------
   const raw: RawProvince[] = [];
   const provinceOfUnit = new Map<string, number>();
+  /** Province indices belonging to each state, in build order. */
+  const membersOfState: number[][] = groups.map(() => []);
 
-  for (const unit of units) {
-    const area = unit.rings.reduce((s, r) => s + ringArea(r), 0);
-    const centre = poleOfInaccessibility([largestRing(unit.rings)], 8);
+  groups.forEach((group, stateIdx) => {
+    const area = group.area;
+    const centre = centreOf(group.rings, 8);
     const [, centreLat] = unprojectLcc(centre[0], centre[1], projection);
     const density = centreLat < 37 ? COLONIAL_AREA_PER_PROVINCE : AREA_PER_PROVINCE;
     const byDensity = Math.min(
-      MAX_PROVINCES_PER_UNIT,
-      Math.max(MIN_PROVINCES_PER_UNIT, Math.round(area / density)),
+      MAX_PROVINCES_PER_STATE,
+      Math.max(MIN_PROVINCES_PER_STATE, Math.round(area / density)),
     );
     // Never ask for more provinces than the territory can hold: splitting Malta
     // in two produces two slivers, both of which are then discarded, and the
@@ -349,49 +357,54 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
     const byArea = Math.max(1, Math.floor(area / MIN_PROVINCE_AREA));
     const wanted = Math.min(byDensity, byArea);
 
-    const unitMulti = toMultiPolygon(unit.rings);
+    const unitMulti = toMultiPolygon(group.rings);
     // Seed only on landmasses big enough to hold a province. Otherwise
-    // farthest-point sampling puts seeds on Madeira and the Azores -- the
-    // points furthest from everything else -- and their clipped cells are then
-    // discarded as slivers, leaving the mainland as a single province.
-    const seedRings = unit.rings.filter((r) => ringArea(r) >= MIN_PROVINCE_AREA * 3);
-    const usable = seedRings.length > 0 ? seedRings : unit.rings;
+    // farthest-point sampling puts seeds on the outermost skerry -- the point
+    // furthest from everything else -- and its clipped cell is then discarded
+    // as a sliver, leaving the mainland as a single province.
+    const seedRings = group.rings.filter((r) => ringArea(r) >= MIN_PROVINCE_AREA * 3);
+    const usable = seedRings.length > 0 ? seedRings : group.rings;
     const mine = cities.filter((c) => pointInRings(c.x, c.y, usable));
     const seeds = makeSeeds(usable, mine, wanted, projection);
+
+    const push = (p: RawProvince): void => {
+      membersOfState[stateIdx].push(raw.length);
+      raw.push(p);
+    };
 
     if (seeds.length <= 1) {
       const [lon, lat] = unprojectLcc(centre[0], centre[1], projection);
       const seed = seeds[0] ?? { x: centre[0], y: centre[1], lon, lat, pop: 0, cityName: null };
-      raw.push({
-        tag: unit.tag,
+      push({
+        tag: group.tag,
         seed,
-        rings: unit.rings,
+        rings: group.rings,
         area,
         centre,
         terrain: classifyTerrain(seed.lon, seed.lat, seed.pop),
         name: '',
+        stateName: group.name,
       });
-      continue;
+      return;
     }
 
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const r of unit.rings) {
+    for (const r of group.rings) {
       const [a, b, c, d] = bboxOfRing(r);
       minX = Math.min(minX, a); minY = Math.min(minY, b);
       maxX = Math.max(maxX, c); maxY = Math.max(maxY, d);
     }
     const pad = 50;
-    // Nearly collinear seeds -- which is exactly what a narrow country like
-    // Portugal or Norway produces -- degenerate the triangulation and make
-    // d3-delaunay return null cells. A sub-kilometre deterministic offset
-    // breaks the collinearity without moving anything visible.
+    // Nearly collinear seeds -- which is exactly what a long coastal state
+    // produces -- degenerate the triangulation and make d3-delaunay return null
+    // cells. A sub-kilometre deterministic offset breaks the collinearity
+    // without moving anything visible.
     const delaunay = Delaunay.from(seeds.map((s, i) => [
       s.x + (((i * 37) % 7) - 3) * 0.35,
       s.y + (((i * 53) % 5) - 2) * 0.35,
     ] as [number, number]));
     const voronoi = delaunay.voronoi([minX - pad, minY - pad, maxX + pad, maxY + pad]);
 
-    let produced = 0;
     for (let i = 0; i < seeds.length; i++) {
       const poly = voronoi.cellPolygon(i);
       if (!poly) continue;
@@ -400,95 +413,60 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
       const cellArea = rings.reduce((s, r) => s + ringArea(r), 0);
       if (cellArea < MIN_PROVINCE_AREA) continue;
       rings.sort((a, b) => ringArea(b) - ringArea(a));
-      const cellCentre = poleOfInaccessibility([rings[0]], 3);
-      raw.push({
-        tag: unit.tag,
+      push({
+        tag: group.tag,
         seed: seeds[i],
         rings,
         area: cellArea,
-        centre: cellCentre,
+        centre: centreOf(rings),
         terrain: classifyTerrain(seeds[i].lon, seeds[i].lat, seeds[i].pop),
         name: '',
+        stateName: group.name,
       });
-      produced++;
     }
-    if (produced < wanted) {
-      console.warn(
-        `  note: ${unit.code} produced ${produced}/${wanted} provinces` +
-        ` (${seeds.length} seeds, ${Math.round(area)} km2)`,
-      );
-    }
-  }
 
-  // --- 2. Historical border corrections ------------------------------------
-  for (const p of raw) {
-    for (const o of HISTORICAL_OVERRIDES) {
-      const [minLon, minLat, maxLon, maxLat] = o.box;
-      const { lon, lat } = p.seed;
-      if (lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat) {
-        p.tag = o.tag;
-      }
+    // A state whose every cell came out a sliver would vanish; keep it whole.
+    if (membersOfState[stateIdx].length === 0) {
+      const [lon, lat] = unprojectLcc(centre[0], centre[1], projection);
+      push({
+        tag: group.tag,
+        seed: { x: centre[0], y: centre[1], lon, lat, pop: 0, cityName: null },
+        rings: group.rings,
+        area,
+        centre,
+        terrain: classifyTerrain(lon, lat, 0),
+        name: '',
+        stateName: group.name,
+      });
     }
-  }
+  });
 
-  // --- 3. Name the provinces that have no city of their own ----------------
+  // --- 2. Name the provinces that have no city of their own ----------------
   nameProvinces(raw, cities);
 
-  // --- 4. Order provinces by nation, then geographically -------------------
-  // Stable ids make save data and screenshot baselines survive a rebuild.
-  const tagOrder = new Map(NATIONS.map((n, i) => [n.tag, i]));
-  raw.sort((a, b) => {
-    const ta = tagOrder.get(a.tag) ?? 999;
-    const tb = tagOrder.get(b.tag) ?? 999;
-    if (ta !== tb) return ta - tb;
-    if (a.centre[1] !== b.centre[1]) return a.centre[1] - b.centre[1];
-    return a.centre[0] - b.centre[0];
-  });
-
-  for (const unit of units) provinceOfUnit.set(unit.code, -1);
-
-  // --- 4. Group provinces into states --------------------------------------
-  const states: StateGeoJson[] = [];
+  // --- 3. Emit states and provinces ----------------------------------------
+  // Ids follow the group order, which is nation then descending area, so a
+  // rebuild that adds a city somewhere does not renumber the whole map.
   const stateOfProvince = new Int32Array(raw.length).fill(-1);
-
-  const byTag = new Map<string, number[]>();
-  raw.forEach((p, i) => {
-    const list = byTag.get(p.tag);
-    if (list) list.push(i);
-    else byTag.set(p.tag, [i]);
+  const states: StateGeoJson[] = groups.map((group, id) => {
+    for (const idx of membersOfState[id]) stateOfProvince[idx] = id;
+    const nation = NATION_BY_TAG.get(group.tag);
+    return {
+      id,
+      name: group.name,
+      ownerTag: group.tag,
+      provinces: [],           // filled once province ids are final
+      manpower: 0,
+      resources: {},
+      infrastructure: nation?.infrastructure ?? 3,
+      civilianFactories: 0,
+      militaryFactories: 0,
+      dockyards: 0,
+      buildingSlots: 0,
+    };
   });
+  for (const group of groups) for (const member of group.members) provinceOfUnit.set(member, -1);
 
-  // Provinces per state is derived from the requested state count rather than
-  // fixed, so `--states=N` actually controls the economic granularity.
-  const provincesPerState = Math.max(2, Math.round(raw.length / stateTarget));
-
-  for (const [tag, members] of byTag) {
-    const nation = NATION_BY_TAG.get(tag);
-    if (!nation) continue;
-    const k = Math.max(1, Math.round(members.length / provincesPerState));
-    const groups = clusterProvinces(raw, members, k);
-
-    for (const group of groups) {
-      if (group.length === 0) continue;
-      const id = states.length;
-      for (const idx of group) stateOfProvince[idx] = id;
-      states.push({
-        id,
-        name: stateName(raw, group, nation.name, states.length),
-        ownerTag: tag,
-        provinces: [],           // filled once province ids are final
-        manpower: 0,
-        resources: {},
-        infrastructure: nation.infrastructure,
-        civilianFactories: 0,
-        militaryFactories: 0,
-        dockyards: 0,
-        buildingSlots: 0,
-      });
-    }
-  }
-
-  // --- 5. Emit provinces ---------------------------------------------------
   const provinces: ProvinceGeoJson[] = raw.map((p, id) => {
     const ringDepth = p.rings.map((r, i) => {
       let depth = 0;
@@ -520,10 +498,10 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
     if (st) st.provinces.push(p.id);
   }
 
-  // --- 6. Distribute national assets across states -------------------------
+  // --- 4. Distribute national assets across states -------------------------
   distributeNationalAssets(provinces, states, raw);
 
-  // --- 7. Adjacency --------------------------------------------------------
+  // --- 5. Adjacency --------------------------------------------------------
   computeGeometricAdjacency(provinces);
 
   return { provinces, states, provinceOfUnit };
@@ -594,63 +572,7 @@ function flatten(ring: Ring, decimals = 1): number[] {
   return out;
 }
 
-function stateName(raw: RawProvince[], group: number[], nationName: string, index: number): string {
-  // Name the state after its largest city, so the UI reads as a place.
-  let best = group[0];
-  for (const i of group) if (raw[i].seed.pop > raw[best].seed.pop) best = i;
-  const city = raw[best].seed.cityName;
-  return city ?? raw[best].name ?? `${nationName} ${index + 1}`;
-}
 
-/**
- * Lloyd-relaxed k-means over province centres.
- *
- * Seeded from the k most populous provinces rather than at random, so the
- * result is identical on every build -- a state layout that shuffles between
- * builds would invalidate every save and every screenshot baseline.
- */
-function clusterProvinces(raw: RawProvince[], members: number[], k: number): number[][] {
-  if (k <= 1 || members.length <= 1) return [members];
-
-  const byPop = [...members].sort((a, b) => raw[b].seed.pop - raw[a].seed.pop);
-  const centroids: Pt[] = byPop.slice(0, k).map((i) => [raw[i].centre[0], raw[i].centre[1]]);
-
-  let assignment = new Int32Array(members.length).fill(-1);
-  for (let iter = 0; iter < 24; iter++) {
-    let changed = false;
-    for (let m = 0; m < members.length; m++) {
-      const c = raw[members[m]].centre;
-      let best = 0;
-      let bestD = Infinity;
-      for (let i = 0; i < centroids.length; i++) {
-        const d = (centroids[i][0] - c[0]) ** 2 + (centroids[i][1] - c[1]) ** 2;
-        if (d < bestD) { bestD = d; best = i; }
-      }
-      if (assignment[m] !== best) { assignment[m] = best; changed = true; }
-    }
-    if (!changed && iter > 0) break;
-
-    const sums = centroids.map(() => [0, 0, 0]);
-    for (let m = 0; m < members.length; m++) {
-      const c = raw[members[m]].centre;
-      const s = sums[assignment[m]];
-      s[0] += c[0]; s[1] += c[1]; s[2]++;
-    }
-    for (let i = 0; i < centroids.length; i++) {
-      if (sums[i][2] === 0) continue;
-      centroids[i] = [sums[i][0] / sums[i][2], sums[i][1] / sums[i][2]];
-    }
-  }
-
-  const groups: number[][] = centroids.map(() => []);
-  for (let m = 0; m < members.length; m++) groups[assignment[m]].push(members[m]);
-  return groups.filter((g) => g.length > 0);
-}
-
-/**
- * Splits each nation's population, industry and resources across its states,
- * weighted by where the people actually are.
- */
 function distributeNationalAssets(
   provinces: ProvinceGeoJson[], states: StateGeoJson[], raw: RawProvince[],
 ): void {
@@ -686,13 +608,23 @@ function distributeNationalAssets(
     const share = (total: number, i: number) => (total * weights[i]) / totalWeight;
 
     // Integer assets are handed out largest-remainder so the totals match the
-    // nation table exactly rather than drifting with rounding.
+    // nation table exactly rather than drifting with rounding. Resources were
+    // rounded one state at a time instead, which cost almost nothing while a
+    // nation had eight states and a great deal once it had seventy: measured
+    // on the administrative map, the Soviet Union's twelve tungsten arrived as
+    // three, its twenty-four chromium as fourteen, and its sixty oil as
+    // sixty-four, because every share under a half vanished and every share
+    // over one rounded up.
     const civ = largestRemainder(nation.civilianFactories, weights);
     const mil = largestRemainder(nation.militaryFactories, weights);
     const dockWeights = stateIds.map((sid, i) =>
       states[sid].provinces.some((pid) => provinces[pid].coastal) ? weights[i] : 0);
     const anyCoastal = dockWeights.some((w) => w > 0);
     const dock = largestRemainder(nation.dockyards, anyCoastal ? dockWeights : weights);
+    const mined = new Map<string, number[]>();
+    for (const [r, v] of Object.entries(nation.resources) as [string, number][]) {
+      mined.set(r, largestRemainder(v, weights));
+    }
 
     stateIds.forEach((sid, i) => {
       const st = states[sid];
@@ -700,9 +632,9 @@ function distributeNationalAssets(
       st.civilianFactories = civ[i];
       st.militaryFactories = mil[i];
       st.dockyards = dock[i];
-      for (const [r, v] of Object.entries(nation.resources) as [keyof typeof nation.resources, number][]) {
-        const amount = Math.round(share(v, i));
-        if (amount > 0) st.resources[r] = amount;
+      for (const [r, spread] of mined) {
+        const amount = spread[i];
+        if (amount > 0) st.resources[r as keyof typeof st.resources] = amount;
       }
       // A state with a big city has better roads and rail.
       let biggestCity = 0;
@@ -834,3 +766,4 @@ function unflatten(flat: number[]): Ring {
   for (let i = 0; i < flat.length; i += 2) out[i / 2] = [flat[i], flat[i + 1]];
   return out;
 }
+

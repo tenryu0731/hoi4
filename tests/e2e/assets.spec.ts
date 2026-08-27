@@ -15,8 +15,14 @@ import { EQUIPMENT_TYPES } from '../../src/sim/core/types';
 const BUDGET = {
   /** Every generated asset, uncompressed. */
   totalAssetBytes: 300 * 1024,
-  /** The baked map. */
-  mapBytes: 900 * 1024,
+  /**
+   * The baked map. It roughly doubled when provinces stopped being invented
+   * and became cells of the world's real administrative units: 1704 provinces
+   * inside 484 states, carrying every border a cartographer actually drew.
+   * 1.6 MB uncompressed is 475 KB over the wire, which the first-load budget
+   * below has room for.
+   */
+  mapBytes: 1800 * 1024,
   /** Largest single asset. */
   largestAssetBytes: 8 * 1024,
   /** Wall time from navigation to a playable game, on a mobile viewport. */

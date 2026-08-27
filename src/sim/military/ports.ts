@@ -19,13 +19,16 @@ import type { CountryId, GameState, ProvinceId } from '../core/types';
 /**
  * Victory points a coastal province needs to have a harbour.
  *
- * Measured on this map: of 426 coastal provinces, 334 carry a single victory
- * point and 92 carry three or more. The gap is not an accident -- vp is how
- * the map says "there is a town here" -- so the threshold is reading the data
- * rather than picking a number. 92 harbours against 1266 provinces is close to
- * the reference's own density.
+ * vp is how the map says "there is a town here", so the threshold reads the
+ * data rather than picking a number. Measured on the administrative map: of
+ * 450 coastal provinces, 215 carry a single victory point, 214 carry three or
+ * more, and 133 carry five or more. Three was the gap when provinces were
+ * whole regions; once they were cut down to real size, half the coast cleared
+ * it and a harbour stopped meaning anything. Five is where a coastal cell has
+ * a town rather than a hamlet, and 133 harbours against 1704 provinces is
+ * close to the reference's own density.
  */
-const PORT_VP = 3;
+const PORT_VP = 5;
 
 const cache = new WeakMap<ProvinceIndex, Set<ProvinceId>>();
 

@@ -444,7 +444,7 @@ export class MapRenderer {
       // rather than as a map. Weight alone separates the tiers -- 1.1px of
       // hairline against 2.0px of seam against 2.8px of frontier -- which is
       // what the printed atlases this is imitating do as well.
-      for (const line of internal.state) this.tracePolyline(g, line);
+      for (const line of this.index.data.borders.province) this.tracePolyline(g, line);
       g.stroke({ color: 0x14110c, width: px(1.5), alpha: 0.5, join: 'round', cap: 'butt' });
     }
 
@@ -1148,40 +1148,27 @@ export class MapRenderer {
   /**
    * Seams inside a country, split by which tier they separate.
    *
-   * The baked map carries none of these: classifyBorders in the map build
-   * decides what an arc separates from provinceOfUnit, which maps the source
-   * geometry to pre-subdivision ids, so after --subdivide every arc inside a
-   * country looks internal to one province and borders.province ships empty.
-   * They are recovered here and cached, since neither tier changes for the
-   * life of the map.
+   * The state tier is not one of them any more. States are now merged out of
+   * real administrative units, so the map build knows exactly which arcs sit
+   * between two of them and ships them in borders.province -- one unbroken
+   * polyline per stretch of state boundary, which is what the tier wanted all
+   * along.
    *
-   * Built from whole rings rather than from the runs two provinces agree on.
-   * The agreement version drew the map as fish scales, and the measurement
-   * says why: 1266 provinces carry 16293 ring vertices between them, so the
-   * average province is a thirteen-sided figure and the average boundary
-   * between two of them is **2.7 vertices long**. 2486 two-point runs, each
-   * given a light halo with round caps, is 2486 little capsules; and 28% of
-   * neighbouring pairs produced no run at all, so the mesh had holes in it
-   * as well.
-   *
-   * A ring is a closed loop and needs no agreement with anything, so the
-   * province tier is simply every outline. The state tier is every edge of
-   * an outline that no same-state neighbour also carries -- decided per edge,
-   * from its midpoint, so consecutive edges chain into one run along the
-   * whole state boundary instead of breaking at every vertex the two rings
-   * disagree about.
+   * The province tier is still built here, because a Voronoi seam inside a
+   * state exists only in the cells themselves. It is built from whole rings
+   * rather than from the runs two provinces agree on. The agreement version
+   * drew the map as fish scales, and the measurement says why: the average
+   * boundary between two provinces is **2.7 vertices long**, so the mesh was
+   * thousands of two-point capsules -- and 28% of neighbouring pairs produced
+   * no run at all, leaving holes as well. A ring is a closed loop and needs no
+   * agreement with anything, so the tier is simply every outline.
    */
-  private internalCache: { province: number[][]; state: number[][] } | null = null;
+  private internalCache: { province: number[][] } | null = null;
 
-  private internalBorders(): { province: number[][]; state: number[][] } {
+  private internalBorders(): { province: number[][] } {
     if (this.internalCache) return this.internalCache;
     const province: number[][] = [];
-    const stateSeams: number[][] = [];
     for (const p of this.index.provinces) {
-      const kin: ProvinceId[] = [];
-      for (const nb of p.neighbors) {
-        if (this.index.provinces[nb]?.stateId === p.stateId) kin.push(nb);
-      }
       for (const ring of p.rings) {
         const n = ring.length / 2;
         if (n < 2) continue;
@@ -1192,28 +1179,9 @@ export class MapRenderer {
           loop.push(ring[j], ring[j + 1]);
         }
         province.push(loop);
-
-        // And the part of it that leaves the state. One extra step so a run
-        // that crosses the ring's own seam is not cut in two.
-        let run: number[] = [];
-        for (let i = 0; i <= n; i++) {
-          const j = (i % n) * 2;
-          const k = ((i + 1) % n) * 2;
-          const mx = (ring[j] + ring[k]) / 2;
-          const my = (ring[j + 1] + ring[k + 1]) / 2;
-          const inside = i < n && kin.some((nb) => this.index.outlineCarries(nb, mx, my));
-          if (i < n && !inside) {
-            if (run.length === 0) run.push(ring[j], ring[j + 1]);
-            run.push(ring[k], ring[k + 1]);
-            continue;
-          }
-          if (run.length >= 4) stateSeams.push(run);
-          run = [];
-        }
-        if (run.length >= 4) stateSeams.push(run);
       }
     }
-    this.internalCache = { province, state: stateSeams };
+    this.internalCache = { province };
     return this.internalCache;
   }
 

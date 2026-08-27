@@ -137,11 +137,17 @@ describe('map data integrity', () => {
 
   it('reproduces well-known European land borders', () => {
     const nb = countryNeighbours();
+    // Borders as they stood in January 1936, which is not where they stand
+    // now: Germany reaches Lithuania across East Prussia, Poland reaches
+    // Romania across Pokuttia, and Czechoslovakia reaches Romania across
+    // Ruthenia. Italy meets Yugoslavia at Istria.
     const borders: [string, string][] = [
       ['GER', 'FRA'], ['GER', 'POL'], ['GER', 'DEN'], ['GER', 'BEL'],
       ['FRA', 'SPR'], ['SPR', 'POR'], ['ITA', 'SWI'], ['ITA', 'AUS'],
       ['SOV', 'FIN'], ['SOV', 'ROM'], ['YUG', 'GRE'], ['BUL', 'TUR'],
       ['NOR', 'SWE'], ['HUN', 'ROM'],
+      ['GER', 'LIT'], ['POL', 'ROM'], ['POL', 'LIT'], ['CZE', 'ROM'],
+      ['ITA', 'YUG'], ['POL', 'SOV'],
     ];
     for (const [a, b] of borders) {
       expect(nb.get(a), `${a} missing`).toBeDefined();
@@ -152,8 +158,10 @@ describe('map data integrity', () => {
 
   it('does not invent land borders across water or third countries', () => {
     const nb = countryNeighbours();
+    // Poland and Hungary did not touch until Ruthenia was carved up in 1939,
+    // and Italy's Dodecanese are islands, so neither pair is a land border.
     const notBorders: [string, string][] = [
-      ['GER', 'ITA'], ['POL', 'HUN'], ['POL', 'ROM'], ['HOL', 'FRA'],
+      ['GER', 'ITA'], ['POL', 'HUN'], ['HOL', 'FRA'],
       ['SWE', 'DEN'], ['GRE', 'ITA'], ['IRE', 'FRA'],
     ];
     for (const [a, b] of notBorders) {

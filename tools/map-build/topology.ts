@@ -189,3 +189,65 @@ export function assembleRing(refs: ArcRef[], arcs: Pt[][]): Pt[] {
   }
   return out;
 }
+
+/**
+ * Merges a group of regions into one outline.
+ *
+ * Because every border is an arc shared by exactly the regions that touch it,
+ * a merge is bookkeeping rather than geometry: an arc used by two members of
+ * the group is interior and cancels, and whatever is left is the group's own
+ * boundary. Chaining those survivors end to end gives the merged rings, with
+ * no risk of the slivers a polygon-union would leave behind.
+ */
+export function dissolve(members: ArcRef[][][], arcs: Pt[][]): ArcRef[][] {
+  const uses = new Map<number, ArcRef[]>();
+  for (const rings of members) {
+    for (const refs of rings) {
+      for (const ref of refs) {
+        const list = uses.get(ref.arc);
+        if (list) list.push(ref);
+        else uses.set(ref.arc, [ref]);
+      }
+    }
+  }
+
+  // Odd use counts survive; an arc walked once from each side is interior.
+  const boundary: ArcRef[] = [];
+  for (const [, list] of uses) if (list.length % 2 === 1) boundary.push(list[0]);
+  if (boundary.length === 0) return [];
+
+  const PREC2 = 1e6;
+  const at = (p: Pt): string => `${Math.round(p[0] * PREC2)}|${Math.round(p[1] * PREC2)}`;
+  const endsOf = (ref: ArcRef): [string, string] => {
+    const a = arcs[ref.arc];
+    const first = at(a[0]);
+    const last = at(a[a.length - 1]);
+    return ref.reversed ? [last, first] : [first, last];
+  };
+
+  const outgoing = new Map<string, number[]>();
+  boundary.forEach((ref, i) => {
+    const [from] = endsOf(ref);
+    const list = outgoing.get(from);
+    if (list) list.push(i);
+    else outgoing.set(from, [i]);
+  });
+
+  const used = new Uint8Array(boundary.length);
+  const rings: ArcRef[][] = [];
+  for (let seed = 0; seed < boundary.length; seed++) {
+    if (used[seed]) continue;
+    const ring: ArcRef[] = [];
+    let cur = seed;
+    for (;;) {
+      used[cur] = 1;
+      ring.push(boundary[cur]);
+      const [, to] = endsOf(boundary[cur]);
+      const next = (outgoing.get(to) ?? []).find((i) => !used[i]);
+      if (next === undefined) break;
+      cur = next;
+    }
+    if (ring.length > 0) rings.push(ring);
+  }
+  return rings;
+}

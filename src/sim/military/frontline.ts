@@ -183,6 +183,7 @@ export const LINE_DRIFT = 3;
  */
 export function lineFront(
   state: GameState, ctx: MilitaryContext, army: Army, anchors: readonly ProvinceId[],
+  engaged = false,
 ): ProvinceId[] {
   const ours = (id: ProvinceId): boolean => state.provinces[id]?.controller === army.owner;
   const faces = (id: ProvinceId): boolean =>
@@ -198,13 +199,7 @@ export function lineFront(
   // provinces two hundred kilometres to the south, half of them behind the
   // line rather than on it. A front that reappears somewhere else is not a
   // front the player drew.
-  // A line none of whose posts faces anybody is a holding line, and it stays
-  // exactly where it was traced. Stepping it forward would walk a reserve line
-  // drawn behind the front onto the front the moment it was given, which is
-  // 「国境線じゃないところに戦線引こうとした時」.
   const held = anchors.filter(ours);
-  if (held.length > 0 && !held.some(faces)) return held;
-
   const out: ProvinceId[] = [];
   const seen = new Set<ProvinceId>();
   for (const a of anchors) {
@@ -213,6 +208,17 @@ export function lineFront(
     seen.add(moved);
     out.push(moved);
   }
+
+  // A line that has never had anybody in front of it is a holding line, and it
+  // stays exactly where it was traced. Stepping it forward would walk a
+  // reserve line drawn behind the front onto the front the moment it was
+  // given, which is 「国境線じゃないところに戦線引こうとした時」.
+  //
+  // Only never: once a line has faced somebody it keeps following its army,
+  // including on the day the army takes the ground in front of it and the
+  // posts briefly face nobody at all. Told apart by the flag rather than by
+  // the geometry, because on the day itself the two are identical.
+  if (!engaged && !held.some(faces)) return held.length > 0 ? held : out;
   return out;
 }
 
@@ -639,11 +645,14 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
         // The length the finger drew, remembered the first time it is asked
         // for: a save written before the span existed still knows how long its
         // line was, because its anchors are still the ones that were drawn.
-        front = lineFront(state, ctx, army, army.order.anchors);
+        front = lineFront(state, ctx, army, army.order.anchors, army.order.engaged ?? false);
         // What the line worked out today is what it anchors on tomorrow, so a
         // drawn front walks forward with the army that holds it instead of
         // staying pinned to the ground it was first traced over.
         if (front.length > 0) army.order.anchors = front;
+        if (!army.order.engaged && front.some((p) => ctx.index.get(p).neighbors.some(
+          (nb) => state.provinces[nb]?.controller !== army.owner,
+        ))) army.order.engaged = true;
         if (spread) assignToFront(state, ctx, army, front);
         break;
       }

@@ -368,7 +368,20 @@ export type ArmyOrder =
    * walks forward with the army and back with it, and only needs redrawing
    * when the player wants it somewhere else.
    */
-  | { kind: 'line'; anchors: ProvinceId[] }
+  | {
+    kind: 'line';
+    anchors: ProvinceId[];
+    /**
+     * Whether the line has ever had somebody in front of it.
+     *
+     * A line traced along a border and a line traced across the interior look
+     * identical the day after the army advances past both: neither faces
+     * anybody any more. The difference is that one of them once did, so it is
+     * recorded the first time it happens, and only an engaged line follows its
+     * army forward.
+     */
+    engaged?: boolean;
+  }
   | { kind: 'garrison'; provinces: ProvinceId[] };
 
 /**

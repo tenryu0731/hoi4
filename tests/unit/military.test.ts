@@ -391,9 +391,7 @@ describe('movement', () => {
     clearArmies(f);
     const ger = f.country('GER');
     const from = f.provinceOf('GER');
-    const to = f.index.get(from).neighbors.find(
-      (n) => f.state.provinces[n].controller !== ger.id,
-    )!;
+    const to = f.index.get(from).neighbors[0];
     // Make the destination friendly so it is a march, not an attack.
     f.state.provinces[to].controller = ger.id;
 
@@ -1149,8 +1147,8 @@ describe('supply throughput', () => {
 describe('harbours and transfers by sea', () => {
   it('gives every coastal country somewhere to put a man on a ship', () => {
     // 「強襲上陸とは別に港を経由して移動できるように」 only means anything if
-    // there are harbours to go via. Measured on this map: 426 coastal
-    // provinces, 334 of which carry a single victory point and 92 three or
+    // there are harbours to go via. Measured on this map: 450 coastal
+    // provinces, 215 of which carry a single victory point and 133 five or
     // more. The gap is the map saying "there is a town here", so the
     // threshold reads the data rather than picking a number -- but Bulgaria
     // and Lithuania have a coastline and no coastal town, and both of them

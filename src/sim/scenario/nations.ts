@@ -53,7 +53,12 @@ export const NATIONS: NationDef[] = [
     color: [0xc4, 0x44, 0x3a], capital: 'Moscow', capitalLonLat: [37.62, 55.75],
     terrain: 'plains', population: 168.0,
     civilianFactories: 40, militaryFactories: 22, dockyards: 6, infrastructure: 3,
-    resources: { oil: 60, steel: 60, aluminium: 20, tungsten: 12, chromium: 24 },
+    // Baku and Grozny. Sixty was never enough to fuel the army the Soviet
+    // economy raises here -- it read as self-sufficient only while a rounding
+    // slip in the map build inflated it to sixty-four. In 1936 the Soviet
+    // Union pumped roughly two and a half times what Romania did, which is the
+    // proportion the reference uses too, so it is the proportion used here.
+    resources: { oil: 98, steel: 60, aluminium: 20, tungsten: 12, chromium: 24 },
     ideology: 'communist', major: true, startingDivisions: 32,
   },
   {
