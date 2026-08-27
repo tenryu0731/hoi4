@@ -1178,6 +1178,72 @@ test.describe('touch input', () => {
     expect(selected.divisions).toBe(expected[0].divisions);
   });
 
+  test('the order bar sits clear of the officers, not behind them', async ({ page }) => {
+    await bootGame(page);
+    // Regression: the bar was placed a constant 64px off the floor -- the
+    // height of the tab bar that used to live there. The officers' strip that
+    // replaced it is taller, so the bar's lower half was behind a row of
+    // portraits that took the taps meant for its buttons.
+    await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      g.selectDivisions(
+        g.state.divisions.filter((d) => d.owner === me && !d.dead).slice(0, 3).map((d) => d.id),
+        { centre: false },
+      );
+      g.tickFrame(16);
+    });
+    const bar = page.locator('.hud-order');
+    await expect(bar).toHaveClass(/is-on/);
+    const geometry = await page.evaluate(() => {
+      const b = document.querySelector('.hud-order')!.getBoundingClientRect();
+      const f = document.querySelector('.hud-officers')!.getBoundingClientRect();
+      return { barBottom: b.bottom, footTop: f.top };
+    });
+    expect(geometry.barBottom).toBeLessThanOrEqual(geometry.footTop);
+
+    // And every one of its controls answers a tap where it is drawn.
+    for (const label of ['軍へ編成', '戦線を引く', '進攻・先鋒の計画を引く']) {
+      const btn = page.getByRole('button', { name: label });
+      const box = (await btn.boundingBox())!;
+      const top = await page.evaluate(
+        (p) => document.elementFromPoint(p.x, p.y)?.getAttribute('aria-label') ?? '',
+        { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+      );
+      expect(top).toBe(label);
+    }
+  });
+
+  test('the order bar can aim an army without opening a panel', async ({ page }) => {
+    await bootGame(page);
+    const army = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const a = (g.state.armies ?? []).find((x) => x.owner === me && !x.isArmyGroup)!;
+      g.selectDivisions([...a.divisions], { army: a.id, centre: false });
+      g.tickFrame(16);
+      return a.id;
+    });
+
+    // 攻撃線 and 先鋒 are drawn on the map in the reference, so they are
+    // reachable from the map here too.
+    await page.getByRole('button', { name: '進攻・先鋒の計画を引く' }).click();
+    const chips = page.locator('.hud-order-chip');
+    await expect(chips.first()).toBeVisible();
+    const spearhead = chips.filter({ hasText: '先鋒' }).first();
+    await expect(spearhead).toBeVisible();
+    await spearhead.click();
+
+    const order = await page.evaluate((id) => {
+      const g = window.__game!;
+      const a = (g.state.armies ?? []).find((x) => x.id === id)!;
+      return { kind: a.order?.kind ?? null, executing: a.executing === true };
+    }, army);
+    expect(order.kind).toBe('spearhead');
+    // Drawn, not running: the arrow on the officer's card is what starts it.
+    expect(order.executing).toBe(false);
+  });
+
   test('a plan waits on the officer card until the arrow is pressed', async ({ page }) => {
     await bootGame(page);
 

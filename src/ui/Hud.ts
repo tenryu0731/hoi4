@@ -3,7 +3,8 @@ import type { MapMode } from '../render/palette';
 import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
 import {
-  PANELS, formatNumber, frontCandidates, openNationId, setSheetCloser, type PanelId,
+  PANELS, formatNumber, frontCandidates, objectivesAgainst, openNationId, setSheetCloser,
+  type PanelId,
 } from './panels';
 import { HUD_CSS } from './hud.css';
 import { PHOTOGRAPHED } from './portraitIndex';
@@ -302,6 +303,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   orderAssign.setAttribute('aria-label', UI.orderAssignLabel);
   const orderFront = el('button', 'hud-order-btn', UI.orderDrawFront);
   orderFront.setAttribute('aria-label', UI.orderDrawFrontLabel);
+  // 攻撃線 and 先鋒, on the map rather than in a panel: the reference draws
+  // both by dragging out of a front line, and a player who has just boxed a
+  // stack and raised an army should not have to open a panel to aim it.
+  const orderPush = el('button', 'hud-order-btn', UI.orderDrawPush);
+  orderPush.setAttribute('aria-label', UI.orderDrawPushLabel);
   const orderCancel = el('button', 'hud-order-cancel', '✕');
   orderCancel.setAttribute('aria-label', UI.cancel);
   orderCancel.addEventListener('click', () => {
@@ -315,12 +321,12 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // lower as the game runs. Measured: a tap aimed at a counter at y=266
   // landed on the second row's 軍へ編成 button and opened its menu, while
   // elementFromPoint checked a moment earlier had said CANVAS.
-  orderRow.append(orderText, orderStop, orderAssign, orderFront, orderCancel);
+  orderRow.append(orderText, orderStop, orderAssign, orderFront, orderPush, orderCancel);
   const orderMenu = el('div', 'hud-order-menu');
   orderHint.append(orderRow, orderMenu);
 
   /** Which button opened the chip row, so pressing it again closes it. */
-  let orderMenuMode: 'army' | 'front' | null = null;
+  let orderMenuMode: 'army' | 'front' | 'push' | null = null;
   let lastOrderSignature = '';
 
   function closeOrderMenu(): void {
@@ -329,6 +335,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     orderMenu.classList.remove('is-on');
     orderAssign.classList.remove('is-on');
     orderFront.classList.remove('is-on');
+    orderPush.classList.remove('is-on');
   }
 
   function orderChip(label: string, onPick: () => void): HTMLElement {
@@ -414,6 +421,42 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     orderMenu.classList.add('is-on');
   });
 
+  orderPush.addEventListener('click', () => {
+    if (orderMenuMode === 'push') { closeOrderMenu(); return; }
+    closeOrderMenu();
+    orderMenuMode = 'push';
+    orderPush.classList.add('is-on');
+    const me = game.state.meta.playerCountry;
+    const army = selectionArmy();
+    if (army === null) {
+      orderMenu.append(el('span', 'hud-order-note', UI.orderNeedsArmy));
+      orderMenu.classList.add('is-on');
+      return;
+    }
+    // Three enemies rather than the six the front menu offers: each one costs
+    // two chips here, and six chips already wrap to a second line.
+    let offered = 0;
+    for (const enemy of frontCandidates(game).slice(0, 3)) {
+      const targets = objectivesAgainst(game, enemy.id);
+      if (targets.length === 0) continue;
+      offered++;
+      orderMenu.append(orderChip(`${UI.setOrderAttack}: ${country(enemy.tag)}`, () => {
+        game.issue({ t: 'setArmyOrder', country: me, army, order: {
+          kind: 'offensive', targets,
+        } });
+      }));
+      orderMenu.append(orderChip(
+        `${UI.setOrderSpearhead}: ${game.index.get(targets[0]).name}`, () => {
+          game.issue({ t: 'setArmyOrder', country: me, army, order: {
+            kind: 'spearhead', target: targets[0],
+          } });
+        },
+      ));
+    }
+    if (offered === 0) orderMenu.append(el('span', 'hud-order-note', UI.orderNoEnemy));
+    orderMenu.classList.add('is-on');
+  });
+
   function syncOrder(): void {
     // Counted live rather than from the selection array: the divisions in it
     // were alive when the counter was tapped, and a stack that has since been
@@ -431,6 +474,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     if (!on) { closeOrderMenu(); return; }
     setText(orderText, UI.orderHint(live));
     orderFront.classList.toggle('is-dim', selectionArmy() === null);
+    orderPush.classList.toggle('is-dim', selectionArmy() === null);
 
     let marching = 0;
     for (const id of game.selection.divisions) {

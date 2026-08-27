@@ -1,6 +1,7 @@
 import { availableFocuses } from '../sim/focus';
 import { equipmentRatio } from '../sim/military/combat';
 import { freeCivilianFactories } from '../sim/economy/production';
+import { maxPlanning } from '../sim/military/frontline';
 import { researchView } from '../sim/research';
 import { UI } from './strings';
 import type { Game } from '../app/Game';
@@ -124,6 +125,26 @@ export function collectAlerts(game: Game): Alert[] {
       id: 'command', icon: 'ui-army',
       text: String(leaderless), caption: UI.alertShortNoCommander,
       title: UI.alertNoCommander,
+      panel: 'command', urgent: false,
+    });
+  }
+
+  // A plan that has finished preparing and has not been given the word. Now
+  // that drawing an attack and running it are two acts, forgetting the second
+  // one is a way to lose a campaign quietly -- an army at its planning ceiling
+  // is an army that has stopped gaining anything by waiting.
+  const ready = (state.armies ?? []).filter(
+    (a) => a.owner === me.id
+      && a.divisions.length > 0
+      && a.executing !== true
+      && (a.order?.kind === 'offensive' || a.order?.kind === 'spearhead')
+      && a.planning >= maxPlanning(state, a) - 1e-6,
+  ).length;
+  if (ready > 0) {
+    out.push({
+      id: 'plan', icon: 'ui-army',
+      text: String(ready), caption: UI.alertShortPlanReady,
+      title: UI.alertPlanReady,
       panel: 'command', urgent: false,
     });
   }

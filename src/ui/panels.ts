@@ -2266,7 +2266,7 @@ function orderOfBattle(game: Game, army: Army): HTMLElement {
 }
 
 /** An enemy's most valuable provinces: what an offensive is actually for. */
-function objectivesAgainst(game: Game, enemy: CountryId): number[] {
+export function objectivesAgainst(game: Game, enemy: CountryId): number[] {
   return game.index.provinces
     .filter((p) => game.state.provinces[p.id]?.controller === enemy)
     .sort((a, b) => b.vp - a.vp || a.id - b.id)

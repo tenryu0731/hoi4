@@ -139,6 +139,8 @@ export const UI = {
   orderAssignLabel: '軍へ編成',
   orderDrawFront: '戦線',
   orderDrawFrontLabel: '戦線を引く',
+  orderDrawPush: '進攻',
+  orderDrawPushLabel: '進攻・先鋒の計画を引く',
   orderNewArmy: '＋新しい軍',
   orderNeedsArmy: 'まず軍に編成してください',
   orderNoEnemy: '接する国がありません',
@@ -157,6 +159,7 @@ export const UI = {
   alertIdleProduction: '軍需工場が生産ラインに割り当てられていません',
   alertUnderEquipped: '装備の足りない師団があります',
   alertNoCommander: '指揮官のいない軍があります',
+  alertPlanReady: '準備の済んだ計画が実行されていません',
   /* Captions for the top bar. Two to four characters: they sit under a figure
      in a chip 45 to 72px wide, and the point of them is that a number with a
      symbol over it says nothing about what it counts. */
@@ -167,6 +170,7 @@ export const UI = {
   alertShortIdleProduction: '軍需遊休',
   alertShortUnderEquipped: '装備不足',
   alertShortNoCommander: '指揮官',
+  alertShortPlanReady: '計画',
   effects: '現在の効果',
   stability: '安定度',
   warSupport: '戦争支持率',

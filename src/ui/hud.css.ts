@@ -315,7 +315,12 @@ export const HUD_CSS = `
      the foot of the band is the foot of the screen. With a panel open it goes
      back up top, where the rule below puts it. */
   position: absolute; left: 8px; right: 8px; transform: translateY(8px);
-  bottom: calc(var(--safe-bottom) + 64px);
+  /* Above whatever the foot of the screen currently is, measured rather than
+     assumed. The constant it used to carry -- 64px -- was the height of the
+     tab bar that used to live down here; the officers' strip that replaced it
+     is 100px, and the bar was sitting 36px inside it with its buttons behind
+     a row of portraits that swallowed the taps. */
+  bottom: calc(var(--hud-foot-h, 64px) + 8px);
   display: none; flex-direction: column; align-items: stretch; gap: 4px;
   /* Transparent to touch except for its own controls. It sits over the map
      band, and a banner that eats taps is exactly the bug the horizontal

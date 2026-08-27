@@ -385,7 +385,11 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
       // A group has no divisions; it passes its order to the armies under it.
       for (const childId of army.children) {
         const child = armyById(state, childId);
-        if (child && army.order && !child.order) child.order = army.order;
+        if (!child || !army.order || child.order) continue;
+        child.order = army.order;
+        // With the word to go, if the group already has it: an army posted to
+        // a group whose plan is already running joins the plan that is running.
+        child.executing = army.executing === true;
       }
       continue;
     }
