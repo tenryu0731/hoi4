@@ -6,10 +6,11 @@
     "uiIcons": 23,
     "equipmentIcons": 9,
     "unitIcons": 12,
-    "portraits": 8
+    "portraitFallbacks": 8,
+    "portraits": 100
   },
-  "totalBytes": 33201,
-  "totalGzipBytes": 20397,
+  "totalBytes": 157627,
+  "totalGzipBytes": 144823,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -352,44 +353,544 @@
       "gzipBytes": 176
     },
     {
-      "path": "assets/portraits/0.svg",
+      "path": "assets/portraits/alb_aranitasi.webp",
+      "bytes": 1322,
+      "gzipBytes": 1322
+    },
+    {
+      "path": "assets/portraits/alb_kupi.webp",
+      "bytes": 1064,
+      "gzipBytes": 1064
+    },
+    {
+      "path": "assets/portraits/aus_jansa.webp",
+      "bytes": 1048,
+      "gzipBytes": 1048
+    },
+    {
+      "path": "assets/portraits/aus_loehr.webp",
+      "bytes": 1056,
+      "gzipBytes": 1056
+    },
+    {
+      "path": "assets/portraits/bul_daskalov.webp",
+      "bytes": 990,
+      "gzipBytes": 990
+    },
+    {
+      "path": "assets/portraits/bul_lukov.webp",
+      "bytes": 1062,
+      "gzipBytes": 1062
+    },
+    {
+      "path": "assets/portraits/bul_marinov.webp",
+      "bytes": 1418,
+      "gzipBytes": 1418
+    },
+    {
+      "path": "assets/portraits/bul_stoychev.webp",
+      "bytes": 1530,
+      "gzipBytes": 1530
+    },
+    {
+      "path": "assets/portraits/cze_krejci.webp",
+      "bytes": 1224,
+      "gzipBytes": 1224
+    },
+    {
+      "path": "assets/portraits/cze_prchala.webp",
+      "bytes": 1156,
+      "gzipBytes": 1156
+    },
+    {
+      "path": "assets/portraits/cze_syrovy.webp",
+      "bytes": 1310,
+      "gzipBytes": 1310
+    },
+    {
+      "path": "assets/portraits/den_prior.webp",
+      "bytes": 1056,
+      "gzipBytes": 1056
+    },
+    {
+      "path": "assets/portraits/eng_alexander.webp",
+      "bytes": 1262,
+      "gzipBytes": 1262
+    },
+    {
+      "path": "assets/portraits/eng_auchinleck.webp",
+      "bytes": 2116,
+      "gzipBytes": 2116
+    },
+    {
+      "path": "assets/portraits/eng_brooke.webp",
+      "bytes": 1316,
+      "gzipBytes": 1316
+    },
+    {
+      "path": "assets/portraits/eng_gort.webp",
+      "bytes": 1500,
+      "gzipBytes": 1500
+    },
+    {
+      "path": "assets/portraits/eng_laycock.webp",
+      "bytes": 930,
+      "gzipBytes": 930
+    },
+    {
+      "path": "assets/portraits/eng_montgomery.webp",
+      "bytes": 1568,
+      "gzipBytes": 1568
+    },
+    {
+      "path": "assets/portraits/eng_percival.webp",
+      "bytes": 1024,
+      "gzipBytes": 1024
+    },
+    {
+      "path": "assets/portraits/eng_slim.webp",
+      "bytes": 890,
+      "gzipBytes": 890
+    },
+    {
+      "path": "assets/portraits/eng_wavell.webp",
+      "bytes": 1006,
+      "gzipBytes": 1006
+    },
+    {
+      "path": "assets/portraits/est_laidoner.webp",
+      "bytes": 848,
+      "gzipBytes": 848
+    },
+    {
+      "path": "assets/portraits/est_reek.webp",
+      "bytes": 1250,
+      "gzipBytes": 1250
+    },
+    {
+      "path": "assets/portraits/fallback-0.svg",
       "bytes": 761,
       "gzipBytes": 378
     },
     {
-      "path": "assets/portraits/1.svg",
+      "path": "assets/portraits/fallback-1.svg",
       "bytes": 594,
       "gzipBytes": 329
     },
     {
-      "path": "assets/portraits/2.svg",
+      "path": "assets/portraits/fallback-2.svg",
       "bytes": 609,
       "gzipBytes": 334
     },
     {
-      "path": "assets/portraits/3.svg",
+      "path": "assets/portraits/fallback-3.svg",
       "bytes": 759,
       "gzipBytes": 397
     },
     {
-      "path": "assets/portraits/4.svg",
+      "path": "assets/portraits/fallback-4.svg",
       "bytes": 787,
       "gzipBytes": 396
     },
     {
-      "path": "assets/portraits/5.svg",
+      "path": "assets/portraits/fallback-5.svg",
       "bytes": 714,
       "gzipBytes": 366
     },
     {
-      "path": "assets/portraits/6.svg",
+      "path": "assets/portraits/fallback-6.svg",
       "bytes": 724,
       "gzipBytes": 386
     },
     {
-      "path": "assets/portraits/7.svg",
+      "path": "assets/portraits/fallback-7.svg",
       "bytes": 729,
       "gzipBytes": 370
+    },
+    {
+      "path": "assets/portraits/fin_mannerheim.webp",
+      "bytes": 1374,
+      "gzipBytes": 1374
+    },
+    {
+      "path": "assets/portraits/fin_osterman.webp",
+      "bytes": 1476,
+      "gzipBytes": 1476
+    },
+    {
+      "path": "assets/portraits/fin_talvela.webp",
+      "bytes": 1262,
+      "gzipBytes": 1262
+    },
+    {
+      "path": "assets/portraits/fra_de_lattre.webp",
+      "bytes": 980,
+      "gzipBytes": 980
+    },
+    {
+      "path": "assets/portraits/fra_gamelin.webp",
+      "bytes": 1194,
+      "gzipBytes": 1194
+    },
+    {
+      "path": "assets/portraits/fra_georges.webp",
+      "bytes": 1398,
+      "gzipBytes": 1398
+    },
+    {
+      "path": "assets/portraits/fra_giraud.webp",
+      "bytes": 1448,
+      "gzipBytes": 1448
+    },
+    {
+      "path": "assets/portraits/fra_huntziger.webp",
+      "bytes": 1648,
+      "gzipBytes": 1648
+    },
+    {
+      "path": "assets/portraits/fra_juin.webp",
+      "bytes": 1062,
+      "gzipBytes": 1062
+    },
+    {
+      "path": "assets/portraits/fra_leclerc.webp",
+      "bytes": 2446,
+      "gzipBytes": 2446
+    },
+    {
+      "path": "assets/portraits/fra_petain.webp",
+      "bytes": 914,
+      "gzipBytes": 914
+    },
+    {
+      "path": "assets/portraits/fra_weygand.webp",
+      "bytes": 1192,
+      "gzipBytes": 1192
+    },
+    {
+      "path": "assets/portraits/ger_dietl.webp",
+      "bytes": 1300,
+      "gzipBytes": 1300
+    },
+    {
+      "path": "assets/portraits/ger_guderian.webp",
+      "bytes": 1172,
+      "gzipBytes": 1172
+    },
+    {
+      "path": "assets/portraits/ger_hoth.webp",
+      "bytes": 1726,
+      "gzipBytes": 1726
+    },
+    {
+      "path": "assets/portraits/ger_keitel.webp",
+      "bytes": 1236,
+      "gzipBytes": 1236
+    },
+    {
+      "path": "assets/portraits/ger_kesselring.webp",
+      "bytes": 1156,
+      "gzipBytes": 1156
+    },
+    {
+      "path": "assets/portraits/ger_manstein.webp",
+      "bytes": 1298,
+      "gzipBytes": 1298
+    },
+    {
+      "path": "assets/portraits/ger_model.webp",
+      "bytes": 1526,
+      "gzipBytes": 1526
+    },
+    {
+      "path": "assets/portraits/ger_rommel.webp",
+      "bytes": 1188,
+      "gzipBytes": 1188
+    },
+    {
+      "path": "assets/portraits/ger_rundstedt.webp",
+      "bytes": 1102,
+      "gzipBytes": 1102
+    },
+    {
+      "path": "assets/portraits/gre_papagos.webp",
+      "bytes": 1034,
+      "gzipBytes": 1034
+    },
+    {
+      "path": "assets/portraits/gre_pitsikas.webp",
+      "bytes": 2010,
+      "gzipBytes": 2010
+    },
+    {
+      "path": "assets/portraits/hol_reijnders.webp",
+      "bytes": 1030,
+      "gzipBytes": 1030
+    },
+    {
+      "path": "assets/portraits/hol_winkelman.webp",
+      "bytes": 854,
+      "gzipBytes": 854
+    },
+    {
+      "path": "assets/portraits/hun_jany.webp",
+      "bytes": 1334,
+      "gzipBytes": 1334
+    },
+    {
+      "path": "assets/portraits/hun_szombathelyi.webp",
+      "bytes": 1238,
+      "gzipBytes": 1238
+    },
+    {
+      "path": "assets/portraits/hun_veress.webp",
+      "bytes": 1190,
+      "gzipBytes": 1190
+    },
+    {
+      "path": "assets/portraits/hun_werth.webp",
+      "bytes": 1052,
+      "gzipBytes": 1052
+    },
+    {
+      "path": "assets/portraits/ita_badoglio.webp",
+      "bytes": 1210,
+      "gzipBytes": 1210
+    },
+    {
+      "path": "assets/portraits/ita_balbo.webp",
+      "bytes": 1540,
+      "gzipBytes": 1540
+    },
+    {
+      "path": "assets/portraits/ita_bastico.webp",
+      "bytes": 1418,
+      "gzipBytes": 1418
+    },
+    {
+      "path": "assets/portraits/ita_cavallero.webp",
+      "bytes": 1534,
+      "gzipBytes": 1534
+    },
+    {
+      "path": "assets/portraits/ita_graziani.webp",
+      "bytes": 1648,
+      "gzipBytes": 1648
+    },
+    {
+      "path": "assets/portraits/ita_messe.webp",
+      "bytes": 1078,
+      "gzipBytes": 1078
+    },
+    {
+      "path": "assets/portraits/lat_balodis.webp",
+      "bytes": 1250,
+      "gzipBytes": 1250
+    },
+    {
+      "path": "assets/portraits/lit_rastikis.webp",
+      "bytes": 1360,
+      "gzipBytes": 1360
+    },
+    {
+      "path": "assets/portraits/lit_vitkauskas.webp",
+      "bytes": 794,
+      "gzipBytes": 794
+    },
+    {
+      "path": "assets/portraits/lux_speller.webp",
+      "bytes": 1140,
+      "gzipBytes": 1140
+    },
+    {
+      "path": "assets/portraits/nor_fleischer.webp",
+      "bytes": 702,
+      "gzipBytes": 702
+    },
+    {
+      "path": "assets/portraits/nor_ruge.webp",
+      "bytes": 1280,
+      "gzipBytes": 1280
+    },
+    {
+      "path": "assets/portraits/pol_anders.webp",
+      "bytes": 1510,
+      "gzipBytes": 1510
+    },
+    {
+      "path": "assets/portraits/pol_kutrzeba.webp",
+      "bytes": 1316,
+      "gzipBytes": 1316
+    },
+    {
+      "path": "assets/portraits/pol_maczek.webp",
+      "bytes": 1174,
+      "gzipBytes": 1174
+    },
+    {
+      "path": "assets/portraits/pol_sikorski.webp",
+      "bytes": 1206,
+      "gzipBytes": 1206
+    },
+    {
+      "path": "assets/portraits/pol_sosabowski.webp",
+      "bytes": 1756,
+      "gzipBytes": 1756
+    },
+    {
+      "path": "assets/portraits/por_carmona.webp",
+      "bytes": 760,
+      "gzipBytes": 760
+    },
+    {
+      "path": "assets/portraits/rom_antonescu.webp",
+      "bytes": 1192,
+      "gzipBytes": 1192
+    },
+    {
+      "path": "assets/portraits/rom_avramescu.webp",
+      "bytes": 1016,
+      "gzipBytes": 1016
+    },
+    {
+      "path": "assets/portraits/rom_dumitrescu.webp",
+      "bytes": 1064,
+      "gzipBytes": 1064
+    },
+    {
+      "path": "assets/portraits/rom_racovita.webp",
+      "bytes": 1362,
+      "gzipBytes": 1362
+    },
+    {
+      "path": "assets/portraits/sov_chuikov.webp",
+      "bytes": 1600,
+      "gzipBytes": 1600
+    },
+    {
+      "path": "assets/portraits/sov_konev.webp",
+      "bytes": 1166,
+      "gzipBytes": 1166
+    },
+    {
+      "path": "assets/portraits/sov_meretskov.webp",
+      "bytes": 966,
+      "gzipBytes": 966
+    },
+    {
+      "path": "assets/portraits/sov_rokossovsky.webp",
+      "bytes": 1350,
+      "gzipBytes": 1350
+    },
+    {
+      "path": "assets/portraits/sov_shaposhnikov.webp",
+      "bytes": 1212,
+      "gzipBytes": 1212
+    },
+    {
+      "path": "assets/portraits/sov_timoshenko.webp",
+      "bytes": 1048,
+      "gzipBytes": 1048
+    },
+    {
+      "path": "assets/portraits/sov_tukhachevsky.webp",
+      "bytes": 880,
+      "gzipBytes": 880
+    },
+    {
+      "path": "assets/portraits/sov_vasilevsky.webp",
+      "bytes": 1556,
+      "gzipBytes": 1556
+    },
+    {
+      "path": "assets/portraits/sov_voroshilov.webp",
+      "bytes": 1056,
+      "gzipBytes": 1056
+    },
+    {
+      "path": "assets/portraits/sov_zhukov.webp",
+      "bytes": 1360,
+      "gzipBytes": 1360
+    },
+    {
+      "path": "assets/portraits/spr_franco.webp",
+      "bytes": 1146,
+      "gzipBytes": 1146
+    },
+    {
+      "path": "assets/portraits/spr_mola.webp",
+      "bytes": 1064,
+      "gzipBytes": 1064
+    },
+    {
+      "path": "assets/portraits/spr_rojo.webp",
+      "bytes": 1464,
+      "gzipBytes": 1464
+    },
+    {
+      "path": "assets/portraits/spr_yague.webp",
+      "bytes": 1186,
+      "gzipBytes": 1186
+    },
+    {
+      "path": "assets/portraits/swe_douglas.webp",
+      "bytes": 1650,
+      "gzipBytes": 1650
+    },
+    {
+      "path": "assets/portraits/swe_thornell.webp",
+      "bytes": 926,
+      "gzipBytes": 926
+    },
+    {
+      "path": "assets/portraits/swi_guisan.webp",
+      "bytes": 1654,
+      "gzipBytes": 1654
+    },
+    {
+      "path": "assets/portraits/swi_wille.webp",
+      "bytes": 1132,
+      "gzipBytes": 1132
+    },
+    {
+      "path": "assets/portraits/tur_altay.webp",
+      "bytes": 978,
+      "gzipBytes": 978
+    },
+    {
+      "path": "assets/portraits/tur_cakmak.webp",
+      "bytes": 1028,
+      "gzipBytes": 1028
+    },
+    {
+      "path": "assets/portraits/tur_karabekir.webp",
+      "bytes": 990,
+      "gzipBytes": 990
+    },
+    {
+      "path": "assets/portraits/tur_orbay.webp",
+      "bytes": 918,
+      "gzipBytes": 918
+    },
+    {
+      "path": "assets/portraits/yug_mihailovic.webp",
+      "bytes": 1160,
+      "gzipBytes": 1160
+    },
+    {
+      "path": "assets/portraits/yug_nedic.webp",
+      "bytes": 1648,
+      "gzipBytes": 1648
+    },
+    {
+      "path": "assets/portraits/yug_simovic.webp",
+      "bytes": 1232,
+      "gzipBytes": 1232
+    },
+    {
+      "path": "assets/portraits/yug_tito.webp",
+      "bytes": 960,
+      "gzipBytes": 960
     },
     {
       "path": "assets/units/air.svg",

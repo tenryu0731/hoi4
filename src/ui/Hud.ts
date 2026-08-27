@@ -6,6 +6,7 @@ import {
   PANELS, formatNumber, frontCandidates, openNationId, setSheetCloser, type PanelId,
 } from './panels';
 import { HUD_CSS } from './hud.css';
+import { PHOTOGRAPHED } from './portraitIndex';
 import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
 import { RESOURCE, RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
@@ -557,9 +558,14 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       if (commander) {
         const face = el('img', 'hud-officer-face');
         face.alt = '';
-        // Eight portraits and a stable pick, so a general keeps his face for
-        // the whole campaign rather than changing it when the list reorders.
-        face.src = assetUrl(`portraits/${commander.id % 8}.svg`);
+        // His own photograph where there is one -- these are real men and the
+        // reference's painted officers are painted from the same pictures --
+        // and a drawn silhouette where there is not. Asked from a generated
+        // index rather than by requesting the file and reading the 404, which
+        // is a thing the asset test counts.
+        face.src = assetUrl(PHOTOGRAPHED.has(commander.defId)
+          ? `portraits/${commander.defId}.webp`
+          : `portraits/fallback-${commander.id % 8}.svg`);
         face.addEventListener('error', () => { face.removeAttribute('src'); });
         plate.append(face);
         if (commander.rank === 'field_marshal') plate.classList.add('is-marshal');

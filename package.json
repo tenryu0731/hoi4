@@ -13,7 +13,8 @@
     "test": "vitest run tests/unit",
     "test:scenario": "vitest run tests/scenario --testTimeout=600000",
     "test:e2e": "npm run build && playwright test",
-    "build:app": "vite build"
+    "build:app": "vite build",
+    "portraits": "tsx tools/asset-gen/fetch-portraits.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -24,6 +25,7 @@
     "playwright": "^1.62.1",
     "pngjs": "^7.0.0",
     "polygon-clipping": "^0.15.7",
+    "sharp": "^0.35.4",
     "tsx": "^4.19.2",
     "typescript": "^5.9.2",
     "vite": "^6.3.5",
