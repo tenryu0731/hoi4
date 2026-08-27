@@ -315,7 +315,12 @@ export const HUD_CSS = `
      the foot of the band is the foot of the screen. With a panel open it goes
      back up top, where the rule below puts it. */
   position: absolute; left: 8px; right: 8px; transform: translateY(8px);
-  bottom: calc(var(--safe-bottom) + 64px);
+  /* Above whatever the foot of the screen currently is, measured rather than
+     assumed. The constant it used to carry -- 64px -- was the height of the
+     tab bar that used to live down here; the officers' strip that replaced it
+     is 100px, and the bar was sitting 36px inside it with its buttons behind
+     a row of portraits that swallowed the taps. */
+  bottom: calc(var(--hud-foot-h, 64px) + 8px);
   display: none; flex-direction: column; align-items: stretch; gap: 4px;
   /* Transparent to touch except for its own controls. It sits over the map
      band, and a banner that eats taps is exactly the bug the horizontal
@@ -403,11 +408,15 @@ export const HUD_CSS = `
    was carried by a single hairline, where HOI4's focus node plate reads
    2.08:1 against its tree. */
 .hud-sheet {
-  position: absolute; left: 0; right: 0; bottom: calc(var(--safe-bottom) + 56px);
+  /* Flush to the floor. The 56px it used to reserve was for a bottom tab bar
+     that is now at the top; what is down there instead is the officer strip,
+     which is a control on the map like the map-mode column and is meant to be
+     covered when a panel is open. */
+  position: absolute; left: 0; right: 0; bottom: var(--safe-bottom);
   background: linear-gradient(180deg, #1a1917 0%, #151412 34%, #121110 100%);
   border-top: 1px solid #0d0c0a;
   box-shadow: inset 0 1px 0 var(--edge-hi), 0 -4px 14px rgba(0,0,0,0.6);
-  transform: translateY(calc(100% + var(--safe-bottom) + 56px));
+  transform: translateY(calc(100% + var(--safe-bottom)));
   transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: auto;
   /* Height is the player's, dragged on the grip and remembered. One fixed
@@ -555,6 +564,11 @@ export const HUD_CSS = `
   display: block; height: 100%; width: 0%;
   background: linear-gradient(180deg, #e2c184 0%, #a8853f 100%);
 }
+/* Preparation being spent rather than banked: the bar of an army that is
+   carrying its plan out reads green and is falling, not rising. */
+.panel-bar.is-live .panel-bar-fill {
+  background: linear-gradient(180deg, #c3d68a 0%, #6d7a4a 100%);
+}
 .panel-empty { font-size: 11px; color: var(--ink-dim); padding: 8px 0; }
 /* An editable field on a card. Sized as a control rather than as text: a
    44px target and 16px type, which is also the size Safari stops zooming the
@@ -639,40 +653,109 @@ export const HUD_CSS = `
 .panel-k { color: var(--ink-dim); }
 .panel-v { font-variant-numeric: tabular-nums; text-align: right; }
 
-/* --- bottom navigation --------------------------------------------------- */
+/* --- the tab strip, under the national figures ---------------------------- */
+/* Where the reference puts it: a row of icons directly beneath the resource
+   line. It is in the flow of .hud-top rather than pinned, so --hud-top-h keeps
+   measuring the whole bar and everything below it stays clear. */
 .hud-nav {
-  position: absolute; left: 0; right: 0; bottom: 0;
-  display: flex; padding-bottom: var(--safe-bottom); touch-action: manipulation;
+  display: flex; touch-action: manipulation;
+  margin-top: 4px;
   background: linear-gradient(180deg, #2c2a25 0%, #1c1b17 100%);
-  border-top: 1px solid #0d0c0a;
-  box-shadow: inset 0 1px 0 var(--edge-hi), 0 -2px 8px rgba(0,0,0,0.5);
+  border-top: 1px solid #0d0c0a; border-bottom: 1px solid #0d0c0a;
+  box-shadow: inset 0 1px 0 var(--edge-hi);
   pointer-events: auto;
 }
 /* A hairline between tabs, as on the real toolbar. */
 .hud-nav-btn + .hud-nav-btn { border-left: 1px solid rgba(0,0,0,0.45); }
 .hud-nav-btn {
-  flex: 1 1 0; min-width: 0; min-height: 56px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  flex: 1 1 0; min-width: 0; min-height: 44px;
+  display: flex; align-items: center; justify-content: center;
   background: transparent; border: none; color: var(--ink-dim); cursor: pointer;
-  padding: 0 2px;
+  padding: 0;
 }
 /* An indicator, not a block. The full-height olive rectangle it replaces had
    square corners and no relationship to anything else on screen, so it read as
-   a compositing seam rather than a selected tab. */
+   a compositing seam rather than a selected tab. Underneath now, because the
+   strip sits above the map instead of below it. */
 .hud-nav-btn { position: relative; }
 .hud-nav-btn.is-active {
   color: var(--accent);
-  background: linear-gradient(180deg, rgba(211,171,99,0.14) 0%, rgba(211,171,99,0) 70%);
+  background: linear-gradient(0deg, rgba(211,171,99,0.16) 0%, rgba(211,171,99,0) 70%);
 }
 .hud-nav-btn.is-active::before {
-  content: ''; position: absolute; top: 0; left: 22%; right: 22%;
-  height: 2px; background: var(--accent); border-radius: 0 0 2px 2px;
+  content: ''; position: absolute; bottom: 0; left: 20%; right: 20%;
+  height: 2px; background: var(--accent); border-radius: 2px 2px 0 0;
 }
-.hud-nav-icon { width: 18px; height: 18px; }
-.hud-nav-label {
-  font-size: 11px; letter-spacing: 0; white-space: nowrap;
-  overflow: hidden; text-overflow: clip;
+.hud-nav-icon { width: 22px; height: 22px; }
+
+/* --- the officer strip ---------------------------------------------------- */
+/* Centred along the foot of the screen, the way the reference lays it out, and
+   scrolling sideways when there are more armies than fit. Seven armies is the
+   ceiling and four fit at 412px. */
+.hud-officers {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; justify-content: center; gap: 3px;
+  padding: 0 6px calc(var(--safe-bottom) + 4px);
+  overflow-x: auto; scrollbar-width: none;
+  pointer-events: auto; touch-action: pan-x;
 }
+.hud-officers::-webkit-scrollbar { display: none; }
+.hud-officers.is-empty { display: none; }
+.hud-officer {
+  flex: 0 0 auto; width: 66px; padding: 3px 2px 2px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  background: linear-gradient(180deg, #35312a 0%, #221f1b 100%);
+  border: 1px solid #0d0c0a; border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.55), inset 0 1px 0 var(--edge-hi);
+  color: var(--ink); cursor: pointer;
+}
+.hud-officer:active { background: linear-gradient(180deg, #201e1a 0%, #2a2823 100%); }
+/* An army carrying out its plan, rather than preparing one. */
+.hud-officer.is-executing { border-color: #6d7a4a; }
+/* The execute pair, above the portrait: stop on the left, arrow on the right.
+   Small, because they sit over a 34px plate and the card is 66px wide, but the
+   row itself is 22px tall so the touch target is not only the glyph. */
+.hud-officer-plan {
+  display: flex; gap: 2px; width: 100%; height: 20px; margin-bottom: 1px;
+}
+.hud-plan-btn {
+  flex: 1 1 0; min-width: 0; height: 100%; padding: 0;
+  font-size: 10px; line-height: 1;
+  background: #2b2822; border: 1px solid #100f0c; border-radius: 2px;
+  color: var(--ink-dim); cursor: pointer;
+}
+.hud-plan-btn:disabled { opacity: 0.32; cursor: default; }
+.hud-plan-btn.is-stop:not(:disabled) { color: #e2796c; border-color: #6b2f28; }
+.hud-plan-btn.is-go:not(:disabled) { color: #b6c77e; border-color: #4d5730; }
+.hud-plan-btn:not(:disabled):active { background: #3d3830; }
+/* The frame the portrait sits in, which is what carries rank. */
+.hud-officer-plate {
+  width: 34px; height: 42px; overflow: hidden;
+  border: 1px solid #8a7f6a;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.65);
+}
+.hud-officer-plate.is-marshal { border-color: var(--accent); }
+/* A command with nobody holding it. Drawn as the empty frame it is, with the
+   cross-hatch the rest of the interface uses for a slot waiting to be filled. */
+.hud-officer-plate.is-vacant {
+  border-style: dashed; border-color: #6b6353;
+  background:
+    repeating-linear-gradient(135deg, #201e1a 0 4px, #262319 4px 8px);
+}
+.hud-officer-face { width: 100%; height: 100%; display: block; object-fit: cover; }
+.hud-officer-name {
+  font-size: 10px; line-height: 1.2; color: var(--ink-dim);
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hud-officer-count {
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+/* An army bigger than its general can command. Every division in it is losing
+   a share of his bonuses, and this is the only place that says so without the
+   command panel being open. */
+.hud-officer.is-over .hud-officer-count { color: #f0a49a; }
+.hud-officer.is-over { border-color: #6b2f28; }
 
 /* --- outcome ------------------------------------------------------------- */
 .hud-outcome {
@@ -718,7 +801,9 @@ export const HUD_CSS = `
 @media (orientation: landscape) and (max-height: 560px) {
   .hud-sheet {
     top: var(--hud-top-h, 88px);
-    bottom: calc(var(--safe-bottom) + 56px);
+    /* On its side there is room for both, so the drawer stops above the
+       officers rather than covering them. */
+    bottom: calc(var(--safe-bottom) + var(--hud-foot-h, 0px));
     right: auto; width: min(62%, 430px); height: auto;
     border-top: none; border-right: 1px solid #0d0c0a;
     box-shadow: inset -1px 0 0 var(--edge-hi), 4px 0 14px rgba(0,0,0,0.6);
@@ -757,6 +842,11 @@ button:active { transform: scale(0.96); }
   background: linear-gradient(180deg, #e0bd7c 0%, #b08f4e 100%);
   border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
+.panel-chip:disabled { opacity: 0.4; }
+/* The plan pair. The red halt on the left of the arrow, as the reference has
+   them, and coloured so which is which reads before the label does. */
+.panel-chip.is-stop:not(:disabled) { color: #e2796c; border-color: #6b2f28; }
+.panel-chip.is-go:not(:disabled) { color: #b6c77e; border-color: #4d5730; }
 .panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
 
 /* --- production ---------------------------------------------------------- */

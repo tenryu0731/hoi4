@@ -338,8 +338,25 @@ export type ArmyOrder =
    * instruction, not a list of destinations.
    */
   | { kind: 'front'; against: CountryId }
-  /** Push through the front toward these provinces, using the plan bonus. */
+  /**
+   * Push through the front toward these provinces, using the plan bonus.
+   *
+   * Broad: every division goes at the nearest objective it can be fed at, so
+   * the advance comes on as a wide face. The reference calls this a 攻撃線 and
+   * warns that drawing one halfway across a border widens the attack rather
+   * than concentrating it.
+   */
   | { kind: 'offensive'; targets: ProvinceId[] }
+  /**
+   * The same push, driven down a single corridor: 先鋒.
+   *
+   * 「1プロヴィンスのみの前線から先鋒の目標を設定した場合。目標のワルシャワ
+   * までの経路のみ進攻する計画になる」 -- the whole army walks one route to one
+   * place instead of fanning out, which is how a pocket gets cut rather than
+   * pushed. The difference from an offensive is the shape of the advance, and
+   * it is the difference between taking ground and taking an army.
+   */
+  | { kind: 'spearhead'; target: ProvinceId }
   /** Sit on these provinces and keep them. */
   | { kind: 'garrison'; provinces: ProvinceId[] };
 
@@ -370,6 +387,24 @@ export interface Army {
   planning: number;
   /** Provinces the current order has assigned, recomputed as the front moves. */
   frontProvinces: ProvinceId[];
+  /**
+   * Whether the plan is being carried out, as opposed to prepared.
+   *
+   * The distinction the reference is built around: a plan is drawn, the army
+   * moves up to it and waits, the preparation bar fills, and only then is it
+   * 実行 -- 「将軍のアイコンの上の計画実行ボタン（矢印のあるボタン）を
+   * クリックして軍や軍集団ごとに実行し、停止する場合は計画実行ボタン左側の
+   * 赤いボタンをクリック」. Without it there is no moment at which the bonus is
+   * spent, and therefore no reason to have earned it: an offensive here used
+   * to start the instant it was ordered, with whatever preparation happened to
+   * have accumulated.
+   *
+   * Holding orders -- a front line, a garrison -- need no execution. They are
+   * where an army waits.
+   *
+   * Optional so a save written before this loads.
+   */
+  executing?: boolean;
 }
 
 // ---------------------------------------------------------------------------

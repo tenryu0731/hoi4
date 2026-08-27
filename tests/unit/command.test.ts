@@ -388,6 +388,168 @@ describe('battle plans', () => {
     expect(idle.planning).toBeCloseTo(planned.planning / 2, 3);
   });
 
+  it('holds an offensive still until the plan is executed', () => {
+    // 「将軍のアイコンの上の計画実行ボタン（矢印のあるボタン）をクリックして
+    // 軍や軍集団ごとに実行し」 -- drawing a plan and running it are two acts,
+    // and if they are one then preparation is never a decision: an army that
+    // marches the moment it is given an order can never bank the bonus that
+    // the whole planning system exists to pay.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    ger.isAI = false;
+    const target = f.provinceOf('POL');
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      order: { kind: 'offensive', targets: [target] },
+    });
+    // War, so the border rule is not what is holding them.
+    sim.execute({ t: 'declareWar', country: ger.id, target: pol.id });
+    expect(army.executing).toBe(false);
+
+    const where = new Map(army.divisions.map(
+      (id) => [id, f.state.divisions.find((d) => d.id === id)!.provinceId],
+    ));
+    const ctx = ctxOf(f);
+    for (let i = 0; i < 20; i++) tickBattlePlansDaily(f.state, ctx);
+    const moved = army.divisions.filter(
+      (id) => f.state.divisions.find((d) => d.id === id)!.path.length > 0,
+    );
+    expect(moved.length).toBe(0);
+    // And the waiting is worth something: twenty days of it is twenty days of
+    // preparation nobody was collecting before.
+    expect(army.planning).toBeGreaterThan(PLANNING_PER_DAY * 10);
+
+    sim.execute({
+      t: 'setPlanExecution', country: ger.id, army: army.id, executing: true,
+    });
+    // Which the order to go does not spend.
+    expect(army.planning).toBeGreaterThan(PLANNING_PER_DAY * 10);
+    tickBattlePlansDaily(f.state, ctx);
+    const going = army.divisions.filter((id) => {
+      const d = f.state.divisions.find((x) => x.id === id)!;
+      return d.path.length > 0 || d.provinceId !== where.get(id);
+    });
+    expect(going.length).toBeGreaterThan(0);
+  });
+
+  it('keeps an offensive standing on its own line rather than the objective', () => {
+    // 攻撃線 is drawn out of a 前線 in the reference: the army holds a line and
+    // the arrow springs from it. Drawing the objectives as the front put the
+    // army's own line inside the country it was invading.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    ger.isAI = false;
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({ t: 'declareWar', country: ger.id, target: pol.id });
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      order: { kind: 'offensive', targets: [pol.capital] },
+    });
+    tickBattlePlansDaily(f.state, ctxOf(f));
+
+    expect(army.frontProvinces.length).toBeGreaterThan(0);
+    for (const p of army.frontProvinces) {
+      expect(f.state.provinces[p].controller).toBe(ger.id);
+    }
+    expect(army.frontProvinces).not.toContain(pol.capital);
+  });
+
+  it('halts a plan without throwing away what it prepared', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      order: { kind: 'offensive', targets: [f.provinceOf('POL')] },
+    });
+    army.planning = 0.24;
+    sim.execute({ t: 'setPlanExecution', country: ger.id, army: army.id, executing: true });
+    sim.execute({ t: 'setPlanExecution', country: ger.id, army: army.id, executing: false });
+    expect(army.executing).toBe(false);
+    // The red button stops the advance; it does not erase the plan or the
+    // preparation. Only a different order does that.
+    expect(army.order).not.toBeNull();
+    expect(army.planning).toBeCloseTo(0.24, 5);
+  });
+
+  it('starts every army under an army group when the group is executed', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const group = createArmy(f.state, ger.id, 'group', true);
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup && a.id !== group.id)!;
+    setArmyParent(f.state, army.id, group.id);
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: group.id,
+      order: { kind: 'offensive', targets: [f.provinceOf('POL')] },
+    });
+    // 「軍や軍集団ごとに実行し」: the field marshal's button is a handle on
+    // everything beneath him, which is most of the reason to raise a group.
+    sim.execute({ t: 'setPlanExecution', country: ger.id, army: group.id, executing: true });
+    expect(group.executing).toBe(true);
+    expect(army.executing).toBe(true);
+  });
+
+  it('drives a spearhead down one corridor instead of across a face', () => {
+    // 「1プロヴィンスのみの前線から先鋒の目標を設定した場合。目標のワルシャワ
+    // までの経路のみ進攻する計画になる」 -- a spearhead is the same divisions
+    // as an offensive arranged as a column, and a column is what cuts a pocket.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    ger.isAI = false;
+    const target = pol.capital;
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({ t: 'declareWar', country: ger.id, target: pol.id });
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      order: { kind: 'spearhead', target },
+    });
+    sim.execute({ t: 'setPlanExecution', country: ger.id, army: army.id, executing: true });
+
+    const ctx = ctxOf(f);
+    tickBattlePlansDaily(f.state, ctx);
+    // The route is a path: every province on it touches the next, and it ends
+    // at the objective. An offensive's front is a set of objectives with no
+    // such relation between them.
+    const route = army.frontProvinces;
+    expect(route.length).toBeGreaterThan(1);
+    expect(route[route.length - 1]).toBe(target);
+    for (let i = 1; i < route.length; i++) {
+      expect(f.index.get(route[i - 1]).neighbors).toContain(route[i]);
+    }
+    // And it is narrower than the offensive over the same ground would be.
+    const broad = f.index.provinces
+      .filter((p) => f.state.provinces[p.id]?.controller === pol.id).length;
+    expect(route.length).toBeLessThan(broad);
+  });
+
+  it('stops executing once the objective is taken', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    ger.isAI = false;
+    const held = f.state.divisions.find((d) => army.divisions.includes(d.id))!.provinceId;
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      // Somewhere we already hold: the plan is finished the day it starts.
+      order: { kind: 'spearhead', target: held },
+    });
+    sim.execute({ t: 'setPlanExecution', country: ger.id, army: army.id, executing: true });
+    tickBattlePlansDaily(f.state, ctxOf(f));
+    // An army left running a finished plan goes on shedding the preparation
+    // for the next one, so it stands down by itself.
+    expect(army.executing).toBe(false);
+  });
+
   it('throws the preparation away when the order changes', () => {
     const f = makeFixture();
     const ger = f.country('GER');

@@ -2095,6 +2095,39 @@ function attributeRow(c: Commander): HTMLElement {
 }
 
 /**
+ * The two buttons that start and stop a plan.
+ *
+ * These are the reference's 「計画実行ボタン」 and the red button to its left,
+ * and they are the reason a plan is worth drawing early: an army that moved the
+ * moment it was given an order could never bank the preparation bonus, because
+ * the bonus is paid for by standing still. Stopping keeps the plan and what it
+ * has banked; only replacing the order throws that away.
+ */
+function planControls(game: Game, army: Army, rebuild: () => void): HTMLElement {
+  const me = game.state.meta.playerCountry;
+  const running = army.executing === true;
+  const row = el('div', 'panel-chips');
+
+  const stop = el('button', 'panel-chip is-stop', `■ ${UI.planStop}`);
+  stop.disabled = !running;
+  stop.addEventListener('click', () => {
+    game.issue({ t: 'setPlanExecution', country: me, army: army.id, executing: false });
+    rebuild();
+  });
+
+  const go = el('button', 'panel-chip is-go', `▶ ${UI.planExecute}`);
+  go.disabled = running;
+  go.classList.toggle('is-on', running);
+  go.addEventListener('click', () => {
+    game.issue({ t: 'setPlanExecution', country: me, army: army.id, executing: true });
+    rebuild();
+  });
+
+  row.append(stop, go);
+  return row;
+}
+
+/**
  * The order line for one army.
  *
  * A front is picked by naming an enemy rather than by drawing on the map: a
@@ -2139,6 +2172,25 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
       rebuild();
     });
     box.append(push);
+
+    // The same push down one corridor instead of across a face -- 「1プロヴィンス
+    // のみの前線から先鋒の目標を設定した場合。目標のワルシャワまでの経路のみ
+    // 進攻する計画になる」. Aimed at the single most valuable thing the enemy
+    // holds, because that is the objective a player draws a spearhead at.
+    const tip = targets[0];
+    const drive = el('button', 'panel-chip',
+      `${UI.setOrderSpearhead}: ${game.index.get(tip).name}`);
+    drive.classList.toggle(
+      'is-on', army.order?.kind === 'spearhead' && army.order.target === tip,
+    );
+    drive.addEventListener('click', () => {
+      game.issue({
+        t: 'setArmyOrder', country: me.id, army: army.id,
+        order: { kind: 'spearhead', target: tip },
+      });
+      rebuild();
+    });
+    box.append(drive);
   }
 
   const clear = el('button', 'panel-chip', UI.setOrderClear);
@@ -2214,7 +2266,7 @@ function orderOfBattle(game: Game, army: Army): HTMLElement {
 }
 
 /** An enemy's most valuable provinces: what an offensive is actually for. */
-function objectivesAgainst(game: Game, enemy: CountryId): number[] {
+export function objectivesAgainst(game: Game, enemy: CountryId): number[] {
   return game.index.provinces
     .filter((p) => game.state.provinces[p.id]?.controller === enemy)
     .sort((a, b) => b.vp - a.vp || a.id - b.id)
@@ -2263,6 +2315,10 @@ function orderLabel(game: Game, army: Army): string {
       return `${UI.orderFront} · ${enemy ? country(enemy.tag) : '—'}`;
     }
     case 'offensive': return UI.orderOffensive;
+    case 'spearhead': {
+      const target = army.order.target;
+      return `${UI.orderSpearhead} · ${game.index.get(target).name}`;
+    }
     case 'garrison': return UI.orderGarrison;
   }
 }
@@ -2362,9 +2418,15 @@ export const commandPanel: Panel = {
       const fill = el('i', 'panel-bar-fill');
       fill.style.width = `${Math.min(100, (army.planning / Math.max(0.01, ceiling)) * 100).toFixed(1)}%`;
       bar.append(fill);
+      const phase = army.order === null
+        ? ''
+        : ` · ${army.executing === true ? UI.planExecuting : UI.planPreparing}`;
       card.append(el('div', 'panel-focus-meta',
-        `${orderLabel(game, army)} · ${UI.planningBonus} ${(army.planning * 100).toFixed(0)}%`));
+        `${orderLabel(game, army)} · ${UI.planningBonus} `
+        + `${(army.planning * 100).toFixed(0)}%${phase}`));
+      bar.classList.toggle('is-live', army.executing === true);
       card.append(bar);
+      if (army.order !== null) card.append(planControls(game, army, rebuild));
 
       if (openArmy === army.id) {
         if (commander) {

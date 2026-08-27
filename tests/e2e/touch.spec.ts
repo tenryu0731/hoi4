@@ -210,14 +210,23 @@ test.describe('touch input', () => {
       // province leaves the viewport and seven runs in ten fail, and at 0.22 the
       // margins are thin enough to fail about one in ten. Asserting the framing
       // turns a flake into a message that says which end was off.
-      const frame = await page.evaluate(() => ({
-        w: window.innerWidth,
-        h: window.innerHeight,
-        top: document.querySelector('.hud-top')!.getBoundingClientRect().bottom,
-        nav: document.querySelector('.hud-nav')!.getBoundingClientRect().top,
-      }));
+      const frame = await page.evaluate(() => {
+        // The floor of the map. The tab strip used to be down here and its top
+        // edge was the floor; the tabs are at the top now and the officers are
+        // the thing standing on the bottom.
+        const foot = document.querySelector('.hud-officers');
+        const floor = foot && !foot.classList.contains('is-empty')
+          ? foot.getBoundingClientRect().top
+          : window.innerHeight;
+        return {
+          w: window.innerWidth,
+          h: window.innerHeight,
+          top: document.querySelector('.hud-top')!.getBoundingClientRect().bottom,
+          floor,
+        };
+      });
       const onMap = (pt: { x: number; y: number }) => pt.x > 24 && pt.x < frame.w - 24
-        && pt.y > frame.top + 24 && pt.y < frame.nav - 24;
+        && pt.y > frame.top + 24 && pt.y < frame.floor - 24;
       expect(onMap(from), `drag start ${JSON.stringify(from)} is off the map ${JSON.stringify(frame)}`)
         .toBe(true);
       expect(onMap(to), `drag end ${JSON.stringify(to)} is off the map ${JSON.stringify(frame)}`)
@@ -661,11 +670,14 @@ test.describe('touch input', () => {
 
       const rect = g.renderer.canvas.getBoundingClientRect();
       const top = document.querySelector('.hud-top')!.getBoundingClientRect().bottom;
-      const nav = document.querySelector('.hud-nav')!.getBoundingClientRect().top;
+      const foot = document.querySelector('.hud-officers');
+      const floor = foot && !foot.classList.contains('is-empty')
+        ? foot.getBoundingClientRect().top
+        : window.innerHeight;
       const own = g.renderer.units.hitBoxes.filter(
         (b) => b.owner === me
           && b.x > 40 && b.x < rect.width - 90
-          && rect.top + b.y > top + 70 && rect.top + b.y < nav - 70,
+          && rect.top + b.y > top + 70 && rect.top + b.y < floor - 70,
       );
       if (own.length < 2) return null;
       own.sort((a, b) => a.y - b.y || a.x - b.x);
@@ -1129,6 +1141,191 @@ test.describe('touch input', () => {
     // おかしい」 -- nothing used to stop it.
     expect(result.path).toBe(0);
     expect(result.where).toBe(result.started);
+  });
+
+
+  test('the officer strip lists the armies and puts one under orders', async ({ page }) => {
+    await bootGame(page);
+
+    const strip = page.locator('.hud-officers');
+    await expect(strip).toBeVisible();
+
+    const expected = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      return (g.state.armies ?? [])
+        .filter((a) => a.owner === me && !a.isArmyGroup)
+        .map((a) => ({ id: a.id, divisions: a.divisions.length }));
+    });
+    expect(expected.length).toBeGreaterThan(0);
+
+    const cards = page.locator('.hud-officer');
+    await expect(cards).toHaveCount(expected.length);
+
+    // The count each card carries is the army's, against what its general can
+    // actually command -- the number that was only visible with the command
+    // panel open and its card expanded.
+    const first = page.locator(`.hud-officer[data-army="${expected[0].id}"]`);
+    await expect(first.locator('.hud-officer-count'))
+      .toContainText(`${expected[0].divisions}/`);
+
+    await first.click();
+    const selected = await page.evaluate(() => {
+      const g = window.__game!;
+      return { divisions: g.selection.divisions.length, army: g.selection.army };
+    });
+    expect(selected.army).toBe(expected[0].id);
+    expect(selected.divisions).toBe(expected[0].divisions);
+  });
+
+  test('the order bar sits clear of the officers, not behind them', async ({ page }) => {
+    await bootGame(page);
+    // Regression: the bar was placed a constant 64px off the floor -- the
+    // height of the tab bar that used to live there. The officers' strip that
+    // replaced it is taller, so the bar's lower half was behind a row of
+    // portraits that took the taps meant for its buttons.
+    await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      g.selectDivisions(
+        g.state.divisions.filter((d) => d.owner === me && !d.dead).slice(0, 3).map((d) => d.id),
+        { centre: false },
+      );
+      g.tickFrame(16);
+    });
+    const bar = page.locator('.hud-order');
+    await expect(bar).toHaveClass(/is-on/);
+    const geometry = await page.evaluate(() => {
+      const b = document.querySelector('.hud-order')!.getBoundingClientRect();
+      const f = document.querySelector('.hud-officers')!.getBoundingClientRect();
+      return { barBottom: b.bottom, footTop: f.top };
+    });
+    expect(geometry.barBottom).toBeLessThanOrEqual(geometry.footTop);
+
+    // And every one of its controls answers a tap where it is drawn.
+    for (const label of ['軍へ編成', '戦線を引く', '進攻・先鋒の計画を引く']) {
+      const btn = page.getByRole('button', { name: label });
+      const box = (await btn.boundingBox())!;
+      const top = await page.evaluate(
+        (p) => document.elementFromPoint(p.x, p.y)?.getAttribute('aria-label') ?? '',
+        { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+      );
+      expect(top).toBe(label);
+    }
+  });
+
+  test('the order bar can aim an army without opening a panel', async ({ page }) => {
+    await bootGame(page);
+    const army = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const a = (g.state.armies ?? []).find((x) => x.owner === me && !x.isArmyGroup)!;
+      g.selectDivisions([...a.divisions], { army: a.id, centre: false });
+      g.tickFrame(16);
+      return a.id;
+    });
+
+    // 攻撃線 and 先鋒 are drawn on the map in the reference, so they are
+    // reachable from the map here too.
+    await page.getByRole('button', { name: '進攻・先鋒の計画を引く' }).click();
+    const chips = page.locator('.hud-order-chip');
+    await expect(chips.first()).toBeVisible();
+    const spearhead = chips.filter({ hasText: '先鋒' }).first();
+    await expect(spearhead).toBeVisible();
+    await spearhead.click();
+
+    const order = await page.evaluate((id) => {
+      const g = window.__game!;
+      const a = (g.state.armies ?? []).find((x) => x.id === id)!;
+      return { kind: a.order?.kind ?? null, executing: a.executing === true };
+    }, army);
+    expect(order.kind).toBe('spearhead');
+    // Drawn, not running: the arrow on the officer's card is what starts it.
+    expect(order.executing).toBe(false);
+  });
+
+  test('a plan waits on the officer card until the arrow is pressed', async ({ page }) => {
+    await bootGame(page);
+
+    // Give the first army an attack to prepare for. 「将軍のアイコンの上の
+    // 計画実行ボタン（矢印のあるボタン）をクリックして軍や軍集団ごとに実行し、
+    // 停止する場合は計画実行ボタン左側の赤いボタンをクリック」.
+    const army = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const a = (g.state.armies ?? []).find((x) => x.owner === me && !x.isArmyGroup)!;
+      const target = g.index.provinces.find(
+        (p) => g.state.provinces[p.id]?.controller !== me,
+      )!.id;
+      g.issue({ t: 'setArmyOrder', country: me, army: a.id, order: {
+        kind: 'offensive', targets: [target],
+      } });
+      g.tickFrame(16);
+      return a.id;
+    });
+
+    const card = page.locator(`.hud-officer[data-army="${army}"]`);
+    await expect(card).toBeVisible();
+    const go = card.locator('.hud-plan-btn.is-go');
+    const stop = card.locator('.hud-plan-btn.is-stop');
+
+    // Drawn but not running: the arrow is live and the halt beside it is not.
+    await expect(go).toBeEnabled();
+    await expect(stop).toBeDisabled();
+    expect(await page.evaluate((id) => {
+      const g = window.__game!;
+      return (g.state.armies ?? []).find((a) => a.id === id)!.executing === true;
+    }, army)).toBe(false);
+
+    await go.click();
+    expect(await page.evaluate((id) => {
+      const g = window.__game!;
+      return (g.state.armies ?? []).find((a) => a.id === id)!.executing === true;
+    }, army)).toBe(true);
+    await expect(go).toBeDisabled();
+    await expect(stop).toBeEnabled();
+
+    // And the red button halts it without erasing the plan.
+    await stop.click();
+    const after = await page.evaluate((id) => {
+      const g = window.__game!;
+      const a = (g.state.armies ?? []).find((x) => x.id === id)!;
+      return { executing: a.executing === true, order: a.order?.kind ?? null };
+    }, army);
+    expect(after.executing).toBe(false);
+    expect(after.order).toBe('offensive');
+  });
+
+  test('the tabs are at the top, above the map', async ({ page }) => {
+    await bootGame(page);
+    const geometry = await page.evaluate(() => {
+      const nav = document.querySelector('.hud-nav')!.getBoundingClientRect();
+      const top = document.querySelector('.hud-top')!.getBoundingClientRect();
+      const foot = document.querySelector('.hud-officers')!.getBoundingClientRect();
+      return {
+        navTop: nav.top,
+        navBottom: nav.bottom,
+        topBottom: top.bottom,
+        footTop: foot.top,
+        height: window.innerHeight,
+        buttons: [...document.querySelectorAll('.hud-nav-btn')]
+          .map((b) => b.getBoundingClientRect())
+          .map((r) => ({ w: r.width, h: r.height, right: r.right })),
+      };
+    });
+    // Inside the top bar, not pinned to the floor.
+    expect(geometry.navBottom).toBeLessThanOrEqual(geometry.topBottom + 1);
+    expect(geometry.navTop).toBeLessThan(geometry.height / 2);
+    // And the officers have the floor.
+    expect(geometry.footTop).toBeGreaterThan(geometry.height / 2);
+
+    // Every tab is still a thumb-sized target and on the screen.
+    expect(geometry.buttons.length).toBe(8);
+    for (const b of geometry.buttons) {
+      expect(b.h).toBeGreaterThanOrEqual(44);
+      expect(b.w).toBeGreaterThanOrEqual(40);
+      expect(b.right).toBeLessThanOrEqual(413);
+    }
   });
 
 });

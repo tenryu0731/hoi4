@@ -288,6 +288,22 @@ export function setArmyParent(state: GameState, armyId: ArmyId, groupId: ArmyId 
 }
 
 /**
+ * Starts or halts a plan, and everything under it.
+ *
+ * The button sits on the general's card, and on an army group's card it is the
+ * field marshal's -- 「軍や軍集団ごとに実行し」. A group has no divisions of its
+ * own, so starting one means starting the armies beneath it; that is the whole
+ * reason to draw a plan at group level.
+ */
+export function setPlanExecution(state: GameState, army: Army, executing: boolean): void {
+  army.executing = executing;
+  for (const childId of army.children) {
+    const child = armyById(state, childId);
+    if (child) child.executing = executing;
+  }
+}
+
+/**
  * Officers learn by being in the field, not by existing.
  *
  * Experience accrues from divisions of theirs that are actually in combat, so

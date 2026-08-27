@@ -67,6 +67,18 @@ export type Command =
   | { t: 'setArmyParent'; country: CountryId; army: ArmyId; group: ArmyId | null }
   /** The standing order the army follows and prepares for. */
   | { t: 'setArmyOrder'; country: CountryId; army: ArmyId; order: ArmyOrder | null }
+  /**
+   * Starts or halts the plan the army has been preparing.
+   *
+   * Drawing a plan and carrying it out are two separate acts in the real game
+   * -- 「将軍のアイコンの上の計画実行ボタン（矢印のあるボタン）をクリックして
+   * 軍や軍集団ごとに実行し、停止する場合は計画実行ボタン左側の赤いボタンを
+   * クリック」 -- and that separation is the whole reason preparation is worth
+   * anything: an army that moves the moment it is given an order never banks a
+   * bonus. Halting keeps the plan and what it has banked; only a new order
+   * throws the preparation away.
+   */
+  | { t: 'setPlanExecution'; country: CountryId; army: ArmyId; executing: boolean }
   // --- diplomacy ------------------------------------------------------------
   | { t: 'justifyWar'; country: CountryId; target: CountryId }
   /**

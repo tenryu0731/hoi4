@@ -125,6 +125,8 @@ export const UI = {
   planLabel: (army: string, divisions: number): string => `${army} · ${divisions}個師団`,
   planOffensive: (army: string, divisions: number): string =>
     `${army} · ${divisions}個師団 進攻`,
+  planSpearhead: (army: string, divisions: number): string =>
+    `${army} · ${divisions}個師団 先鋒`,
   /** Shown while a stack is under orders and the next tap sets its objective. */
   orderHint: (n: number): string => `${n}個師団 — 移動先をタップ`,
   /* The order bar's own buttons, on the map rather than in a panel. Two
@@ -137,6 +139,8 @@ export const UI = {
   orderAssignLabel: '軍へ編成',
   orderDrawFront: '戦線',
   orderDrawFrontLabel: '戦線を引く',
+  orderDrawPush: '進攻',
+  orderDrawPushLabel: '進攻・先鋒の計画を引く',
   orderNewArmy: '＋新しい軍',
   orderNeedsArmy: 'まず軍に編成してください',
   orderNoEnemy: '接する国がありません',
@@ -155,6 +159,7 @@ export const UI = {
   alertIdleProduction: '軍需工場が生産ラインに割り当てられていません',
   alertUnderEquipped: '装備の足りない師団があります',
   alertNoCommander: '指揮官のいない軍があります',
+  alertPlanReady: '準備の済んだ計画が実行されていません',
   /* Captions for the top bar. Two to four characters: they sit under a figure
      in a chip 45 to 72px wide, and the point of them is that a number with a
      symbol over it says nothing about what it counts. */
@@ -165,6 +170,7 @@ export const UI = {
   alertShortIdleProduction: '軍需遊休',
   alertShortUnderEquipped: '装備不足',
   alertShortNoCommander: '指揮官',
+  alertShortPlanReady: '計画',
   effects: '現在の効果',
   stability: '安定度',
   warSupport: '戦争支持率',
@@ -211,10 +217,18 @@ export const UI = {
   orderNone: '命令なし',
   orderFront: '戦線を保持',
   orderOffensive: '進攻',
+  orderSpearhead: '先鋒',
   orderGarrison: '駐屯',
   setOrderFront: '戦線',
   setOrderAttack: '進攻',
+  setOrderSpearhead: '先鋒',
   setOrderClear: '解除',
+  /** The arrow button above the general's portrait: 計画実行. */
+  planExecute: '計画実行',
+  /** The red button to its left, which halts the plan without erasing it. */
+  planStop: '停止',
+  planPreparing: '準備中',
+  planExecuting: '実行中',
   pickEnemy: '対象',
   divisionsInArmy: '個師団',
   /** A division's name: the 12 in 第12歩兵師団. */

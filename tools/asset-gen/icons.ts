@@ -99,6 +99,29 @@ export const UI_ICONS: Record<string, string> = {
     'h-2.3c-.5 5.3-4.9 9.5-10.2 9.5S6.2 23.8 5.7 18.5H3.4l3.9-5.4 3.9 5.4H8.8c.4 2.9 2.6 5.3 5.6 5.9V13.8' +
     'h-3.2v-3h3.2z"/>',
   ),
+  /**
+   * Trade: a freighter under way, seen from the side.
+   *
+   * The trade tab used to share the diplomacy globe. That was survivable while
+   * the tabs carried labels; once they became a row of eight icons under the
+   * national figures -- which is where the reference puts them -- two
+   * identical globes are two tabs the player has to guess between. A ship is
+   * what this trade actually is: civilian industry shipped out as convoys and
+   * ore shipped back.
+   */
+  trade: solid(
+    // Hull, with a raked bow and a flat transom.
+    '<path d="M3.2 20.4h25.6l-3.4 6.6a2 2 0 0 1-1.8 1.1H8.4a2 2 0 0 1-1.8-1.1z"/>' +
+    // Deck line and superstructure aft.
+    '<path d="M4.6 17.6h22.8v2.2H4.6z"/>' +
+    '<path d="M20.4 10.4h5.4v6.6h-5.4z"/>' +
+    // Funnel.
+    '<path d="M22.2 6.2h2.6v3.6h-2.6z"/>' +
+    // Two containers forward, with a gap between them so they read as cargo
+    // rather than as one block.
+    '<path d="M6.2 12.8h5.6v4.2H6.2z"/>' +
+    '<path d="M13 12.8h5.6v4.2H13z"/>',
+  ),
   manpower: solid(
     '<circle cx="16" cy="9.6" r="5.1"/>' +
     '<path d="M16 16.4c-5.1 0-9.2 3.6-9.2 8.1v3.2h18.4v-3.2c0-4.5-4.1-8.1-9.2-8.1z"/>',
@@ -362,3 +385,97 @@ export const UNIT_ICONS: Record<string, string> = {
 };
 
 export const ALL_ICONS = { ...RESOURCE_ICONS, ...UI_ICONS, ...EQUIPMENT_ICONS };
+
+// ---------------------------------------------------------------------------
+// Officer portraits
+// ---------------------------------------------------------------------------
+
+/** Portraits are the one thing here that is taller than it is wide. */
+const PW = 36;
+const PH = 44;
+
+/**
+ * The only art in the project that is not one flat ink.
+ *
+ * Everything else here is a mask the interface tints. A face cannot be: drawn
+ * in a single colour, the cap merges into the hair, the hair into the head,
+ * the head into the neck and the neck into the shoulders, and what comes out
+ * is a snowman -- which is exactly what the first attempt produced, eight
+ * times over and indistinguishable. A portrait needs tone: a dark uniform, a
+ * light face, and the features cut back into the face in the dark tone. Three
+ * colours is enough for a woodcut and a woodcut is enough at 40px.
+ */
+const P_BACK = '#211f1a';
+const P_COAT = '#4a4639';
+const P_TRIM = '#615b49';
+const P_SKIN = '#c9a888';
+const P_DARK = '#2b2621';
+
+function portrait(body: string): string {
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" ` +
+    `width="${PW}" height="${PH}">` +
+    `<rect width="${PW}" height="${PH}" fill="${P_BACK}"/>` +
+    body +
+    `</svg>`
+  );
+}
+
+/** Shoulders and chest. `braid` squares off an epaulette at each end. */
+function body_(braid: boolean): string {
+  return (
+    `<path d="M2 44c0-8.2 5.6-13 16-14.4C28.4 31 34 35.8 34 44z" fill="${P_COAT}"/>`
+    // A collar, so the head is not growing straight out of the coat.
+    + `<path d="M13.6 30.6 18 36l4.4-5.4 2.6 1.1L18 39l-7-7.3z" fill="${P_TRIM}"/>`
+    + (braid
+      ? `<path d="M2.6 37.2h7.2v3H2.6zM26.2 37.2h7.2v3h-7.2z" fill="${P_TRIM}"/>`
+      : '')
+  );
+}
+
+const NECK = `<path d="M14.9 24h6.2v7.4h-6.2z" fill="${P_SKIN}"/>`;
+const HEAD = `<ellipse cx="18" cy="17" rx="7.2" ry="8.4" fill="${P_SKIN}"/>`;
+/** Eyes, always. A face without them is a thumb. */
+const EYES = `<path d="M14.3 15.6h2.1v1.5h-2.1zM19.6 15.6h2.1v1.5h-2.1z" fill="${P_DARK}"/>`;
+
+/** A peaked service cap: crown, band, and a visor that juts forward. */
+const CAP_PEAKED =
+  `<path d="M9.6 11.4c0-4.4 3.8-6.8 8.4-6.8s8.4 2.4 8.4 6.8z" fill="${P_COAT}"/>`
+  + `<path d="M9.2 11.2h17.6v2.6H9.2z" fill="${P_DARK}"/>`
+  + `<path d="M7.2 13.6h21.6v1.9H7.2z" fill="${P_TRIM}"/>`;
+/** A folded side cap, no visor. */
+const CAP_SIDE =
+  `<path d="M10.4 13.4c0-4.8 3.4-7.4 7.6-7.4s7.6 2.6 7.6 7.4z" fill="${P_COAT}"/>`
+  + `<path d="M10.4 12.6h15.2v2.1H10.4z" fill="${P_TRIM}"/>`;
+/** A steel helmet: a dome with a flared rim. */
+const HELMET =
+  `<path d="M8.6 14a9.4 9.8 0 0 1 18.8 0z" fill="${P_TRIM}"/>`
+  + `<path d="M7 13.6h22v2.4a1.8 1.8 0 0 1-1.8 1.8H8.8A1.8 1.8 0 0 1 7 16z" fill="${P_COAT}"/>`;
+/** Bare, hair swept back. */
+const HAIR = `<path d="M10.8 13.2c0-5 3.2-7.8 7.2-7.8s7.2 2.8 7.2 7.8c-2.2-2.6-4.4-3.6-7.2-3.6s-5 1-7.2 3.6z" fill="${P_DARK}"/>`;
+
+const MOUSTACHE = `<path d="M14.6 20.1h6.8v1.9h-6.8z" fill="${P_DARK}"/>`;
+const BEARD = `<path d="M11.8 20.4c1 4.2 3 6.2 6.2 6.2s5.2-2 6.2-6.2c-1.6 2.6-3.6 3.6-6.2 3.6s-4.6-1-6.2-3.6z" fill="${P_DARK}"/>`;
+const GLASSES =
+  `<path d="M12.4 14.9h4.6v3.2h-4.6zM19 14.9h4.6v3.2H19z" fill="none" `
+  + `stroke="${P_DARK}" stroke-width="1"/>`
+  + `<path d="M17 16.2h2v.9h-2z" fill="${P_DARK}"/>`;
+
+/**
+ * The eight officers, in the order the strip picks them.
+ *
+ * Ordered so that neighbours differ in the loudest feature first -- headgear
+ * -- because the strip shows them side by side and that is the comparison the
+ * player actually makes. The name and the division count underneath carry the
+ * rest of the identifying; these only have to be eight different men.
+ */
+export const PORTRAIT_ICONS: Record<string, string> = {
+  '0': portrait(body_(true) + NECK + HEAD + EYES + CAP_PEAKED + MOUSTACHE),
+  '1': portrait(body_(false) + NECK + HEAD + EYES + CAP_SIDE),
+  '2': portrait(body_(false) + NECK + HEAD + EYES + HELMET),
+  '3': portrait(body_(true) + NECK + HEAD + EYES + HAIR + BEARD),
+  '4': portrait(body_(false) + NECK + HEAD + EYES + CAP_PEAKED + GLASSES),
+  '5': portrait(body_(true) + NECK + HEAD + EYES + CAP_SIDE + MOUSTACHE),
+  '6': portrait(body_(false) + NECK + HEAD + EYES + HAIR + GLASSES),
+  '7': portrait(body_(true) + NECK + HEAD + EYES + HELMET + MOUSTACHE),
+};

@@ -31,7 +31,7 @@ import {
 import { tickSupplyDaily } from './military/supply';
 import {
   MAX_ARMIES, appointCommander, armiesOf, armyById, assignDivisions, createArmy, disbandArmy,
-  setArmyParent, tickCommandReinforcementDaily, tickCommanderExperienceDaily,
+  setArmyParent, setPlanExecution, tickCommandReinforcementDaily, tickCommanderExperienceDaily,
 } from './military/command';
 import { tickBattlePlansDaily } from './military/frontline';
 import { MAX_BATTALIONS, MAX_SUPPORTS } from './core/data';
@@ -206,7 +206,13 @@ export class Simulation {
         if (!army || army.owner !== cmd.country) return;
         // A new order throws the old preparation away. Planning is preparation
         // for one thing; it does not transfer to another.
-        if (JSON.stringify(army.order) !== JSON.stringify(cmd.order)) army.planning = 0;
+        if (JSON.stringify(army.order) !== JSON.stringify(cmd.order)) {
+          army.planning = 0;
+          // And it stops. A fresh plan is a plan to be prepared, not one to be
+          // run the instant it is drawn; the player starts it when they judge
+          // the preparation is worth what it cost to wait for.
+          army.executing = false;
+        }
         army.order = cmd.order;
         // And it takes the whole formation back under command. A division sent
         // somewhere by hand stays there until the army is given something new
@@ -215,6 +221,15 @@ export class Simulation {
           const d = state.divisions[id];
           if (d) d.detached = false;
         }
+        return;
+      }
+      case 'setPlanExecution': {
+        const army = armyById(state, cmd.army);
+        if (!army || army.owner !== cmd.country) return;
+        // An army group is a handle on the armies beneath it: pressing execute
+        // on the group starts every army under it at once, which is the point
+        // of having drawn one plan across three armies.
+        setPlanExecution(state, army, cmd.executing);
         return;
       }
       case 'createTemplate': {
