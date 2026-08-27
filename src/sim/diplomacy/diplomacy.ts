@@ -2,7 +2,7 @@ import { randRange } from '../core/rng';
 import { INITIAL_RESISTANCE } from '../economy/occupation';
 import { surrenderTolerance } from '../politics/politics';
 import type {
-  CountryId, GameState, ProvinceId, War,
+  CountryId, GameState, ProvinceId, StateId, War,
 } from '../core/types';
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 import { removeDivision } from '../military/movement';
@@ -459,22 +459,10 @@ function absorbCountry(
       p.controller = p.owner;
     }
   }
-  for (let i = 0; i < state.states.length; i++) {
-    const st = state.states[i];
-    const members: ProvinceId[] = ctx.index.data.states[i].provinces;
-    if (members.length === 0) continue;
-    const holder = state.provinces[members[0]].controller;
-    if (members.every((id) => state.provinces[id].controller === holder)) {
-      if (st.controller !== holder) {
-        st.controller = holder;
-        // Territory taken from a beaten country is occupied, not owned: it
-        // resists until it is garrisoned. Without this, mass conquest through
-        // capitulation -- which is how most territory changes hands -- never
-        // raised any resistance at all.
-        st.resistance = st.owner === holder ? 0 : INITIAL_RESISTANCE;
-      }
-    }
-  }
+  // Every state, not only the beaten country's: a capitulation moves ground
+  // all over the map, and a state whose controller has just died has to be
+  // handed on rather than left pointing at a country that no longer exists.
+  for (let i = 0; i < state.states.length; i++) setStateController(state, ctx, i);
 
   for (const d of state.divisions) {
     if (!d.dead && d.owner === country) removeDivision(state, d);
@@ -538,6 +526,162 @@ export function capitulate(
     kind: 'capitulation',
     body: { k: 'capitulated', country: c.tag, occupation },
     country,
+  });
+
+  peaceConference(state, ctx, country, victor);
+}
+
+// ---------------------------------------------------------------------------
+// The peace conference
+// ---------------------------------------------------------------------------
+
+/**
+ * Points a state at whoever is actually standing on it.
+ *
+ * A state carries a controller of its own -- the factories, the mines and the
+ * building slots are read off it -- and it is a separate fact from the
+ * controller of each province inside it. When they disagree the state is the
+ * one that is wrong, and the disagreement is not hypothetical: a campaign run
+ * to 1948 finished with six states whose controller had been dead for years,
+ * their industry counted for a country that no longer existed and invisible to
+ * the one holding the ground.
+ *
+ * The plurality holder rather than a unanimous one, so a state split down the
+ * middle still belongs to somebody.
+ */
+function setStateController(state: GameState, ctx: DiplomacyContext, id: StateId): void {
+  const st = state.states[id];
+  const members: ProvinceId[] = ctx.index.data.states[id].provinces;
+  if (!st || members.length === 0) return;
+
+  const held = new Map<CountryId, number>();
+  for (const p of members) {
+    const holder = state.provinces[p].controller;
+    if (state.countries[holder]?.capitulated) continue;
+    held.set(holder, (held.get(holder) ?? 0) + 1);
+  }
+  let winner: CountryId | null = null;
+  let best = -1;
+  for (const [holder, n] of held) {
+    if (n > best || (n === best && winner !== null && holder < winner)) { best = n; winner = holder; }
+  }
+  if (winner === null || winner === st.controller) return;
+  st.controller = winner;
+  // Territory taken from somebody else is occupied, not owned: it resists
+  // until it is garrisoned.
+  st.resistance = st.owner === winner ? 0 : INITIAL_RESISTANCE;
+}
+
+/**
+ * Dividing a beaten country between the people who beat it.
+ *
+ * Until now one country took everything: `absorbCountry` handed the whole of a
+ * capitulated nation to whichever enemy happened to hold the most of its
+ * victory points, and every other member of the winning coalition -- who had
+ * been fighting the same war, in some cases for longer -- got nothing at all.
+ * That is not how any of these wars ended, and it makes a bloc worthless to
+ * belong to: the reward for helping is that somebody else is bigger.
+ *
+ * The rule here is HOI4's rule with the bidding taken out, which is the part
+ * of it a phone cannot show anyway. Every winner has a claim proportional to
+ * what it took off the loser -- counted in victory points, war by war, by
+ * `creditCapture` -- and the states are dealt out in order of value, each one
+ * going to the claimant with the most claim left. A state somebody is standing
+ * in goes to them if they have any claim at all, because possession is the one
+ * argument nobody at a conference table can talk their way past.
+ *
+ * A country that contributed nothing gets nothing. A country that did all of
+ * it gets all of it, which is the old behaviour and still the common case for
+ * a war between two powers.
+ */
+export function peaceConference(
+  state: GameState, ctx: DiplomacyContext, loser: CountryId, fallback: CountryId | null,
+): void {
+  const claims = new Map<CountryId, number>();
+  for (const w of state.wars) {
+    const side = w.attackers.includes(loser) ? w.attackers
+      : w.defenders.includes(loser) ? w.defenders : null;
+    if (side === null) continue;
+    const winners = side === w.attackers ? w.defenders : w.attackers;
+    for (const id of winners) {
+      if (state.countries[id].capitulated) continue;
+      const took = w.contribution?.[id] ?? 0;
+      if (took <= 0) continue;
+      claims.set(id, (claims.get(id) ?? 0) + took);
+    }
+  }
+
+  // Nobody has a measured claim -- a country that fell to an ultimatum, or to
+  // a war whose captures were all made by somebody now dead. The old rule is
+  // the right fallback: whoever is standing on it keeps it.
+  if (claims.size === 0) return;
+  if (claims.size === 1 && fallback !== null && claims.has(fallback)) return;
+
+  // The loser's own states, most valuable first.
+  const spoils: { id: StateId; vp: number }[] = [];
+  for (let i = 0; i < state.states.length; i++) {
+    const st = state.states[i];
+    if (!st || st.owner !== loser) continue;
+    let vp = 0;
+    for (const p of ctx.index.data.states[i].provinces) vp += ctx.index.get(p).vp;
+    spoils.push({ id: i, vp });
+  }
+  if (spoils.length === 0) return;
+  spoils.sort((a, b) => b.vp - a.vp || a.id - b.id);
+
+  const totalClaim = [...claims.values()].reduce((a, b) => a + b, 0);
+  const totalVp = spoils.reduce((a, s) => a + s.vp, 0);
+  const quota = new Map<CountryId, number>();
+  for (const [id, claim] of claims) quota.set(id, (claim / totalClaim) * totalVp);
+
+  const dealt = new Map<CountryId, number>();
+  for (const { id, vp } of spoils) {
+    const provinces = ctx.index.data.states[id].provinces;
+    // Who is standing on it, weighted by how much of it they hold.
+    const holding = new Map<CountryId, number>();
+    for (const p of provinces) {
+      const holder = state.provinces[p].controller;
+      if (!quota.has(holder)) continue;
+      holding.set(holder, (holding.get(holder) ?? 0) + 1);
+    }
+
+    let winner: CountryId | null = null;
+    let best = -Infinity;
+    for (const [candidate, left] of quota) {
+      // Possession is worth one state in the argument -- this state, the one
+      // being argued over -- and no more. Weighted against the whole country
+      // instead, as it was first written, an occupier who happened to hold all
+      // of it took all of it whatever its partners had done: measured with a
+      // 300/100 ledger over nine Polish states, Italy's quota was 25 and
+      // Germany's grip bonus alone was 50, so Italy got nothing.
+      const grip = (holding.get(candidate) ?? 0) / Math.max(1, provinces.length);
+      const score = left + grip * vp;
+      if (score > best) { best = score; winner = candidate; }
+    }
+    if (winner === null) continue;
+    quota.set(winner, (quota.get(winner) ?? 0) - vp);
+    dealt.set(winner, (dealt.get(winner) ?? 0) + 1);
+    for (const p of provinces) {
+      // Ground its rightful owner has taken back is not the conference's to
+      // give away.
+      const p2 = state.provinces[p];
+      if (p2.owner !== loser && !state.countries[p2.owner].capitulated) continue;
+      p2.controller = winner;
+    }
+    setStateController(state, ctx, id);
+  }
+
+  state.log.push({
+    day: state.clock.totalDays,
+    kind: 'peace',
+    body: {
+      k: 'peaceTerms',
+      country: state.countries[loser].tag,
+      shares: [...dealt.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+        .map(([id, n]) => ({ country: state.countries[id].tag, states: n })),
+    },
+    country: loser,
   });
 }
 

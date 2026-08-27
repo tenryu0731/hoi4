@@ -101,20 +101,26 @@ export function assignToFront(
 
   const taken = new Map<ProvinceId, number>();
   for (const div of divisions) {
-    let best: ProvinceId | null = null;
-    let bestCost = Infinity;
-    for (const target of ranked) {
-      // Prefer an empty post; only stack once every post has somebody.
-      const load = taken.get(target) ?? 0;
-      const from = ctx.index.get(div.provinceId);
+    const from = ctx.index.get(div.provinceId);
+    // Every post, cheapest first: an empty one before a crowded one, and a
+    // near one before a far one.
+    const order = [...ranked].sort((a, b) => cost(a) - cost(b));
+    function cost(target: ProvinceId): number {
       const to = ctx.index.get(target);
-      const distance = Math.hypot(from.centerX - to.centerX, from.centerY - to.centerY);
-      const cost = distance + load * 4000;
-      if (cost < bestCost) { bestCost = cost; best = target; }
+      return Math.hypot(from.centerX - to.centerX, from.centerY - to.centerY)
+        + (taken.get(target) ?? 0) * 4000;
     }
-    if (best === null) continue;
-    taken.set(best, (taken.get(best) ?? 0) + 1);
-    reorder(state, ctx, div, best);
+    // Down the list until one of them can actually be marched to. Posts on the
+    // far side of a neutral country cannot: East Prussia is cut off from the
+    // Reich by the Polish Corridor, and before armies had to respect a border
+    // that did not matter because they walked through Poland. Assigning a
+    // division to a post it cannot reach left it standing with no orders at
+    // all -- measured at five of twenty-four.
+    for (const target of order) {
+      if (!reorder(state, ctx, div, target)) continue;
+      taken.set(target, (taken.get(target) ?? 0) + 1);
+      break;
+    }
   }
 }
 
@@ -173,29 +179,33 @@ export function pressOffensive(
   const room = (id: ProvinceId): number =>
     stackLimit(ctx.index, id) - friendlyStack(state, army.owner, id) - (booked.get(id) ?? 0);
 
-  const nearest = (from: ProvinceId, choices: readonly ProvinceId[]): ProvinceId | null => {
-    const here = ctx.index.get(from);
-    let best: ProvinceId | null = null;
-    let bestCost = Infinity;
-    for (const id of choices) {
-      if (room(id) <= 0) continue;
-      const to = ctx.index.get(id);
-      const cost = Math.hypot(here.centerX - to.centerX, here.centerY - to.centerY);
-      if (cost < bestCost) { bestCost = cost; best = id; }
+  /** Somewhere with room this division can actually march to, nearest first. */
+  const send = (div: Division, choices: readonly ProvinceId[]): boolean => {
+    const here = ctx.index.get(div.provinceId);
+    const order = choices
+      .filter((id) => room(id) > 0)
+      .sort((a, b) => {
+        const pa = ctx.index.get(a);
+        const pb = ctx.index.get(b);
+        return Math.hypot(here.centerX - pa.centerX, here.centerY - pa.centerY)
+          - Math.hypot(here.centerX - pb.centerX, here.centerY - pb.centerY);
+      });
+    for (const target of order) {
+      if (!reorder(state, ctx, div, target)) continue;
+      booked.set(target, (booked.get(target) ?? 0) + 1);
+      return true;
     }
-    return best;
+    return false;
   };
 
   for (const id of army.divisions) {
     const div = state.divisions.find((d) => d.id === id);
     if (!div || div.dead || div.combatId !== null || div.detached) continue;
     // An objective first, the ground in front of it second, and if both are
-    // full then nowhere: a division that cannot be fed at the front is worth
-    // more standing where it is than starving on top of the ones that can.
-    const target = nearest(div.provinceId, live) ?? nearest(div.provinceId, staging);
-    if (target === null) continue;
-    booked.set(target, (booked.get(target) ?? 0) + 1);
-    reorder(state, ctx, div, target);
+    // full or out of reach then nowhere: a division that cannot be fed at the
+    // front is worth more standing where it is than starving on top of the
+    // ones that can.
+    if (!send(div, live)) send(div, staging);
   }
 }
 
@@ -212,10 +222,10 @@ export function pressOffensive(
  */
 function reorder(
   state: GameState, ctx: MilitaryContext, div: Division, target: ProvinceId,
-): void {
-  if (div.provinceId === target) return;
-  if (div.order?.kind === 'move' && div.order.target === target && div.path.length > 0) return;
-  orderMove(state, ctx, div, target);
+): boolean {
+  if (div.provinceId === target) return true;
+  if (div.order?.kind === 'move' && div.order.target === target && div.path.length > 0) return true;
+  return orderMove(state, ctx, div, target);
 }
 
 /** The ceiling this army's planning may reach, with its officers' help. */

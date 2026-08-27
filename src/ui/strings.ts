@@ -523,6 +523,11 @@ export function eventText(
       return `${country(body.attacker)}が${country(body.defender)}に宣戦布告`;
     case 'joinedFaction':
       return `${country(body.country)}が${body.faction}に加入`;
+    case 'peaceTerms':
+      return `${country(body.country)}の講和会議：`
+        + body.shares.map((s) => `${country(s.country)} ${s.states}州`).join('・');
+    case 'whitePeace':
+      return `${body.countries.map(country).join('と')}が白紙講和`;
     case 'ceded':
       return `${country(body.country)}が${country(body.by)}に${body.states}ステートを割譲`;
     case 'capitulated':

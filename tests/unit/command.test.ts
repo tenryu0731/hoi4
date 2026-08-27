@@ -250,13 +250,31 @@ describe('battle plans', () => {
     // than a day's march away never arrives at all.
     expect(standing.length).toBe(army.divisions.length);
 
+    // Evenly, but only among posts that can actually be reached from one
+    // another. East Prussia is cut off from the Reich by the Polish Corridor,
+    // and now that an army may not march through a neutral country its five
+    // posts there are held by the five divisions already in them while the
+    // other nineteen mass on the main border: 1,1,1,1,1 and 5,5,5,4. A single
+    // flat spread across all nine would mean the corridor was being walked
+    // through, which is the thing that should not happen.
     const perProvince = new Map<number, number>();
     for (const id of army.divisions) {
       const d = f.state.divisions.find((x) => x.id === id)!;
       perProvince.set(d.provinceId, (perProvince.get(d.provinceId) ?? 0) + 1);
     }
-    const counts = [...perProvince.values()];
-    expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
+    const german = (p: number): boolean => f.state.provinces[p].controller === ger.id;
+    const theatres: Set<number>[] = [];
+    for (const post of army.frontProvinces) {
+      if (theatres.some((t) => t.has(post))) continue;
+      theatres.push(new Set(f.index.reachable(post, german, { includeSea: false })));
+    }
+    expect(theatres.length).toBeGreaterThan(1);
+    for (const theatre of theatres) {
+      const counts = [...perProvince.entries()]
+        .filter(([p]) => theatre.has(p))
+        .map(([, n]) => n);
+      expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
+    }
   });
 
   it('leaves a hand-given order alone instead of marching the division back', () => {

@@ -7,7 +7,7 @@ import {
   resolveCombatRound, terrainProfile, tickDivisionUpkeep,
 } from '../../src/sim/military/combat';
 import {
-  captureProvince, isHostile, movementSpeed, orderMove, placeDivision,
+  captureProvince, hasAccess, isHostile, movementSpeed, orderMove, placeDivision,
   retreat, sealiftCapacity, tickMilitaryHourly, tickReinforcementDaily,
 } from '../../src/sim/military/movement';
 import {
@@ -17,6 +17,7 @@ import {
 import {
   deriveTemplate, spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY,
 } from '../../src/sim/scenario/europe1936';
+import { leaveFaction } from '../../src/sim/diplomacy/diplomacy';
 import { TERRAIN } from '../../src/sim/core/data';
 import { TERRAIN_TYPES } from '../../src/sim/core/types';
 import type { Division, GameState, ProvinceId } from '../../src/sim/core/types';
@@ -786,6 +787,63 @@ describe('encirclement', () => {
       expect(limit).toBeGreaterThanOrEqual(2);
       expect(limit).toBeLessThanOrEqual(12);
     }
+  });
+
+  it('will not let an army walk into a country it is not at war with', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const div = f.state.divisions.find((d) => d.owner === ger.id && !d.dead)!;
+
+    // Somewhere Polish, and the border it sits behind.
+    const polish = f.index.provinces.find((p) => p.ownerTag === 'POL')!;
+    expect(hasAccess(f.state, ger.id, polish.id)).toBe(false);
+    expect(orderMove(f.state, { index: f.index }, div, polish.id)).toBe(false);
+    expect(div.path).toEqual([]);
+
+    // War opens it, and it is an attack rather than a visit.
+    declareWar(f.state, ger.id, pol.id);
+    expect(hasAccess(f.state, ger.id, polish.id)).toBe(true);
+    expect(orderMove(f.state, { index: f.index }, div, polish.id)).toBe(true);
+    expect(div.path.length).toBeGreaterThan(0);
+  });
+
+  it('opens a border to a country in the same bloc', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const ita = f.country('ITA');
+    // Both begin in the Axis.
+    expect(ger.factionId).not.toBeNull();
+    expect(ita.factionId).toBe(ger.factionId);
+    const italian = f.index.provinces.find((p) => p.ownerTag === 'ITA')!;
+    expect(hasAccess(f.state, ger.id, italian.id)).toBe(true);
+
+    // And closes it again when the bloc no longer holds them both.
+    leaveFaction(f.state, ita.id);
+    expect(hasAccess(f.state, ger.id, italian.id)).toBe(false);
+  });
+
+  it('will not route around the world through neutral ground', () => {
+    // The rule has to hold on the route as well as the destination: marching
+    // *through* a neutral is the same trespass as stopping in one. East
+    // Prussia is the case that matters -- it is German, and reaching it
+    // overland means crossing the Polish Corridor.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const div = f.state.divisions.find(
+      (d) => d.owner === ger.id && !d.dead
+        && f.index.get(d.provinceId).name.includes('Berlin'),
+    );
+    const eastPrussia = f.index.provinces.find(
+      (p) => p.ownerTag === 'GER' && p.name.includes('Kaliningrad'),
+    );
+    if (!div || !eastPrussia) return;
+
+    const route = f.index.path(div.provinceId, eastPrussia.id, {
+      allowSea: false,
+      blocked: (id) => !hasAccess(f.state, ger.id, id),
+    });
+    expect(route).toBeNull();
   });
 
   it('keeps East Prussia supplied through its own port', () => {

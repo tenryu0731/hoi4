@@ -391,6 +391,17 @@ export interface War {
   defenders: CountryId[];
   startDay: number;
   ended: boolean;
+  /**
+   * Victory points each participant has taken off the other side, by country.
+   *
+   * What the peace conference divides the spoils by. Counted from captures
+   * rather than from casualties because a capture is the thing the map
+   * actually records, and because it is what a conference argues about: a
+   * coalition member who took nothing has nothing to table.
+   *
+   * Optional so a save written before conferences existed still loads.
+   */
+  contribution?: Record<CountryId, number>;
 }
 
 export interface Justification {
@@ -699,6 +710,8 @@ export type GameEventBody =
   | { k: 'warDeclared'; attacker: string; defender: string }
   | { k: 'joinedFaction'; country: string; faction: string }
   | { k: 'capitulated'; country: string; occupation: number }
+  | { k: 'peaceTerms'; country: string; shares: { country: string; states: number }[] }
+  | { k: 'whitePeace'; countries: string[] }
   | { k: 'annexed'; country: string; by: string }
   | { k: 'ceded'; country: string; by: string; states: number }
   | { k: 'itemCompleted'; country: string; item: string }
@@ -708,7 +721,8 @@ export type GameEventBody =
 
 export interface GameEvent {
   day: number;
-  kind: 'war' | 'combat' | 'production' | 'construction' | 'research' | 'focus' | 'diplomacy' | 'capitulation' | 'outcome';
+  kind: 'war' | 'combat' | 'production' | 'construction' | 'research' | 'focus' | 'diplomacy'
+  | 'capitulation' | 'peace' | 'outcome';
   body: GameEventBody;
   /** Optional province to focus the camera on when tapped. */
   province?: ProvinceId;

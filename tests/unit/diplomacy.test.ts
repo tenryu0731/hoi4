@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { Simulation } from '../../src/sim/Simulation';
 import {
   GUARANTEE_COST, IMPROVE_COST, INVITE_COST, INVITE_OPINION,
-  canLeaveFaction, declareWar, guarantee, improveRelations, inviteBlock, inviteToFaction,
-  joinableFactions, opinionOf,
+  canLeaveFaction, capitulate, declareWar, guarantee, improveRelations, inviteBlock,
+  inviteToFaction, joinableFactions, opinionOf,
 } from '../../src/sim/diplomacy/diplomacy';
+import { captureProvince } from '../../src/sim/military/movement';
 import { makeFixture } from './helpers/fixture';
 import type { Fixture } from './helpers/fixture';
 
@@ -196,5 +197,108 @@ describe('the instruments the invitation depends on', () => {
     expect(guarantee(f.state, ger.id, hun.id)).toBe(true);
     expect(guarantee(f.state, ger.id, hun.id)).toBe(false);
     expect(ger.diplomacy.guarantees.filter((x) => x === hun.id).length).toBe(1);
+  });
+});
+
+describe('the peace conference', () => {
+  /** Everything one country owns, handed to another as an occupier. */
+  function occupy(f: Fixture, ownerTag: string, byTag: string, share = 1): void {
+    const owner = f.country(ownerTag);
+    const by = f.country(byTag);
+    let n = 0;
+    for (const p of f.state.provinces) {
+      if (!p || p.owner !== owner.id) continue;
+      n++;
+      if (n % Math.round(1 / share) !== 0) continue;
+      p.controller = by.id;
+    }
+  }
+
+  it('divides a beaten country by what each winner took off it', () => {
+    const f = rig();
+    const ger = f.country('GER');
+    const ita = f.country('ITA');
+    const pol = f.country('POL');
+    // Italy is in the Axis, so a German war is an Italian war too.
+    declareWar(f.state, ger.id, pol.id);
+    expect(ita.atWarWith).toContain(pol.id);
+    occupy(f, 'POL', 'GER');
+
+    const war = f.state.wars.find((w) => w.defenders.includes(pol.id))!;
+    // Stated rather than played out, so the test is about the rule.
+    war.contribution = { [ger.id]: 300, [ita.id]: 100 };
+
+    capitulate(f.state, { index: f.index }, pol.id);
+
+    const polish = f.state.states
+      .map((st, id) => ({ st, id }))
+      .filter((x) => x.st && x.st.owner === pol.id);
+    expect(polish.length).toBeGreaterThan(3);
+    const share = (id: number): number =>
+      polish.filter((x) => x.st.controller === id).length;
+
+    // Both of them get something, and the one that did more gets more.
+    expect(share(ger.id)).toBeGreaterThan(0);
+    expect(share(ita.id)).toBeGreaterThan(0);
+    expect(share(ger.id)).toBeGreaterThan(share(ita.id));
+    expect(share(ger.id) + share(ita.id)).toBe(polish.length);
+  });
+
+  it('gives a coalition partner who did nothing nothing', () => {
+    const f = rig();
+    const ger = f.country('GER');
+    const ita = f.country('ITA');
+    const pol = f.country('POL');
+    declareWar(f.state, ger.id, pol.id);
+    occupy(f, 'POL', 'GER');
+    const war = f.state.wars.find((w) => w.defenders.includes(pol.id))!;
+    war.contribution = { [ger.id]: 300 };
+
+    capitulate(f.state, { index: f.index }, pol.id);
+
+    const polish = f.state.states.filter((st) => st && st.owner === pol.id);
+    expect(polish.every((st) => st.controller === ger.id)).toBe(true);
+    expect(ita.capitulated).toBe(false);
+  });
+
+  it('leaves no state pointing at a country that no longer exists', () => {
+    const f = rig();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const cze = f.country('CZE');
+    // Poland has taken a piece of Czechoslovakia, then loses its own war.
+    declareWar(f.state, pol.id, cze.id);
+    occupy(f, 'CZE', 'POL');
+    declareWar(f.state, ger.id, pol.id);
+    occupy(f, 'POL', 'GER');
+
+    capitulate(f.state, { index: f.index }, pol.id);
+
+    for (const st of f.state.states) {
+      if (!st) continue;
+      expect(f.state.countries[st.controller].capitulated, `state of ${st.owner}`).toBe(false);
+    }
+    for (const p of f.state.provinces) {
+      if (!p) continue;
+      expect(f.state.countries[p.controller].capitulated).toBe(false);
+    }
+  });
+
+  it('counts a capture into the ledger of the war it was made in', () => {
+    const f = rig();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    declareWar(f.state, ger.id, pol.id);
+    const war = f.state.wars.find((w) => w.defenders.includes(pol.id))!;
+    expect(war.contribution?.[ger.id] ?? 0).toBe(0);
+
+    const target = f.state.provinces.findIndex((p) => p && p.owner === pol.id);
+    const vp = f.index.get(target).vp;
+    captureProvince(f.state, { index: f.index }, target, ger.id);
+    expect(war.contribution?.[ger.id] ?? 0).toBe(vp);
+
+    // And not into a war neither side is fighting.
+    const other = f.state.wars.find((w) => w !== war);
+    expect(other?.contribution?.[ger.id] ?? 0).toBe(0);
   });
 });

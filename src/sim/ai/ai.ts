@@ -15,7 +15,7 @@ import {
   DEMAND_COST, demandSubmission, guarantee, guarantorsOf, hasWarGoal, joinFaction,
   occupationRatio, opinionOf, startJustification,
 } from '../diplomacy/diplomacy';
-import { orderMove } from '../military/movement';
+import { hasAccess, orderMove } from '../military/movement';
 import { stackLimit } from '../military/supply';
 import { canChangeLaw, changeLaw } from '../politics/politics';
 import { fuelRatio } from '../economy/fuel';
@@ -1059,6 +1059,56 @@ function pruneJustifications(state: GameState, c: Country): void {
   });
 }
 
+/**
+ * The country standing between this one and an enemy it cannot reach.
+ *
+ * Armies may not cross a border they have no right to cross, which is correct
+ * and which closes roads that used to be open. The historical answer to a
+ * closed road is not to stand still: it is to declare war on whoever owns it.
+ * Belgium in 1914 and again in 1940 is the whole of this rule.
+ *
+ * Returns null when the enemy is reachable already, when nothing neutral is in
+ * the way, or when the way through is somebody this country cannot fight.
+ */
+function blockingNeutral(state: GameState, ctx: AIContext, c: Country): CountryId | null {
+  const mine = state.divisions.find((d) => !d.dead && d.owner === c.id);
+  if (!mine) return null;
+
+  for (const enemyId of c.atWarWith) {
+    const enemy = state.countries[enemyId];
+    if (enemy.capitulated) continue;
+    const target = state.provinces.findIndex((p) => p && p.controller === enemyId);
+    if (target < 0) continue;
+
+    // Already reachable: this war needs no new one.
+    const open = ctx.index.path(mine.provinceId, target, {
+      allowSea: true,
+      seaMultiplier: 6,
+      blocked: (id) => !hasAccess(state, c.id, id),
+    });
+    if (open) continue;
+
+    // The road as it would be if every border were open, and the first country
+    // on it that is closed to us.
+    const through = ctx.index.path(mine.provinceId, target, {
+      allowSea: true, seaMultiplier: 6,
+    });
+    if (!through) continue;
+    for (const step of through) {
+      const owner = state.provinces[step]?.controller;
+      if (owner === undefined || hasAccess(state, c.id, step)) continue;
+      const blocker = state.countries[owner];
+      if (blocker.capitulated || blocker.id === c.id) continue;
+      if (areAllied(state, c.id, blocker.id)) continue;
+      // Only somebody this bloc can actually beat, and not while its own
+      // ground is still being fought over.
+      if (blocStrength(state, c.id) < defendingStrength(state, blocker.id, c.id)) continue;
+      return blocker.id;
+    }
+  }
+  return null;
+}
+
 export function runDiplomacyAI(state: GameState, ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
   const doc = doctrineFor(c.tag);
@@ -1066,6 +1116,15 @@ export function runDiplomacyAI(state: GameState, ctx: AIContext, c: Country): vo
   maintainGuarantees(state, c, doc);
   considerAlignment(state, ctx, c, doc);
   pruneJustifications(state, c);
+
+  // --- a war we cannot get to ---------------------------------------------
+  // Before anything else: an enemy that cannot be reached is not a war, it is
+  // a standing army and a rising division count. Open the road.
+  const blocker = blockingNeutral(state, ctx, c);
+  if (blocker !== null) {
+    declareWar(state, c.id, blocker);
+    return;
+  }
 
   const faction = c.factionId !== null ? state.factions[c.factionId] : null;
   const isLeader = faction !== null && faction.leader === c.id;
