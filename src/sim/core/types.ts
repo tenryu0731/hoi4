@@ -358,6 +358,17 @@ export type ArmyOrder =
    */
   | { kind: 'spearhead'; target: ProvinceId }
   /** Sit on these provinces and keep them. */
+  /**
+   * A line the player drew, rather than an enemy they named.
+   *
+   * 「前線は国ごとの選択じゃなくて自分で国境などに引く」. The anchors are the
+   * ground the finger passed over; every day the army works out which of the
+   * provinces near them actually face somebody now, and those become the new
+   * anchors. That is what makes it a front line and not a list of places: it
+   * walks forward with the army and back with it, and only needs redrawing
+   * when the player wants it somewhere else.
+   */
+  | { kind: 'line'; anchors: ProvinceId[] }
   | { kind: 'garrison'; provinces: ProvinceId[] };
 
 /**

@@ -699,6 +699,55 @@ export const HUD_CSS = `
 }
 .hud-nav-icon { width: 22px; height: 22px; }
 
+/* --- the battle-plan bar --------------------------------------------------- */
+/* Above the officers, along the foot, the way the reference lays it out. The
+   tools scroll sideways rather than wrapping: a second row would take another
+   44px of map, and this bar is on screen the whole time. */
+.hud-plans {
+  position: absolute; left: 0; right: 0;
+  bottom: calc(var(--hud-officers-h, 0px));
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  pointer-events: none;
+}
+.hud-plan-tools {
+  display: flex; gap: 3px; max-width: 100%;
+  padding: 3px 6px; margin: 0 6px;
+  overflow-x: auto; scrollbar-width: none; touch-action: pan-x;
+  background: linear-gradient(180deg, rgba(52,48,38,0.96) 0%, rgba(32,29,23,0.96) 100%);
+  border: 1px solid #0f0e0c; border-bottom: none; border-radius: 4px 4px 0 0;
+  box-shadow: var(--bevel), 0 -3px 12px rgba(0,0,0,0.5);
+  pointer-events: auto;
+}
+.hud-plan-tools::-webkit-scrollbar { display: none; }
+.hud-plan-tool {
+  flex: 0 0 auto; min-width: 44px; min-height: 44px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; padding: 3px 5px;
+  background: linear-gradient(180deg, #3b352a 0%, #2a2620 100%);
+  border: 1px solid #100f0c; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--ink-dim); cursor: pointer;
+}
+.hud-plan-icon { width: 18px; height: 18px; display: block; }
+.hud-plan-glyph { font-size: 14px; line-height: 18px; }
+.hud-plan-l { font-size: 9px; line-height: 10px; letter-spacing: 0; white-space: nowrap; }
+.hud-plan-tool.is-on {
+  background: linear-gradient(180deg, #e0bd7c 0%, #b08f4e 100%);
+  border-color: #6d5730; color: #1a1811;
+}
+.hud-plan-tool.is-go { color: #b6c77e; }
+.hud-plan-tool.is-stop { color: #e2796c; }
+.hud-plan-tool.is-clear { color: #b0a595; }
+/* What the tool in hand will do, said once, above the row. Two characters on a
+   button cannot explain a gesture nobody has made yet. */
+.hud-plan-hint {
+  max-width: calc(100% - 24px); padding: 2px 8px;
+  font-size: 11px; color: var(--ink);
+  background: rgba(18,17,14,0.86); border: 1px solid #0f0e0c; border-radius: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0; transition: opacity 140ms ease;
+}
+.hud-plans.is-armed .hud-plan-hint { opacity: 1; }
+
 /* --- the officer strip ---------------------------------------------------- */
 /* Centred along the foot of the screen, the way the reference lays it out, and
    scrolling sideways when there are more armies than fit. Seven armies is the

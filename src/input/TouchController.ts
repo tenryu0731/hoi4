@@ -45,6 +45,18 @@ export interface TouchCallbacks {
     x0: number, y0: number,
     x1: number, y1: number,
   ) => void;
+  /**
+   * Whether a stroke here paints on the map instead of panning it.
+   *
+   * The same shape of contract as the marquee, and for the same reason: a
+   * tool the player picks up, never a gesture inferred from how a finger
+   * happens to move. Drawing a battle plan is what this is for -- 「前線は国
+   * ごとの選択じゃなくて自分で国境などに引く」 -- and the reference draws one
+   * by dragging along the ground it runs over.
+   */
+  canStartPaint?: (screenX: number, screenY: number) => boolean;
+  /** Every point the stroke passes through, in world space. */
+  onPaint?: (phase: GesturePhase, worldX: number, worldY: number) => void;
   /** Fired whenever the camera moved, so the app can mark itself dirty. */
   onCameraChange?: () => void;
 }
@@ -55,7 +67,7 @@ const HOLD_MS = 480;
 /** Velocity is averaged over this window so a flick is not judged on one frame. */
 const VELOCITY_WINDOW_MS = 90;
 
-type State = 'idle' | 'pending' | 'pan' | 'pinch' | 'order' | 'hold' | 'box';
+type State = 'idle' | 'pending' | 'pan' | 'pinch' | 'order' | 'hold' | 'box' | 'paint';
 
 interface PointerRec {
   id: number;
@@ -98,6 +110,9 @@ export class TouchController {
    * mid-gesture.
    */
   private boxCandidate = false;
+
+  /** Whether the press landed with a plan tool armed. Decided once, as above. */
+  private paintCandidate = false;
 
   private history: { t: number; x: number; y: number }[] = [];
   private detachFns: (() => void)[] = [];
@@ -190,6 +205,7 @@ export class TouchController {
         this.camera.screenToWorldX(x), this.camera.screenToWorldY(y),
       ) ?? false;
       this.boxCandidate = this.cb.canStartBoxSelect?.(x, y) ?? false;
+    this.paintCandidate = this.cb.canStartPaint?.(x, y) ?? false;
       this.clearHold();
       // The timer only records that the press became a hold. The action fires
       // on release, so a press that turns into a drag never triggers it.
@@ -205,6 +221,7 @@ export class TouchController {
       if (this.state === 'box') {
         this.cb.onBoxSelect?.('cancel', this.boxFromX, this.boxFromY, this.boxFromX, this.boxFromY);
       }
+      if (this.state === 'paint') this.cb.onPaint?.('cancel', 0, 0);
       this.beginPinch();
     }
   };
@@ -254,6 +271,16 @@ export class TouchController {
         }
         const wx = this.camera.screenToWorldX(rec.startX);
         const wy = this.camera.screenToWorldY(rec.startY);
+        // A plan tool wins over an order drag: having picked the tool up, the
+        // next stroke draws with it, wherever it starts.
+        if (this.paintCandidate) {
+          this.state = 'paint';
+          this.cb.onPaint?.('start', wx, wy);
+          this.cb.onPaint?.(
+            'move', this.camera.screenToWorldX(x), this.camera.screenToWorldY(y),
+          );
+          return;
+        }
         if (this.orderCandidate) {
           this.state = 'order';
           this.orderFromX = wx;
@@ -282,6 +309,12 @@ export class TouchController {
       }
       case 'box': {
         this.cb.onBoxSelect?.('move', this.boxFromX, this.boxFromY, x, y);
+        return;
+      }
+      case 'paint': {
+        this.cb.onPaint?.(
+          'move', this.camera.screenToWorldX(x), this.camera.screenToWorldY(y),
+        );
         return;
       }
       case 'pinch': {
@@ -345,6 +378,11 @@ export class TouchController {
       case 'box':
         this.cb.onBoxSelect?.('end', this.boxFromX, this.boxFromY, x, y);
         break;
+      case 'paint':
+        this.cb.onPaint?.(
+          'end', this.camera.screenToWorldX(x), this.camera.screenToWorldY(y),
+        );
+        break;
       default:
         break;
     }
@@ -375,6 +413,7 @@ export class TouchController {
     if (this.state === 'box') {
       this.cb.onBoxSelect?.('cancel', this.boxFromX, this.boxFromY, this.boxFromX, this.boxFromY);
     }
+    if (this.state === 'paint') this.cb.onPaint?.('cancel', 0, 0);
     if (this.pointers.size === 0) this.state = 'idle';
   };
 

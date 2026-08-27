@@ -87,6 +87,42 @@ const FACTORY_BODY =
   'M13.4 21.4h3.6v3.4h-3.6z"/>';
 
 export const UI_ICONS: Record<string, string> = {
+  // --- the battle-plan bar ------------------------------------------------
+  // The reference puts a row of these along the foot of the screen and every
+  // plan is drawn with one of them held. Each is the shape of what it draws,
+  // because a toolbar of six abstractions is six things to memorise.
+  /** A front line: the comb the map draws, with the teeth on the near side. */
+  'plan-front': solid(
+    '<path d="M3 12h26v3.4H3z"/>'
+    + '<path d="M4.6 15.4h3.2v6H4.6zM11 15.4h3.2v6H11zM17.4 15.4h3.2v6h-3.2z'
+    + 'M23.8 15.4h3.2v6h-3.2z"/>',
+  ),
+  /** An offensive: a broad head pushing forward on a wide face. */
+  'plan-offensive': solid(
+    '<path d="M3 6h4.4v20H3zM10 6h4.4v20H10z"/>'
+    + '<path d="M18 16 27.6 8.4v5.4H31v4.4h-3.4v5.4z"/>',
+  ),
+  /** A spearhead: the same push, one lane wide. */
+  'plan-spearhead': solid(
+    '<path d="M3 13.6h16v4.8H3z"/>'
+    + '<path d="M17.6 6 30 16 17.6 26z"/>',
+  ),
+  /** A garrison: a shield over ground that is already ours. */
+  'plan-garrison': solid(
+    '<path d="M16 2.6 27.4 7v9.2c0 6-4.7 11.2-11.4 13.2C9.3 27.4 4.6 22.2 4.6 16.2V7z'
+    + 'm0 4.3L8.4 9.9v6.3c0 4.1 3 7.8 7.6 9.4 4.6-1.6 7.6-5.3 7.6-9.4V9.9z"/>',
+  ),
+  /** A landing: an anchor, which is the mark the reference uses for one. */
+  'plan-invade': solid(
+    '<path d="M14 8.6a2.6 2.6 0 1 1 4 0v1.8h3.2v3H18v11.3c3.1-.7 5.5-3.3 5.9-6.5h-2.6l4-5.6 4 5.6'
+    + 'h-2.5c-.5 5.6-5.2 10-11.8 10S4.1 18.8 3.6 13.2H1.1l4-5.6 4 5.6H6.5c.4 3.2 2.8 5.8 5.9 6.5'
+    + 'V13.4h-3.2v-3H12z"/>',
+  ),
+  /** Clearing the plan: a bin, which is what the reference draws too. */
+  'plan-clear': solid(
+    '<path d="M12 2h8v3h8v3.4H4V5h8zM6.4 10.8h19.2L24 30H8z'
+    + 'm5 3.4v12h2.4v-12zm7.2 0v12H21v-12z"/>',
+  ),
   factory: solid(FACTORY_BODY),
   // The two plants stand next to each other in the top bar, so the military
   // one needs a mark that survives being 13px wide: a shell over the roofline.

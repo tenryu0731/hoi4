@@ -1,10 +1,9 @@
-import type { Game } from '../app/Game';
+import type { Game, PlanTool } from '../app/Game';
 import type { MapMode } from '../render/palette';
 import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
 import {
-  PANELS, formatNumber, frontCandidates, objectivesAgainst, openNationId, setSheetCloser,
-  type PanelId,
+  PANELS, formatNumber, openNationId, setSheetCloser, type PanelId,
 } from './panels';
 import { HUD_CSS } from './hud.css';
 import { PHOTOGRAPHED } from './portraitIndex';
@@ -301,13 +300,12 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   });
   const orderAssign = el('button', 'hud-order-btn', UI.orderAssign);
   orderAssign.setAttribute('aria-label', UI.orderAssignLabel);
-  const orderFront = el('button', 'hud-order-btn', UI.orderDrawFront);
-  orderFront.setAttribute('aria-label', UI.orderDrawFrontLabel);
-  // 攻撃線 and 先鋒, on the map rather than in a panel: the reference draws
-  // both by dragging out of a front line, and a player who has just boxed a
-  // stack and raised an army should not have to open a panel to aim it.
-  const orderPush = el('button', 'hud-order-btn', UI.orderDrawPush);
-  orderPush.setAttribute('aria-label', UI.orderDrawPushLabel);
+  // No 戦線 or 進攻 button here. Both used to live on this bar and both named
+  // a country to aim at; the reference draws a plan on the ground instead --
+  // 「前線は国ごとの選択じゃなくて自分で国境などに引く」 -- and that is what the
+  // battle-plan bar below does now. Two ways to give the same order is one way
+  // too many on a 412px screen, and the one that survives is the one that lets
+  // the player put the line where they want it.
   const orderCancel = el('button', 'hud-order-cancel', '✕');
   orderCancel.setAttribute('aria-label', UI.cancel);
   orderCancel.addEventListener('click', () => {
@@ -321,12 +319,12 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // lower as the game runs. Measured: a tap aimed at a counter at y=266
   // landed on the second row's 軍へ編成 button and opened its menu, while
   // elementFromPoint checked a moment earlier had said CANVAS.
-  orderRow.append(orderText, orderStop, orderAssign, orderFront, orderPush, orderCancel);
+  orderRow.append(orderText, orderStop, orderAssign, orderCancel);
   const orderMenu = el('div', 'hud-order-menu');
   orderHint.append(orderRow, orderMenu);
 
   /** Which button opened the chip row, so pressing it again closes it. */
-  let orderMenuMode: 'army' | 'front' | 'push' | null = null;
+  let orderMenuMode: 'army' | null = null;
   let lastOrderSignature = '';
 
   function closeOrderMenu(): void {
@@ -334,8 +332,6 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     orderMenu.innerHTML = '';
     orderMenu.classList.remove('is-on');
     orderAssign.classList.remove('is-on');
-    orderFront.classList.remove('is-on');
-    orderPush.classList.remove('is-on');
   }
 
   function orderChip(label: string, onPick: () => void): HTMLElement {
@@ -346,11 +342,6 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       syncOrder();
     });
     return chip;
-  }
-
-  /** The army the whole selection belongs to, or null when it is mixed. */
-  function selectionArmy(): number | null {
-    return game.armyOf(game.selection.divisions);
   }
 
   orderAssign.addEventListener('click', () => {
@@ -391,72 +382,6 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     orderMenu.classList.add('is-on');
   });
 
-  orderFront.addEventListener('click', () => {
-    if (orderMenuMode === 'front') { closeOrderMenu(); return; }
-    closeOrderMenu();
-    orderMenuMode = 'front';
-    orderFront.classList.add('is-on');
-    const state = game.state;
-    const me = state.meta.playerCountry;
-    const army = selectionArmy();
-    if (army === null) {
-      orderMenu.append(el('span', 'hud-order-note', UI.orderNeedsArmy));
-      orderMenu.classList.add('is-on');
-      return;
-    }
-    const enemies = frontCandidates(game).slice(0, 6);
-    if (enemies.length === 0) {
-      orderMenu.append(el('span', 'hud-order-note', UI.orderNoEnemy));
-      orderMenu.classList.add('is-on');
-      return;
-    }
-    for (const enemy of enemies) {
-      orderMenu.append(orderChip(country(enemy.tag), () => {
-        game.issue({
-          t: 'setArmyOrder', country: me, army,
-          order: { kind: 'front', against: enemy.id },
-        });
-      }));
-    }
-    orderMenu.classList.add('is-on');
-  });
-
-  orderPush.addEventListener('click', () => {
-    if (orderMenuMode === 'push') { closeOrderMenu(); return; }
-    closeOrderMenu();
-    orderMenuMode = 'push';
-    orderPush.classList.add('is-on');
-    const me = game.state.meta.playerCountry;
-    const army = selectionArmy();
-    if (army === null) {
-      orderMenu.append(el('span', 'hud-order-note', UI.orderNeedsArmy));
-      orderMenu.classList.add('is-on');
-      return;
-    }
-    // Three enemies rather than the six the front menu offers: each one costs
-    // two chips here, and six chips already wrap to a second line.
-    let offered = 0;
-    for (const enemy of frontCandidates(game).slice(0, 3)) {
-      const targets = objectivesAgainst(game, enemy.id);
-      if (targets.length === 0) continue;
-      offered++;
-      orderMenu.append(orderChip(`${UI.setOrderAttack}: ${country(enemy.tag)}`, () => {
-        game.issue({ t: 'setArmyOrder', country: me, army, order: {
-          kind: 'offensive', targets,
-        } });
-      }));
-      orderMenu.append(orderChip(
-        `${UI.setOrderSpearhead}: ${game.index.get(targets[0]).name}`, () => {
-          game.issue({ t: 'setArmyOrder', country: me, army, order: {
-            kind: 'spearhead', target: targets[0],
-          } });
-        },
-      ));
-    }
-    if (offered === 0) orderMenu.append(el('span', 'hud-order-note', UI.orderNoEnemy));
-    orderMenu.classList.add('is-on');
-  });
-
   function syncOrder(): void {
     // Counted live rather than from the selection array: the divisions in it
     // were alive when the counter was tapped, and a stack that has since been
@@ -473,8 +398,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     orderHint.classList.toggle('is-on', on);
     if (!on) { closeOrderMenu(); return; }
     setText(orderText, UI.orderHint(live));
-    orderFront.classList.toggle('is-dim', selectionArmy() === null);
-    orderPush.classList.toggle('is-dim', selectionArmy() === null);
+
 
     let marching = 0;
     for (const id of game.selection.divisions) {
@@ -669,6 +593,95 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     }
   }
 
+  // --- the battle-plan bar -------------------------------------------------
+  // 「下の戦闘計画のタブから色々できる」. The reference hangs a row of tools
+  // along the foot of the screen, above the officers, and every plan on the
+  // map is drawn with one of them in hand. Picking one up arms the next
+  // stroke; drawing with it issues the order and puts the tool down again.
+  const planBar = el('div', 'hud-plans');
+  const planTools = el('div', 'hud-plan-tools');
+  const planHint = el('div', 'hud-plan-hint', '');
+  planBar.append(planHint, planTools);
+
+  const TOOLS: [Exclude<PlanTool, null>, string, string, string][] = [
+    ['front', UI.toolFront, UI.toolFrontHint, 'plan-front'],
+    ['offensive', UI.toolOffensive, UI.toolOffensiveHint, 'plan-offensive'],
+    ['spearhead', UI.toolSpearhead, UI.toolSpearheadHint, 'plan-spearhead'],
+    ['garrison', UI.toolGarrison, UI.toolGarrisonHint, 'plan-garrison'],
+    ['invade', UI.toolInvade, UI.toolInvadeHint, 'plan-invade'],
+  ];
+  const toolNodes = new Map<Exclude<PlanTool, null>, HTMLButtonElement>();
+  for (const [tool, label, hint, icon] of TOOLS) {
+    const btn = el('button', 'hud-plan-tool');
+    btn.title = `${label} — ${hint}`;
+    btn.setAttribute('aria-label', label);
+    btn.dataset.tool = tool;
+    btn.append(iconNode('hud-plan-icon', `icons/${icon}.svg`), el('span', 'hud-plan-l', label));
+    btn.addEventListener('click', () => {
+      // Pressing the tool you are already holding puts it down, which is the
+      // only way off a mode on a screen with no escape key.
+      game.planTool = game.planTool === tool ? null : tool;
+      game.planDraft = [];
+      syncPlanBar();
+    });
+    toolNodes.set(tool, btn);
+    planTools.append(btn);
+  }
+
+  // Execute and halt, for every army at once: the reference has this pair on
+  // the bar as well as on each general, because a plan drawn across four
+  // armies is started as one act.
+  const planGo = el('button', 'hud-plan-tool is-go');
+  planGo.title = UI.planExecute;
+  planGo.setAttribute('aria-label', UI.planExecute);
+  planGo.append(el('span', 'hud-plan-glyph', '▶'), el('span', 'hud-plan-l', UI.planExecute));
+  const planStop = el('button', 'hud-plan-tool is-stop');
+  planStop.title = UI.planStop;
+  planStop.setAttribute('aria-label', UI.planStop);
+  planStop.append(el('span', 'hud-plan-glyph', '■'), el('span', 'hud-plan-l', UI.planStop));
+  for (const [btn, executing] of [[planGo, true], [planStop, false]] as
+    [HTMLButtonElement, boolean][]) {
+    btn.addEventListener('click', () => {
+      const me = game.state.meta.playerCountry;
+      for (const a of game.state.armies ?? []) {
+        if (a.owner !== me || a.order === null) continue;
+        game.issue({ t: 'setPlanExecution', country: me, army: a.id, executing });
+      }
+      syncPlanBar();
+      syncOfficers();
+    });
+  }
+  planTools.append(planStop, planGo);
+
+  const planClear = el('button', 'hud-plan-tool is-clear');
+  planClear.title = UI.toolClearHint;
+  planClear.setAttribute('aria-label', UI.toolClear);
+  planClear.append(
+    iconNode('hud-plan-icon', 'icons/plan-clear.svg'), el('span', 'hud-plan-l', UI.toolClear),
+  );
+  planClear.addEventListener('click', () => {
+    const army = game.selection.army;
+    if (army === null) { planHint.textContent = UI.planNeedsArmy; return; }
+    game.issue({
+      t: 'setArmyOrder', country: game.state.meta.playerCountry, army, order: null,
+    });
+    planHint.textContent = UI.planCleared;
+    syncPlanBar();
+  });
+  planTools.append(planClear);
+
+  function syncPlanBar(): void {
+    for (const [tool, btn] of toolNodes) {
+      const on = game.planTool === tool;
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-pressed', String(on));
+    }
+    const held = TOOLS.find(([t]) => t === game.planTool);
+    if (held) planHint.textContent = game.selection.army === null ? UI.planNeedsArmy : held[2];
+    else if (planHint.textContent === UI.planNeedsArmy) planHint.textContent = '';
+    planBar.classList.toggle('is-armed', game.planTool !== null);
+  }
+
   // --- alerts --------------------------------------------------------------
   const toasts = el('div', 'hud-toasts');
 
@@ -734,7 +747,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // of a Graphics rebuild.
   const marquee = el('div', 'hud-marquee');
   root.append(
-    top, modeBar, armedHint, marquee, orderHint, toasts, officers, sheet, outcome,
+    top, modeBar, armedHint, marquee, orderHint, planBar, toasts, officers, sheet,
+    outcome,
   );
 
   // Everything below the top bar is placed against its measured height rather
@@ -751,8 +765,12 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     // The officer strip is the floor when no panel is open. Measured rather
     // than assumed: it is empty before the first army is raised, and a
     // constant 56px was the height of a tab bar that no longer lives there.
-    const footH = officers.classList.contains('is-empty')
+    const officersH = officers.classList.contains('is-empty')
       ? 0 : Math.round(officers.getBoundingClientRect().height);
+    // The plan bar stands on the officers, so it needs their height to place
+    // itself, and everything above the two needs the sum.
+    root.style.setProperty('--hud-officers-h', `${officersH}px`);
+    const footH = officersH + Math.round(planTools.getBoundingClientRect().height);
     root.style.setProperty('--hud-foot-h', `${footH}px`);
     const sheetTop = sheet.classList.contains('is-open')
       ? sheet.getBoundingClientRect().top
@@ -1025,6 +1043,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     // The tool disarms itself when a rectangle is finished, and the button has
     // to stop looking armed at the same moment.
     if (selectTool.classList.contains('is-active') !== game.boxSelectArmed) syncSelectTool();
+    // Same for a plan tool: drawing with it puts it down, and the bar has to
+    // stop looking armed on the frame that happens.
+    if (planBar.classList.contains('is-armed') !== (game.planTool !== null)) syncPlanBar();
 
     if (openPanel !== null) PANELS[openPanel].refresh?.(game, sheetBody);
 

@@ -2138,60 +2138,13 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
   const me = game.state.countries[game.state.meta.playerCountry];
   const box = el('div', 'panel-chips');
 
-  for (const enemy of frontCandidates(game).slice(0, 5)) {
-    const chip = el('button', 'panel-chip', `${UI.setOrderFront}: ${country(enemy.tag)}`);
-    chip.classList.toggle(
-      'is-on', army.order?.kind === 'front' && army.order.against === enemy.id,
-    );
-    chip.addEventListener('click', () => {
-      game.issue({
-        t: 'setArmyOrder', country: me.id, army: army.id,
-        order: { kind: 'front', against: enemy.id },
-      });
-      rebuild();
-    });
-    box.append(chip);
-
-    // An offensive needs objectives, and picking them province by province is
-    // not something a thumb can do. Naming the enemy aims the army at what it
-    // would actually be sent to take: the places worth victory points.
-    const targets = objectivesAgainst(game, enemy.id);
-    if (targets.length === 0) continue;
-    const push = el('button', 'panel-chip', `${UI.setOrderAttack}: ${country(enemy.tag)}`);
-    push.classList.toggle(
-      'is-on',
-      army.order?.kind === 'offensive'
-      && army.order.targets.length === targets.length
-      && army.order.targets[0] === targets[0],
-    );
-    push.addEventListener('click', () => {
-      game.issue({
-        t: 'setArmyOrder', country: me.id, army: army.id,
-        order: { kind: 'offensive', targets },
-      });
-      rebuild();
-    });
-    box.append(push);
-
-    // The same push down one corridor instead of across a face -- 「1プロヴィンス
-    // のみの前線から先鋒の目標を設定した場合。目標のワルシャワまでの経路のみ
-    // 進攻する計画になる」. Aimed at the single most valuable thing the enemy
-    // holds, because that is the objective a player draws a spearhead at.
-    const tip = targets[0];
-    const drive = el('button', 'panel-chip',
-      `${UI.setOrderSpearhead}: ${game.index.get(tip).name}`);
-    drive.classList.toggle(
-      'is-on', army.order?.kind === 'spearhead' && army.order.target === tip,
-    );
-    drive.addEventListener('click', () => {
-      game.issue({
-        t: 'setArmyOrder', country: me.id, army: army.id,
-        order: { kind: 'spearhead', target: tip },
-      });
-      rebuild();
-    });
-    box.append(drive);
-  }
+  // No "front against Poland" chips any more. Naming a country was the touch
+  // stand-in for drawing a line, and it was the wrong stand-in: the reference
+  // draws plans on the ground -- 「前線は国ごとの選択じゃなくて自分で国境などに
+  // 引く」 -- and the battle-plan bar along the foot of the map does that now.
+  // What is left here is what a panel is better at than a map: saying what the
+  // plan is, and taking it back.
+  box.append(el('div', 'panel-note', UI.planDrawnOnMap));
 
   const clear = el('button', 'panel-chip', UI.setOrderClear);
   clear.classList.toggle('is-on', army.order === null);
@@ -2319,6 +2272,7 @@ function orderLabel(game: Game, army: Army): string {
       const target = army.order.target;
       return `${UI.orderSpearhead} · ${game.index.get(target).name}`;
     }
+    case 'line': return `${UI.orderLine} · ${army.order.anchors.length}`;
     case 'garrison': return UI.orderGarrison;
   }
 }

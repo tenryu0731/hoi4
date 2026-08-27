@@ -818,7 +818,7 @@ test.describe('touch input', () => {
     expect(placed.listed).toBe(true);
   });
 
-  test('the order bar raises an army from a selection and gives it a front', async ({ page }) => {
+  test('the order bar raises an army from a selection', async ({ page }) => {
     await bootGame(page);
 
     const chosen = await page.evaluate(() => {
@@ -851,18 +851,6 @@ test.describe('touch input', () => {
     expect(raised.owner).toBe(raised.me);
     expect(raised.held).toBeGreaterThanOrEqual(chosen.length);
 
-    await page.getByRole('button', { name: '戦線を引く' }).click();
-    await page.locator('.hud-order-chip').first().click();
-
-    // A day of the battle-plan tick is what turns the order into a line.
-    await page.evaluate(() => { window.__game!.stepHours(26); window.__game!.tickFrame(16); });
-    const plan = await page.evaluate(() => {
-      const g = window.__game!;
-      const army = (g.state.armies ?? []).find((a) => a.id === g.selection.army);
-      return { kind: army?.order?.kind, front: army?.frontProvinces.length ?? 0 };
-    });
-    expect(plan.kind).toBe('front');
-    expect(plan.front).toBeGreaterThan(0);
   });
 
   test('a minor can be courted into the faction from the diplomacy panel', async ({ page }) => {
@@ -1197,13 +1185,14 @@ test.describe('touch input', () => {
     await expect(bar).toHaveClass(/is-on/);
     const geometry = await page.evaluate(() => {
       const b = document.querySelector('.hud-order')!.getBoundingClientRect();
-      const f = document.querySelector('.hud-officers')!.getBoundingClientRect();
+      // The floor is the battle-plan bar now, which stands on the officers.
+      const f = document.querySelector('.hud-plan-tools')!.getBoundingClientRect();
       return { barBottom: b.bottom, footTop: f.top };
     });
     expect(geometry.barBottom).toBeLessThanOrEqual(geometry.footTop);
 
     // And every one of its controls answers a tap where it is drawn.
-    for (const label of ['軍へ編成', '戦線を引く', '進攻・先鋒の計画を引く']) {
+    for (const label of ['軍へ編成']) {
       const btn = page.getByRole('button', { name: label });
       const box = (await btn.boundingBox())!;
       const top = await page.evaluate(
@@ -1214,34 +1203,65 @@ test.describe('touch input', () => {
     }
   });
 
-  test('the order bar can aim an army without opening a panel', async ({ page }) => {
+  test('a front line is drawn on the map, not chosen from a list of countries', async ({ page }) => {
     await bootGame(page);
-    const army = await page.evaluate(() => {
+
+    // 「前線は国ごとの選択じゃなくて自分で国境などに引く」. Frame the ground the
+    // line runs along, take up the 前線 tool, and trace it.
+    const setup = await page.evaluate(() => {
       const g = window.__game!;
       const me = g.state.meta.playerCountry;
-      const a = (g.state.armies ?? []).find((x) => x.owner === me && !x.isArmyGroup)!;
-      g.selectDivisions([...a.divisions], { army: a.id, centre: false });
-      g.tickFrame(16);
-      return a.id;
+      const army = (g.state.armies ?? []).find((a) => a.owner === me && !a.isArmyGroup)!;
+      g.selectDivisions([...army.divisions], { army: army.id, centre: false });
+      const pol = g.state.countries.find((c) => c.tag === 'POL')!;
+      const border = g.index.provinces.filter(
+        (q) => g.state.provinces[q.id]?.controller === me
+          && q.neighbors.some((n) => g.state.provinces[n]?.controller === pol.id),
+      );
+      const c = g.renderer.camera;
+      c.zoom = 0.5;
+      c.x = border.reduce((s, q) => s + q.centerX, 0) / border.length;
+      c.y = border.reduce((s, q) => s + q.centerY, 0) / border.length;
+      c.velocityX = 0;
+      c.velocityY = 0;
+      for (let i = 0; i < 60; i++) g.tickFrame(16.667);
+      return {
+        army: army.id,
+        points: border.map((q) => ({
+          x: c.worldToScreenX(q.centerX), y: c.worldToScreenY(q.centerY),
+        })).filter((q) => q.x > 20 && q.x < 392 && q.y > 200 && q.y < 700),
+      };
     });
+    expect(setup.points.length).toBeGreaterThanOrEqual(2);
 
-    // 攻撃線 and 先鋒 are drawn on the map in the reference, so they are
-    // reachable from the map here too.
-    await page.getByRole('button', { name: '進攻・先鋒の計画を引く' }).click();
-    const chips = page.locator('.hud-order-chip');
-    await expect(chips.first()).toBeVisible();
-    const spearhead = chips.filter({ hasText: '先鋒' }).first();
-    await expect(spearhead).toBeVisible();
-    await spearhead.click();
+    await page.getByRole('button', { name: '前線' }).click();
+    expect(await page.evaluate(() => window.__game!.planTool)).toBe('front');
 
-    const order = await page.evaluate((id) => {
+    await page.mouse.move(setup.points[0].x, setup.points[0].y);
+    await page.mouse.down();
+    for (const q of setup.points.slice(1)) await page.mouse.move(q.x, q.y, { steps: 6 });
+    // The stroke is visible while it is being made: a line the player cannot
+    // see as they draw it is a line they cannot correct.
+    expect(await page.evaluate(() => window.__game!.planDraft.length))
+      .toBeGreaterThanOrEqual(2);
+    await page.mouse.up();
+
+    const drawn = await page.evaluate((id) => {
       const g = window.__game!;
       const a = (g.state.armies ?? []).find((x) => x.id === id)!;
-      return { kind: a.order?.kind ?? null, executing: a.executing === true };
-    }, army);
-    expect(order.kind).toBe('spearhead');
-    // Drawn, not running: the arrow on the officer's card is what starts it.
-    expect(order.executing).toBe(false);
+      return { kind: a.order?.kind ?? null, tool: g.planTool };
+    }, setup.army);
+    expect(drawn.kind).toBe('line');
+    // And the tool is put down again. A mode a player has to remember to leave
+    // is a mode they get stuck in.
+    expect(drawn.tool).toBeNull();
+
+    // A day later the army has worked out where that line actually stands.
+    await page.evaluate(() => { window.__game!.stepHours(26); window.__game!.tickFrame(16); });
+    expect(await page.evaluate((id) => {
+      const a = (window.__game!.state.armies ?? []).find((x) => x.id === id)!;
+      return a.frontProvinces.length;
+    }, setup.army)).toBeGreaterThan(0);
   });
 
   test('a plan waits on the officer card until the arrow is pressed', async ({ page }) => {
