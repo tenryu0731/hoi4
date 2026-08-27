@@ -63,16 +63,28 @@ export const HUD_CSS = `
    but measured on Chromium it does not: a swipe scrolls these rows to 287px
    with the body rule in force and with it removed alike. So these are an
    explicit statement of intent, not a fix for anything. */
-.hud-figures { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* One band, scrolling sideways, holding all three groups. Three stacked rows
+   cost 112px of a 915px screen; side by side they cost 38, and a strip that
+   runs off the edge is a thing a thumb already knows how to deal with. */
+.hud-figures {
+  display: flex; flex-direction: row; align-items: stretch; gap: 8px;
+  min-width: 0; overflow-x: auto; scrollbar-width: none; touch-action: pan-x;
+}
+.hud-figures::-webkit-scrollbar { display: none; }
+.hud-figures > * { flex: 0 0 auto; }
+/* A hairline between the groups, so alerts do not read as another resource. */
+.hud-figures > * + * {
+  border-left: 1px solid #100f0d; box-shadow: -1px 0 0 var(--edge-hi);
+  padding-left: 8px;
+}
 .hud-stats, .hud-resources {
-  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
-  touch-action: pan-x;
+  display: flex; gap: 4px; scrollbar-width: none;
 }
 /* Should a row still not fit, fading the trailing edge is what tells the
    player it continues, rather than the last chip being guillotined by the
    screen edge with no affordance at all. Applied only when the row actually
    overflows: unconditionally, it dimmed the last chip of a row that fits. */
-.hud-stats.is-clipped, .hud-resources.is-clipped, .hud-alerts.is-clipped {
+.hud-figures.is-clipped {
   -webkit-mask-image: linear-gradient(90deg, #000 94%, transparent);
           mask-image: linear-gradient(90deg, #000 94%, transparent);
 }
@@ -124,8 +136,7 @@ export const HUD_CSS = `
 
 /* The alert row. Amber for something idle, red for something being lost. */
 .hud-alerts {
-  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
-  touch-action: pan-x;
+  display: flex; gap: 4px; scrollbar-width: none;
 }
 .hud-alerts.is-empty { display: none; }
 .hud-alerts::-webkit-scrollbar { display: none; }
@@ -816,11 +827,6 @@ export const HUD_CSS = `
   /* The map modes would sit on top of the docked panel. */
   .hud-modes { top: auto; bottom: calc(var(--safe-bottom) + 62px); flex-direction: row; }
   .hud-toasts { max-width: 34%; left: auto; right: 10px; }
-  /* The figures go side by side. Measured on its side: 395px of stats and
-     320px of resources, each stacked in its own 853px row, so the bar spent
-     32px of a 412px screen saying nothing. */
-  .hud-figures { flex-direction: row; align-items: flex-start; }
-  .hud-figures > * { flex: 0 1 auto; min-width: 0; }
   /* Every pixel of bar is a pixel of map. */
   .hud-top { gap: 3px; padding-bottom: 5px; }
   .hud-stats > .hud-stat, .hud-resources > .hud-res { padding: 1px 6px 2px; }

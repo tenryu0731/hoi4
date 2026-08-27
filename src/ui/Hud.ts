@@ -716,13 +716,18 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     markOverflow();
   }
 
-  // The two figure rows share a wrapper so a landscape phone can lay them out
-  // side by side. On its side the screen is 412px tall and the bar was taking
-  // 171 of them -- 41.5%, leaving 184px of map -- while each row used less than
-  // half of the 853px it had.
+  // Alerts, figures and resources are one scrolling band, not three stacked
+  // rows. Measured before this: the bar took 225px of a 915px screen -- 24.6%
+  // of the phone, against 11% in the reference, and 「上側が圧迫しすぎてる」
+  // is what that looks like. The three rows were 68 + 36 and the gaps between
+  // them; side by side in one 38px band they cost 38.
+  //
+  // The order is alerts, then the national figures, then resources: the band
+  // starts at the left, and what is wrong with the country should be the first
+  // thing under the eye rather than the thing that has scrolled away.
   const figures = el('div', 'hud-figures');
-  figures.append(stats, resStrip);
-  top.append(topRow, figures, alertRow, nav);
+  figures.append(alertRow, stats, resStrip);
+  top.append(topRow, figures, nav);
 
   // The rubber band, in the document rather than on the canvas: it is a band
   // on the glass, and drawing it here costs four style writes a frame instead
@@ -760,7 +765,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
    * and nowhere else. The stats row is 395px of content in 396px of space, so
    * a mask that starts at 94% was greying out the last chip on a row that fits.
    */
-  const scrollRows = [stats, resStrip, alertRow];
+  // One scroller now, so one thing to mark. The groups inside it do not
+  // scroll on their own any more.
+  const scrollRows = [figures];
   function markOverflow(): void {
     for (const row of scrollRows) {
       row.classList.toggle('is-clipped', row.scrollWidth > row.clientWidth + 1);

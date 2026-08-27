@@ -379,6 +379,20 @@ export class ProvinceIndex {
     return runs;
   }
 
+  /**
+   * True when a province's outline passes within SHARED_EPS of (x, y).
+   *
+   * The public form of the test `sharedBorder` runs internally. The border
+   * mesh asks it per *edge* rather than per vertex: these polygons average
+   * thirteen sides, so a boundary between two of them is two or three
+   * vertices, and a run built from vertices that both rings agree on is a
+   * two-point stub with nothing joining it to the next one.
+   */
+  outlineCarries(province: ProvinceId, x: number, y: number): boolean {
+    const p = this.provinces[province];
+    return p === undefined ? false : this.nearRings(x, y, p.rings);
+  }
+
   /** True when (x, y) lies within SHARED_EPS of any edge in `rings`. */
   private nearRings(x: number, y: number, rings: readonly Float32Array[]): boolean {
     for (const r of rings) {
