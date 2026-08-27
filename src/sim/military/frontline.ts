@@ -21,6 +21,12 @@ import { stackLimit } from './supply';
  * The preparation numbers are the real game's: 2% of bonus a day, a ceiling of
  * 30% before an officer's planning attribute raises it, 1% a day lost while
  * the plan is executing.
+ *
+ * Drawing a plan and carrying it out are two separate acts, as they are in the
+ * reference -- 「将軍のアイコンの上の計画実行ボタン（矢印のあるボタン）をクリック
+ * して軍や軍集団ごとに実行し、停止する場合は計画実行ボタン左側の赤いボタンを
+ * クリック」. A holding order needs no word to go, because holding is what it
+ * does; an attack waits for one, and the waiting is what buys the bonus.
  */
 
 /** Bonus accumulated per day while an army sits on its plan. */
@@ -210,6 +216,123 @@ export function pressOffensive(
 }
 
 /**
+ * The line an offensive springs from: ours, and touching whoever holds an
+ * objective. Falling back to everyone we are shooting at, and then to the
+ * staging ground itself, so an army that has already crossed the border still
+ * has something drawn for it.
+ */
+function offensiveFront(
+  state: GameState, ctx: MilitaryContext, army: Army, targets: readonly ProvinceId[],
+): ProvinceId[] {
+  const holders = new Set<CountryId>();
+  for (const t of targets) {
+    const c = state.provinces[t]?.controller;
+    if (c !== undefined && c !== army.owner) holders.add(c);
+  }
+  const out = new Set<ProvinceId>();
+  for (const against of holders) {
+    for (const id of frontProvinces(state, ctx.index, army.owner, against)) out.add(id);
+  }
+  if (out.size > 0) return [...out];
+  const hostile = hostileFront(state, ctx.index, army.owner);
+  if (hostile.length > 0) return hostile;
+  // Nothing of ours touches them -- an amphibious objective, or a pocket we
+  // are already inside. Draw the ground the army is standing on instead of
+  // nothing: a plan the map does not show is a plan the player forgot giving.
+  const standing = new Set<ProvinceId>();
+  for (const id of army.divisions) {
+    const div = state.divisions.find((d) => d.id === id);
+    if (div && !div.dead && state.provinces[div.provinceId]?.controller === army.owner) {
+      standing.add(div.provinceId);
+    }
+  }
+  return [...standing];
+}
+
+/** True when every objective of the current plan is in our hands. */
+function isDone(state: GameState, army: Army): boolean {
+  const order = army.order;
+  if (!order) return true;
+  if (order.kind === 'offensive') {
+    return order.targets.every((t) => state.provinces[t]?.controller === army.owner);
+  }
+  if (order.kind === 'spearhead') {
+    return state.provinces[order.target]?.controller === army.owner;
+  }
+  return false;
+}
+
+/**
+ * The route a spearhead drives down.
+ *
+ * One path from the ground the army is standing on to the objective, so the
+ * advance is a corridor rather than a face -- 「目標のワルシャワまでの経路のみ
+ * 進攻する計画になる」. Costed to prefer ground we already hold, so the corridor
+ * runs up our own side of the line before it crosses it, and hostile ground is
+ * expensive rather than forbidden because crossing it is the point.
+ */
+export function corridor(
+  state: GameState, ctx: MilitaryContext, army: Army, target: ProvinceId,
+): ProvinceId[] {
+  const from = nearestHeld(state, ctx, army, target);
+  if (from === null) return [target];
+  const path = ctx.index.path(from, target, {
+    allowSea: true,
+    seaMultiplier: 6,
+    cost: (id) => (state.provinces[id]?.controller === army.owner ? 1 : 4),
+  });
+  return path ?? [target];
+}
+
+/** The army's own province closest to the objective; where the drive starts. */
+function nearestHeld(
+  state: GameState, ctx: MilitaryContext, army: Army, target: ProvinceId,
+): ProvinceId | null {
+  let best: ProvinceId | null = null;
+  let bestCost = Infinity;
+  for (const id of army.divisions) {
+    const div = state.divisions.find((d) => d.id === id);
+    if (!div || div.dead) continue;
+    const cost = ctx.index.distance(div.provinceId, target);
+    if (cost < bestCost) { bestCost = cost; best = div.provinceId; }
+  }
+  return best;
+}
+
+/**
+ * Drives an army down one corridor.
+ *
+ * Everything goes at the first province on the route we do not hold, up to
+ * what that province can carry, and the rest close up behind it. That is what
+ * makes a spearhead a spearhead: it is the same divisions as an offensive
+ * arranged as a column instead of a line, and a column is what cuts a pocket.
+ */
+export function pressSpearhead(
+  state: GameState, ctx: MilitaryContext, army: Army, route: readonly ProvinceId[],
+): void {
+  const tip = route.find((p) => state.provinces[p]?.controller !== army.owner);
+  if (tip === undefined) return;
+
+  const booked = new Map<ProvinceId, number>();
+  const room = (id: ProvinceId): number =>
+    stackLimit(ctx.index, id) - friendlyStack(state, army.owner, id) - (booked.get(id) ?? 0);
+  // Behind the tip, nearest to it first: the queue forms up along the route
+  // rather than piling on the last province of it.
+  const behind = route.slice(0, route.indexOf(tip)).reverse();
+
+  for (const id of army.divisions) {
+    const div = state.divisions.find((d) => d.id === id);
+    if (!div || div.dead || div.combatId !== null || div.detached) continue;
+    for (const target of [tip, ...behind]) {
+      if (room(target) <= 0) continue;
+      if (!reorder(state, ctx, div, target)) continue;
+      booked.set(target, (booked.get(target) ?? 0) + 1);
+      break;
+    }
+  }
+}
+
+/**
  * Sends a division somewhere, unless it is already on its way there.
  *
  * This guard is the whole reason a standing order works at all. orderMove
@@ -291,6 +414,11 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
     const spread = !state.countries[army.owner].isAI;
 
     let front: ProvinceId[] = [];
+    // A plan is drawn, prepared, and then carried out. Holding orders need no
+    // carrying out -- a front line is where an army waits -- but an attack
+    // waits for the word, which is the whole reason the preparation bar is
+    // worth filling.
+    const executing = army.executing === true;
     switch (army.order.kind) {
       case 'front':
         front = frontProvinces(state, ctx.index, army.owner, army.order.against);
@@ -304,11 +432,23 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
         if (spread) assignToFront(state, ctx, army, front);
         break;
       case 'offensive':
-        front = army.order.targets;
-        if (spread) pressOffensive(state, ctx, army, front);
+        // The line the attack is mounted from, not the places it is aimed at.
+        // 攻撃線 is drawn out of a 前線 in the reference and the army goes on
+        // holding one while it attacks; drawing the objectives as the "front"
+        // put the army's own line inside the country it was invading.
+        front = offensiveFront(state, ctx, army, army.order.targets);
+        if (spread && executing) pressOffensive(state, ctx, army, army.order.targets);
+        break;
+      case 'spearhead':
+        front = corridor(state, ctx, army, army.order.target);
+        if (spread && executing) pressSpearhead(state, ctx, army, front);
         break;
     }
     army.frontProvinces = front;
+
+    // A plan that has arrived is finished, and an army left executing a plan
+    // it has completed goes on shedding the preparation for the next one.
+    if (executing && isDone(state, army)) army.executing = false;
 
     accruePlanning(state, army, 1);
   }

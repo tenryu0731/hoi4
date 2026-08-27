@@ -1178,6 +1178,58 @@ test.describe('touch input', () => {
     expect(selected.divisions).toBe(expected[0].divisions);
   });
 
+  test('a plan waits on the officer card until the arrow is pressed', async ({ page }) => {
+    await bootGame(page);
+
+    // Give the first army an attack to prepare for. 「将軍のアイコンの上の
+    // 計画実行ボタン（矢印のあるボタン）をクリックして軍や軍集団ごとに実行し、
+    // 停止する場合は計画実行ボタン左側の赤いボタンをクリック」.
+    const army = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const a = (g.state.armies ?? []).find((x) => x.owner === me && !x.isArmyGroup)!;
+      const target = g.index.provinces.find(
+        (p) => g.state.provinces[p.id]?.controller !== me,
+      )!.id;
+      g.issue({ t: 'setArmyOrder', country: me, army: a.id, order: {
+        kind: 'offensive', targets: [target],
+      } });
+      g.tickFrame(16);
+      return a.id;
+    });
+
+    const card = page.locator(`.hud-officer[data-army="${army}"]`);
+    await expect(card).toBeVisible();
+    const go = card.locator('.hud-plan-btn.is-go');
+    const stop = card.locator('.hud-plan-btn.is-stop');
+
+    // Drawn but not running: the arrow is live and the halt beside it is not.
+    await expect(go).toBeEnabled();
+    await expect(stop).toBeDisabled();
+    expect(await page.evaluate((id) => {
+      const g = window.__game!;
+      return (g.state.armies ?? []).find((a) => a.id === id)!.executing === true;
+    }, army)).toBe(false);
+
+    await go.click();
+    expect(await page.evaluate((id) => {
+      const g = window.__game!;
+      return (g.state.armies ?? []).find((a) => a.id === id)!.executing === true;
+    }, army)).toBe(true);
+    await expect(go).toBeDisabled();
+    await expect(stop).toBeEnabled();
+
+    // And the red button halts it without erasing the plan.
+    await stop.click();
+    const after = await page.evaluate((id) => {
+      const g = window.__game!;
+      const a = (g.state.armies ?? []).find((x) => x.id === id)!;
+      return { executing: a.executing === true, order: a.order?.kind ?? null };
+    }, army);
+    expect(after.executing).toBe(false);
+    expect(after.order).toBe('offensive');
+  });
+
   test('the tabs are at the top, above the map', async ({ page }) => {
     await bootGame(page);
     const geometry = await page.evaluate(() => {

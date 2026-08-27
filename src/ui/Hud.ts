@@ -537,7 +537,8 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     // left alone the rest of the time -- it sits under the player's thumb and
     // a row that rebuilds every frame cannot be tapped.
     const key = mine
-      .map((a) => `${a.id}:${a.name}:${a.commander}:${a.divisions.length}`)
+      .map((a) => `${a.id}:${a.name}:${a.commander}:${a.divisions.length}`
+        + `:${a.order?.kind ?? '-'}:${a.executing === true ? 'x' : '-'}`)
       .join('|');
     if (key === lastOfficerKey) return;
     lastOfficerKey = key;
@@ -549,10 +550,44 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       const limit = commander ? commandLimit(commander) : COMMAND_LIMIT;
       const over = army.divisions.length > limit;
 
-      const card = el('button', 'hud-officer');
+      // A div rather than a button: the execute pair above the portrait are
+      // buttons of their own and HTML will not nest one inside another. The
+      // card still takes a tap anywhere that is not one of them.
+      const card = el('div', 'hud-officer');
       card.dataset.army = String(army.id);
+      card.setAttribute('role', 'button');
+      card.tabIndex = 0;
       card.classList.toggle('is-over', over);
       card.title = commander ? `${commander.name} — ${army.name}` : army.name;
+
+      // 「将軍のアイコンの上の計画実行ボタン（矢印のあるボタン）をクリックして
+      // 軍や軍集団ごとに実行し、停止する場合は計画実行ボタン左側の赤いボタンを
+      // クリック」 -- the stop on the left, the arrow on the right, both above
+      // the portrait, and both dead until the army has a plan to run.
+      const planned = army.order !== null;
+      const running = army.executing === true;
+      const planRow = el('div', 'hud-officer-plan');
+      const stop = el('button', 'hud-plan-btn is-stop', '■');
+      stop.setAttribute('aria-label', UI.planStop);
+      stop.title = UI.planStop;
+      stop.disabled = !planned || !running;
+      const go = el('button', 'hud-plan-btn is-go', '▶');
+      go.setAttribute('aria-label', UI.planExecute);
+      go.title = UI.planExecute;
+      go.disabled = !planned || running;
+      go.classList.toggle('is-live', running);
+      for (const [btn, executing] of [[stop, false], [go, true]] as [HTMLButtonElement, boolean][]) {
+        btn.addEventListener('click', (e) => {
+          // The card beneath takes a tap as "select this army"; the buttons
+          // are not that.
+          e.stopPropagation();
+          game.issue({ t: 'setPlanExecution', country: me, army: army.id, executing });
+          syncOfficers();
+        });
+      }
+      planRow.append(stop, go);
+      card.append(planRow);
+      card.classList.toggle('is-executing', running);
 
       const plate = el('div', 'hud-officer-plate');
       if (commander) {

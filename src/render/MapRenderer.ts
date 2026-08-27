@@ -71,6 +71,13 @@ export interface PlanLine {
   color: number;
   /** Drawn at full strength; the other formations' plans stay quiet. */
   selected: boolean;
+  /**
+   * Whether the plan is being carried out. A plan that has been drawn but not
+   * started is a proposal, and is drawn as one -- faint, with a dashed shaft
+   * on its arrows -- so the map says at a glance which armies are moving and
+   * which are still banking preparation.
+   */
+  executing: boolean;
   /** The tag written on the line: which formation, and how many divisions. */
   label: string;
 }
@@ -782,7 +789,9 @@ export class MapRenderer {
         }
       }
 
-      const emphasis = plan.selected ? 1 : 0.62;
+      // A proposal reads at about half the weight of an order being carried
+      // out, which is enough to see it without mistaking it for troops moving.
+      const emphasis = (plan.selected ? 1 : 0.62) * (plan.executing ? 1 : 0.5);
       if (runs.length > 0) {
         for (const r of runs) this.tracePolyline(g, r.pts);
         g.stroke({
@@ -821,7 +830,9 @@ export class MapRenderer {
         if (!to) continue;
         const from = this.nearestOf(plan.provinces, to.centerX, to.centerY);
         if (!from) continue;
-        this.traceArrow(g, from.centerX, from.centerY, to.centerX, to.centerY, zoom);
+        this.traceArrow(
+          g, from.centerX, from.centerY, to.centerX, to.centerY, zoom, plan.executing,
+        );
       }
       if (plan.targets.length > 0) {
         g.stroke({
@@ -946,6 +957,7 @@ export class MapRenderer {
   /** A straight shaft with a head, in world units, left unstroked. */
   private traceArrow(
     g: Graphics, x0: number, y0: number, x1: number, y1: number, zoom: number,
+    solid = true,
   ): void {
     const dx = x1 - x0;
     const dy = y1 - y0;
@@ -958,8 +970,19 @@ export class MapRenderer {
     const head = Math.min(len * 0.35, 22 / zoom);
     const tipX = x1 - ux * head * 0.5;
     const tipY = y1 - uy * head * 0.5;
-    g.moveTo(x0, y0);
-    g.lineTo(tipX, tipY);
+    const shaft = Math.sqrt((tipX - x0) ** 2 + (tipY - y0) ** 2);
+    if (solid) {
+      g.moveTo(x0, y0);
+      g.lineTo(tipX, tipY);
+    } else {
+      // A dashed shaft: the plan exists but nobody has been told to walk it.
+      const dash = Math.max(6 / zoom, shaft / 24);
+      for (let d = 0; d < shaft; d += dash * 2) {
+        const e = Math.min(d + dash, shaft);
+        g.moveTo(x0 + ux * d, y0 + uy * d);
+        g.lineTo(x0 + ux * e, y0 + uy * e);
+      }
+    }
     g.moveTo(tipX - ux * head + uy * head * 0.55, tipY - uy * head - ux * head * 0.55);
     g.lineTo(tipX, tipY);
     g.lineTo(tipX - ux * head - uy * head * 0.55, tipY - uy * head + ux * head * 0.55);

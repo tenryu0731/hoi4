@@ -125,6 +125,8 @@ export const UI = {
   planLabel: (army: string, divisions: number): string => `${army} · ${divisions}個師団`,
   planOffensive: (army: string, divisions: number): string =>
     `${army} · ${divisions}個師団 進攻`,
+  planSpearhead: (army: string, divisions: number): string =>
+    `${army} · ${divisions}個師団 先鋒`,
   /** Shown while a stack is under orders and the next tap sets its objective. */
   orderHint: (n: number): string => `${n}個師団 — 移動先をタップ`,
   /* The order bar's own buttons, on the map rather than in a panel. Two
@@ -211,10 +213,18 @@ export const UI = {
   orderNone: '命令なし',
   orderFront: '戦線を保持',
   orderOffensive: '進攻',
+  orderSpearhead: '先鋒',
   orderGarrison: '駐屯',
   setOrderFront: '戦線',
   setOrderAttack: '進攻',
+  setOrderSpearhead: '先鋒',
   setOrderClear: '解除',
+  /** The arrow button above the general's portrait: 計画実行. */
+  planExecute: '計画実行',
+  /** The red button to its left, which halts the plan without erasing it. */
+  planStop: '停止',
+  planPreparing: '準備中',
+  planExecuting: '実行中',
   pickEnemy: '対象',
   divisionsInArmy: '個師団',
   /** A division's name: the 12 in 第12歩兵師団. */

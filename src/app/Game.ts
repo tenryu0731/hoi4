@@ -345,15 +345,26 @@ export class Game {
       const strength = army.divisions.reduce(
         (n, id) => n + (this.state.divisions[id]?.dead === false ? 1 : 0), 0,
       );
-      const offensive = army.order?.kind === 'offensive';
+      const kind = army.order?.kind;
+      // A spearhead's objective is the one place it is driving at; an
+      // offensive's are the several it is spread across. Both draw as arrows,
+      // and the spearhead's frontProvinces are its corridor, so the arrow runs
+      // along the route rather than across open ground.
+      const targets = army.order === null ? []
+        : army.order.kind === 'offensive' ? army.order.targets
+        : army.order.kind === 'spearhead' ? [army.order.target]
+        : [];
       out.push({
         owner: me,
         provinces: army.frontProvinces,
-        targets: offensive && army.order?.kind === 'offensive' ? army.order.targets : [],
+        targets,
         color: Game.PLAN_COLORS[i % Game.PLAN_COLORS.length],
-        label: offensive
+        label: kind === 'offensive'
           ? UI.planOffensive(army.name, strength)
-          : UI.planLabel(army.name, strength),
+          : kind === 'spearhead'
+            ? UI.planSpearhead(army.name, strength)
+            : UI.planLabel(army.name, strength),
+        executing: army.executing === true,
         // With nothing selected every plan is drawn at full strength: the
         // player is looking at the whole board. Selecting one is what pushes
         // the others back.

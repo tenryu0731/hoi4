@@ -559,6 +559,11 @@ export const HUD_CSS = `
   display: block; height: 100%; width: 0%;
   background: linear-gradient(180deg, #e2c184 0%, #a8853f 100%);
 }
+/* Preparation being spent rather than banked: the bar of an army that is
+   carrying its plan out reads green and is falling, not rising. */
+.panel-bar.is-live .panel-bar-fill {
+  background: linear-gradient(180deg, #c3d68a 0%, #6d7a4a 100%);
+}
 .panel-empty { font-size: 11px; color: var(--ink-dim); padding: 8px 0; }
 /* An editable field on a card. Sized as a control rather than as text: a
    44px target and 16px type, which is also the size Safari stops zooming the
@@ -701,6 +706,24 @@ export const HUD_CSS = `
   color: var(--ink); cursor: pointer;
 }
 .hud-officer:active { background: linear-gradient(180deg, #201e1a 0%, #2a2823 100%); }
+/* An army carrying out its plan, rather than preparing one. */
+.hud-officer.is-executing { border-color: #6d7a4a; }
+/* The execute pair, above the portrait: stop on the left, arrow on the right.
+   Small, because they sit over a 34px plate and the card is 66px wide, but the
+   row itself is 22px tall so the touch target is not only the glyph. */
+.hud-officer-plan {
+  display: flex; gap: 2px; width: 100%; height: 20px; margin-bottom: 1px;
+}
+.hud-plan-btn {
+  flex: 1 1 0; min-width: 0; height: 100%; padding: 0;
+  font-size: 10px; line-height: 1;
+  background: #2b2822; border: 1px solid #100f0c; border-radius: 2px;
+  color: var(--ink-dim); cursor: pointer;
+}
+.hud-plan-btn:disabled { opacity: 0.32; cursor: default; }
+.hud-plan-btn.is-stop:not(:disabled) { color: #e2796c; border-color: #6b2f28; }
+.hud-plan-btn.is-go:not(:disabled) { color: #b6c77e; border-color: #4d5730; }
+.hud-plan-btn:not(:disabled):active { background: #3d3830; }
 /* The frame the portrait sits in, which is what carries rank. */
 .hud-officer-plate {
   width: 34px; height: 42px; overflow: hidden;
@@ -814,6 +837,11 @@ button:active { transform: scale(0.96); }
   background: linear-gradient(180deg, #e0bd7c 0%, #b08f4e 100%);
   border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
+.panel-chip:disabled { opacity: 0.4; }
+/* The plan pair. The red halt on the left of the arrow, as the reference has
+   them, and coloured so which is which reads before the label does. */
+.panel-chip.is-stop:not(:disabled) { color: #e2796c; border-color: #6b2f28; }
+.panel-chip.is-go:not(:disabled) { color: #b6c77e; border-color: #4d5730; }
 .panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
 
 /* --- production ---------------------------------------------------------- */
