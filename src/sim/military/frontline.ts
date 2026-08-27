@@ -144,68 +144,138 @@ export const LINE_DRIFT = 3;
  * the day Poland fell.
  */
 export function lineFront(
-  state: GameState, ctx: MilitaryContext, army: Army,
-  anchors: readonly ProvinceId[], span: number,
+  state: GameState, ctx: MilitaryContext, army: Army, anchors: readonly ProvinceId[],
 ): ProvinceId[] {
   const ours = (id: ProvinceId): boolean => state.provinces[id]?.controller === army.owner;
   const faces = (id: ProvinceId): boolean =>
     ctx.index.get(id).neighbors.some((nb) => !ours(nb));
-  const held = anchors.filter(ours);
 
-  // A line the player traced in the interior faces nobody, and it stays where
-  // it was traced. 「国境線じゃないところに戦線引こうとした時とか」: the drift
-  // search below is a *correction* to a line that is already on a border, and
-  // running it on one that is not walked the plan three provinces sideways
-  // onto the nearest frontier -- 670km on this map -- which is not where the
-  // player put their finger.
+  // Each post moves at most one province a day, on its own, and the line keeps
+  // the order and the length the finger gave it.
+  //
+  // What this replaces searched three hops out from the whole line and then
+  // kept whichever border provinces were nearest -- and "nearest" over a set
+  // has no memory of shape. Measured on a line traced across the four northern
+  // provinces of the Polish border: after one advance it came back as four
+  // provinces two hundred kilometres to the south, half of them behind the
+  // line rather than on it. A front that reappears somewhere else is not a
+  // front the player drew.
+  // A line none of whose posts faces anybody is a holding line, and it stays
+  // exactly where it was traced. Stepping it forward would walk a reserve line
+  // drawn behind the front onto the front the moment it was given, which is
+  // 「国境線じゃないところに戦線引こうとした時」.
+  const held = anchors.filter(ours);
   if (held.length > 0 && !held.some(faces)) return held;
 
-  let ring = held;
-  if (ring.length === 0) {
-    // Every anchor was lost. Start from our own ground next to where the line
-    // used to be, so a driven-back army re-forms behind the old line rather
-    // than losing its plan outright.
-    const seeds = new Set<ProvinceId>();
-    for (const a of anchors) {
-      for (const nb of ctx.index.get(a).neighbors) if (ours(nb)) seeds.add(nb);
-    }
-    ring = [...seeds];
+  const out: ProvinceId[] = [];
+  const seen = new Set<ProvinceId>();
+  for (const a of anchors) {
+    const moved = step(ctx, a, ours, faces);
+    if (moved === null || seen.has(moved)) continue;
+    seen.add(moved);
+    out.push(moved);
   }
-  if (ring.length === 0) return [];
+  return out;
+}
 
-  const seen = new Set<ProvinceId>(ring);
-  for (let hop = 0; hop < LINE_DRIFT; hop++) {
+/**
+ * Where one post of a drawn line stands today.
+ *
+ * Held and facing somebody: it is already the front, and it stays. Held but
+ * facing nobody: the army advanced past it, so the post follows to the nearest
+ * neighbour that does face somebody. Lost: the post falls back to the nearest
+ * neighbour we still hold. One province either way -- a line that can teleport
+ * is a line the player has to keep checking.
+ */
+function step(
+  ctx: MilitaryContext, at: ProvinceId,
+  ours: (id: ProvinceId) => boolean, faces: (id: ProvinceId) => boolean,
+): ProvinceId | null {
+  if (ours(at)) {
+    if (faces(at)) return at;
+    const ahead = ctx.index.get(at).neighbors.find((nb) => ours(nb) && faces(nb));
+    return ahead ?? at;
+  }
+  const back = ctx.index.get(at).neighbors;
+  return back.find((nb) => ours(nb) && faces(nb)) ?? back.find(ours) ?? null;
+}
+
+/**
+ * The run of front line between two places, along the front itself.
+ *
+ * 「実際のhoi4みたいに端から延長したり縮めたり」. Dragging an end of a line does
+ * not draw a new line freehand: it says how far along the border this army's
+ * line now reaches, and everything between the far end and the finger belongs
+ * to it. Walking our own facing provinces gets that run without the player
+ * having to trace it, which on a 412px screen they cannot do accurately
+ * anyway.
+ *
+ * Both ends snap to the front: a finger that drifts a province inland while
+ * dragging still means "out to about here".
+ */
+export function frontChain(
+  state: GameState, ctx: MilitaryContext, owner: CountryId,
+  from: ProvinceId, to: ProvinceId,
+): ProvinceId[] {
+  const ours = (id: ProvinceId): boolean => state.provinces[id]?.controller === owner;
+  const onFront = (id: ProvinceId): boolean =>
+    ours(id) && ctx.index.get(id).neighbors.some((nb) => !ours(nb));
+
+  const a = snapToFront(ctx, from, ours, onFront);
+  const b = snapToFront(ctx, to, ours, onFront);
+  if (a === null || b === null) return [];
+  if (a === b) return [a];
+
+  // Breadth-first through the front, so the run is the shortest way along it
+  // rather than a line drawn through the country behind it.
+  const prev = new Map<ProvinceId, ProvinceId>();
+  const seen = new Set<ProvinceId>([a]);
+  let ring: ProvinceId[] = [a];
+  while (ring.length > 0 && !seen.has(b)) {
     const next: ProvinceId[] = [];
     for (const id of ring) {
       for (const nb of ctx.index.get(id).neighbors) {
-        if (seen.has(nb) || !ours(nb)) continue;
+        if (seen.has(nb) || !onFront(nb)) continue;
         seen.add(nb);
+        prev.set(nb, id);
         next.push(nb);
       }
     }
-    if (next.length === 0) break;
     ring = next;
   }
+  if (!seen.has(b)) return [];
 
-  const facing = [...seen].filter(faces);
-  // Nothing anywhere near it faces us either. Returning the search instead --
-  // everything within three hops -- is what made a line swallow the country:
-  // the result becomes tomorrow's anchors, so the blob fed itself.
-  if (facing.length === 0) return held;
-  if (facing.length <= span) return facing;
+  const chain: ProvinceId[] = [b];
+  for (let at = b; at !== a;) {
+    const back = prev.get(at);
+    if (back === undefined) return [];
+    chain.push(back);
+    at = back;
+  }
+  return chain.reverse();
+}
 
-  // More border than the player asked for. Keep the part nearest the line they
-  // drew, so the front follows rather than jumping to the far end of it.
-  const near = (id: ProvinceId): number => {
-    let best = Infinity;
-    for (const a of anchors) best = Math.min(best, ctx.index.distance(id, a));
-    return best;
-  };
-  return facing
-    .map((id) => ({ id, d: near(id) }))
-    .sort((a, b) => a.d - b.d || a.id - b.id)
-    .slice(0, span)
-    .map((x) => x.id);
+/** The nearest province that is actually on the front, walking our ground. */
+function snapToFront(
+  ctx: MilitaryContext, from: ProvinceId,
+  ours: (id: ProvinceId) => boolean, onFront: (id: ProvinceId) => boolean,
+): ProvinceId | null {
+  if (onFront(from)) return from;
+  const seen = new Set<ProvinceId>([from]);
+  let ring: ProvinceId[] = [from];
+  for (let hop = 0; hop < LINE_DRIFT && ring.length > 0; hop++) {
+    const next: ProvinceId[] = [];
+    for (const id of ring) {
+      for (const nb of ctx.index.get(id).neighbors) {
+        if (seen.has(nb)) continue;
+        seen.add(nb);
+        if (onFront(nb)) return nb;
+        if (ours(nb)) next.push(nb);
+      }
+    }
+    ring = next;
+  }
+  return null;
 }
 
 /** Divisions of one country standing in a province. */
@@ -513,8 +583,7 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
         // The length the finger drew, remembered the first time it is asked
         // for: a save written before the span existed still knows how long its
         // line was, because its anchors are still the ones that were drawn.
-        army.order.span ??= army.order.anchors.length;
-        front = lineFront(state, ctx, army, army.order.anchors, army.order.span);
+        front = lineFront(state, ctx, army, army.order.anchors);
         // What the line worked out today is what it anchors on tomorrow, so a
         // drawn front walks forward with the army that holds it instead of
         // staying pinned to the ground it was first traced over.

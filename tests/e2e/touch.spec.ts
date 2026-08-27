@@ -1343,6 +1343,85 @@ test.describe('touch input', () => {
     expect(await page.evaluate(() => window.__game!.selection.divisions.length)).toBe(0);
   });
 
+  test('a front line is extended and shortened from its ends', async ({ page }) => {
+    await bootGame(page);
+    // 「国境でも国境の一部だけ引くとか」「実際のhoi4みたいに端から延長したり
+    // 縮めたり」. Grabbing an end says how far along the border this line now
+    // reaches; starting clear of it draws a new one.
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const pol = g.state.countries.find((c) => c.tag === 'POL')!;
+      const army = (g.state.armies ?? []).find((a) => a.owner === me && !a.isArmyGroup)!;
+      g.selectDivisions([...army.divisions], { army: army.id, centre: false });
+      const border = g.index.provinces.filter(
+        (q) => g.state.provinces[q.id]?.controller === me
+          && q.neighbors.some((n) => g.state.provinces[n]?.controller === pol.id),
+      );
+      // One run of it: East Prussia's border is a separate piece, and a line
+      // cannot reach across the corridor between them.
+      const reach = new Set(g.index.reachable(
+        border[border.length - 1].id,
+        (x) => g.state.provinces[x]?.controller === me, { includeSea: false },
+      ));
+      const main = border.filter((q) => reach.has(q.id));
+      const c = g.renderer.camera;
+      c.zoom = 0.62;
+      c.x = main.reduce((s, q) => s + q.centerX, 0) / main.length;
+      c.y = main.reduce((s, q) => s + q.centerY, 0) / main.length;
+      c.velocityX = 0;
+      c.velocityY = 0;
+      for (let i = 0; i < 60; i++) g.tickFrame(16.667);
+      return {
+        army: army.id,
+        points: main.map((q) => ({
+          name: q.name,
+          x: Math.round(c.worldToScreenX(q.centerX)),
+          y: Math.round(c.worldToScreenY(q.centerY)),
+        })).filter((q) => q.x > 20 && q.x < 392 && q.y > 200 && q.y < 700),
+      };
+    });
+    expect(setup.points.length).toBeGreaterThanOrEqual(4);
+
+    const stroke = async (pts: { x: number; y: number }[]) => {
+      await page.getByRole('button', { name: '前線', exact: true }).click();
+      await page.mouse.move(pts[0].x, pts[0].y);
+      await page.mouse.down();
+      for (const q of pts.slice(1)) await page.mouse.move(q.x, q.y, { steps: 6 });
+      await page.mouse.up();
+      await page.evaluate(() => { window.__game!.stepHours(26); window.__game!.tickFrame(16); });
+    };
+    const anchors = async (): Promise<string[]> => page.evaluate((id) => {
+      const g = window.__game!;
+      const a = (g.state.armies ?? []).find((x) => x.id === id)!;
+      return a.order?.kind === 'line' ? a.order.anchors.map((q) => g.index.get(q).name) : [];
+    }, setup.army);
+
+    // Part of the border, not all of it.
+    await stroke(setup.points.slice(1, 3));
+    const drawn = await anchors();
+    expect(drawn).toHaveLength(2);
+    expect(drawn.length).toBeLessThan(setup.points.length);
+
+    // Grab the end and drag outward: longer, and still starting where it did.
+    const grab = setup.points.find((q) => q.name === drawn[drawn.length - 1])!;
+    await stroke([grab, setup.points[setup.points.length - 1]]);
+    const longer = await anchors();
+    expect(longer.length).toBeGreaterThan(drawn.length);
+    expect(longer[0]).toBe(drawn[0]);
+
+    // Grab it again and drag back along itself: shorter.
+    const grab2 = setup.points.find((q) => q.name === longer[longer.length - 1])!;
+    await stroke([grab2, setup.points[1]]);
+    expect((await anchors()).length).toBeLessThan(longer.length);
+
+    // And a stroke that starts clear of the line is a new line, which is how
+    // it gets redrawn somewhere else.
+    await stroke([setup.points[0], setup.points[1]]);
+    const fresh = await anchors();
+    expect(fresh[0]).toBe(setup.points[0].name);
+  });
+
   test('a rectangle puts what it caught in a list beside the map', async ({ page }) => {
     await bootGame(page);
     // 「全然範囲選択できてないやん」「範囲選択したら横に出るんだよ」. The rectangle

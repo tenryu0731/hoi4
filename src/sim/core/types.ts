@@ -368,21 +368,7 @@ export type ArmyOrder =
    * walks forward with the army and back with it, and only needs redrawing
    * when the player wants it somewhere else.
    */
-  | {
-    kind: 'line';
-    anchors: ProvinceId[];
-    /**
-     * How many provinces the finger actually drew.
-     *
-     * The anchors are replaced every day by wherever the line stands now, so
-     * without a remembered length the plan grows: three provinces become the
-     * forty within three hops of them, and those forty become everything
-     * within three hops of *those*. Measured on a line drawn inland, the order
-     * covered the whole country inside a week. The span is the promise that a
-     * drawn line stays the length it was drawn.
-     */
-    span?: number;
-  }
+  | { kind: 'line'; anchors: ProvinceId[] }
   | { kind: 'garrison'; provinces: ProvinceId[] };
 
 /**
