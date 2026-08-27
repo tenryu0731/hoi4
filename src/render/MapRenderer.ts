@@ -14,6 +14,7 @@ import {
 } from './textures';
 import { NATIONS } from '../sim/scenario/nations';
 import { supplyCapacity } from '../sim/military/supply';
+import { ports } from '../sim/military/ports';
 import { FONT_PLAN, LabelLayer } from './layers/LabelLayer';
 import { UnitLayer, type DragOrder } from './layers/UnitLayer';
 import { country } from '../ui/strings';
@@ -304,10 +305,56 @@ export class MapRenderer {
    * applying a scale to the layer: scaling a Graphics scales its coordinates
    * too, which would drag every city towards the world origin.
    */
-  private buildCities(zoom: number): void {
+  /**
+   * Whether harbours are being pointed out.
+   *
+   * Set while the player is holding the transfer or the assault tool, which is
+   * the one moment they need to know where a ship can put in. The rest of the
+   * time a port is drawn faintly: it is a fact about the map, not a thing
+   * competing with the counters for attention.
+   */
+  private portsLit = false;
+
+  /** Exposed so a test can assert the harbours are being pointed out. */
+  get portsAreLit(): boolean {
+    return this.portsLit;
+  }
+
+  setPortsLit(lit: boolean): void {
+    if (lit === this.portsLit) return;
+    this.portsLit = lit;
+    if (this.cityLayer.visible && this.lodStep >= 0) {
+      this.buildCities(this.camera.zoom, this.lodStep);
+    }
+  }
+
+  private buildCities(zoom: number, step: number): void {
     const g = this.cityLayer;
     g.clear();
     const u = 1 / Math.max(1e-4, zoom);
+
+    // Harbours, under the towns. A ring rather than a disc, so a port that is
+    // also a city reads as both rather than as a bigger city, and in a colour
+    // nothing else on the map uses.
+    const harbours = ports(this.index);
+    const lit = this.portsLit;
+    for (const id of harbours) {
+      const p = this.index.provinces[id];
+      if (!p) continue;
+      g.circle(p.centerX, p.centerY, (lit ? 6.4 : 4.6) * u);
+    }
+    g.stroke({ color: 0x6fd0e0, width: (lit ? 2.4 : 1.4) * u, alpha: lit ? 0.95 : 0.42 });
+    if (lit) {
+      for (const id of harbours) {
+        const p = this.index.provinces[id];
+        if (!p) continue;
+        g.circle(p.centerX, p.centerY, 2.2 * u);
+      }
+      g.fill({ color: 0x6fd0e0, alpha: 0.8 });
+    }
+
+    // The towns themselves only once the map is close enough to carry them.
+    if (step < 2) return;
     for (const c of this.index.data.cities) {
       if (c.capitalOf) {
         g.star(c.x, c.y, 5, 7 * u, 3.2 * u);
@@ -413,8 +460,11 @@ export class MapRenderer {
       rg.stroke({ color: PALETTE.river, width: px(1.3), alpha: 0.55, join: 'round', cap: 'round' });
     }
 
-    this.cityLayer.visible = step >= 2;
-    if (this.cityLayer.visible) this.buildCities(zoom);
+    // Harbours are drawn a zoom band earlier than towns: choosing where to
+    // land is a strategic decision and it is made at strategic zoom.
+    this.lodStep = step;
+    this.cityLayer.visible = step >= 1;
+    if (this.cityLayer.visible) this.buildCities(zoom, step);
     this.labels.setLod(step, zoom);
     this.units.setZoom(zoom);
   }

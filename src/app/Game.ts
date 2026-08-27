@@ -9,7 +9,9 @@ import { MapRenderer, type PlanLine, type SelectionScope } from '../render/MapRe
 import type { MapMode } from '../render/palette';
 import { TouchController } from '../input/TouchController';
 import { ZOOM_AGGREGATE_STATES } from '../render/layers/UnitLayer';
-import { sealiftCapacity } from '../sim/military/movement';
+import {
+  planTransport, sealiftCapacity, type TransportBlock,
+} from '../sim/military/movement';
 import { nextArmyName } from '../sim/military/command';
 import { UI } from '../ui/strings';
 
@@ -20,10 +22,14 @@ import { UI } from '../ui/strings';
  * they cover. `spearhead` and `invade` are aimed: one province is the target,
  * and a stroke would be four ways of saying the same thing.
  */
-export type PlanTool = 'front' | 'offensive' | 'garrison' | 'spearhead' | 'invade' | null;
+export type PlanTool =
+  | 'front' | 'offensive' | 'garrison' | 'spearhead' | 'invade' | 'transport' | null;
 
 /** Tools drawn with a stroke rather than a tap. */
 const PAINTED = new Set<PlanTool>(['front', 'offensive', 'garrison']);
+
+/** Tools that take a single objective from a tap. */
+const AIMED = new Set<PlanTool>(['spearhead', 'invade', 'transport']);
 
 /**
  * Composition root. Owns the loop and wires the three halves of the program
@@ -258,6 +264,8 @@ export class Game {
     this.input.update(dtMs);
     this.renderer.setDragOrder(this.dragOrder);
     this.renderer.setPlans(this.planLines());
+    // Harbours are pointed out while a tool that needs one is in hand.
+    this.renderer.setPortsLit(this.planTool === 'transport' || this.planTool === 'invade');
     this.renderer.update(dtMs, this.state);
     for (const fn of this.listeners) fn();
   }
@@ -458,9 +466,11 @@ export class Game {
     // would be four ways of saying the same thing. Painted tools fall through
     // -- a stroke is what those are for -- so a tap with one held is just a
     // tap, and the player can still read the ground while holding a pen.
-    if (id !== null && (this.planTool === 'spearhead' || this.planTool === 'invade')) {
+    if (id !== null && AIMED.has(this.planTool)) {
+      const tool = this.planTool;
       this.planDraft = [id];
-      if (this.planTool === 'invade') { this.orderInvasion(id); return; }
+      if (tool === 'invade') { this.orderInvasion(id); return; }
+      if (tool === 'transport') { this.orderTransport(id); return; }
       this.commitPlanDraft();
       return;
     }
@@ -682,6 +692,33 @@ export class Game {
     const divisions = [...this.selection.divisions];
     if (divisions.length === 0) return;
     this.issue({ t: 'moveDivisions', divisions, target });
+  }
+
+  /**
+   * Ships the selection to a harbour, rather than at a beach.
+   *
+   * 「強襲上陸とは別に港を経由して移動できるように」. The result is reported
+   * rather than swallowed: every way this can fail has a different answer --
+   * march inland to a quay, take a harbour first, or build some ships -- and
+   * an order that silently does nothing is the worst of the three.
+   */
+  transportBlock: TransportBlock | null = null;
+
+  orderTransport(target: ProvinceId): void {
+    this.planTool = null;
+    this.planDraft = [];
+    const divisions = [...this.selection.divisions];
+    if (divisions.length === 0) return;
+    // Asked before the command goes out, so the interface can say why nothing
+    // happened. They start in the same place often enough that the first one's
+    // answer is the answer for the group.
+    const first = this.state.divisions[divisions[0]];
+    if (!first) return;
+    this.transportBlock = planTransport(
+      this.state, this.index, first.owner, first.provinceId, target,
+    ).block;
+    if (this.transportBlock !== 'ok') return;
+    this.issue({ t: 'transportDivisions', divisions, target });
   }
 
   /** How many more divisions this country can put to sea right now. */

@@ -1343,6 +1343,71 @@ test.describe('touch input', () => {
     expect(await page.evaluate(() => window.__game!.selection.divisions.length)).toBe(0);
   });
 
+  test('a division sails to an overseas port instead of storming it', async ({ page }) => {
+    await bootGame(page);
+    // 「強襲上陸とは別に港を経由して移動できるように」. East Prussia is German and
+    // cannot be walked to now that a peacetime border is a border, so this is
+    // the journey that used to require invading your own province.
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const d = g.state.divisions.find((x) => x.owner === me && !x.dead)!;
+      const reach = new Set(g.index.reachable(
+        d.provinceId, (q) => g.state.provinces[q]?.controller === me, { includeSea: false },
+      ));
+      const overseas = g.index.provinces.find(
+        (q) => g.state.provinces[q.id]?.controller === me && !reach.has(q.id),
+      )!;
+      g.selectDivisions([d.id], { centre: false });
+      g.tickFrame(16);
+      return { division: d.id, overseas: overseas.id, org: d.org };
+    });
+
+    await page.getByRole('button', { name: '海上輸送' }).click();
+    expect(await page.evaluate(() => window.__game!.planTool)).toBe('transport');
+    // Harbours are pointed out while the tool is in hand, which is the one
+    // moment the player needs to know where a ship can put in. Read after a
+    // frame: the map is told what to light on the frame, as it is told what
+    // plans to draw.
+    expect(await page.evaluate(() => {
+      window.__game!.tickFrame(16.667);
+      return window.__game!.renderer.portsAreLit;
+    })).toBe(true);
+
+    const route = await page.evaluate((s) => {
+      const g = window.__game!;
+      g.orderTransport(s.overseas);
+      const d = g.state.divisions.find((x) => x.id === s.division)!;
+      let prev = d.provinceId;
+      let voyages = 0;
+      for (const step of d.path) {
+        if (!g.index.areAdjacent(prev, step)) voyages++;
+        prev = step;
+      }
+      return { block: g.transportBlock, steps: d.path.length, voyages, tool: g.planTool };
+    }, setup);
+    expect(route.block).toBe('ok');
+    expect(route.steps).toBeGreaterThan(1);
+    // Exactly one leg is a voyage: march to the quay, sail, march inland.
+    expect(route.voyages).toBe(1);
+    expect(route.tool).toBeNull();
+
+    const arrival = await page.evaluate((s) => {
+      const g = window.__game!;
+      for (let day = 0; day < 90; day++) {
+        const d = g.state.divisions.find((x) => x.id === s.division)!;
+        if (d.path.length === 0) break;
+        g.stepHours(24);
+      }
+      const d = g.state.divisions.find((x) => x.id === s.division)!;
+      return { where: d.provinceId, org: d.org };
+    }, setup);
+    expect(arrival.where).toBe(setup.overseas);
+    // Nobody was shooting at the quay: the men walked off in the order they
+    // walked on. An assault is what costs a division its organisation.
+    expect(arrival.org).toBeGreaterThanOrEqual(setup.org * 0.95);
+  });
+
   test('a plan waits on the officer card until the arrow is pressed', async ({ page }) => {
     await bootGame(page);
 

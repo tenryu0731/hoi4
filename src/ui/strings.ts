@@ -234,14 +234,25 @@ export const UI = {
   toolSpearheadHint: '敵地を一箇所たたいて突破目標にする',
   toolGarrison: '駐屯',
   toolGarrisonHint: '自国領をなぞって駐屯地にする',
-  toolInvade: '上陸',
-  toolInvadeHint: '海の向こうの一箇所をたたいて上陸目標にする',
+  toolInvade: '強襲上陸',
+  toolInvadeHint: '敵の海岸を一箇所たたいて強襲上陸する（組織率を大きく失う）',
+  toolTransport: '海上輸送',
+  toolTransportHint: '味方の港へ一箇所たたいて船で送る（港から港へ）',
   toolClear: '削除',
   toolClearHint: '計画を消す',
   planNeedsArmy: 'まず軍を選んでください',
   planDrawnOnMap: '計画は地図の下の「戦闘計画」から引きます',
   planDrawn: (n: number): string => `${n}州の計画を引いた`,
   planCleared: '計画を消した',
+  /* Why a sea transfer could not be arranged. Each has a different answer, so
+     each says which one it is rather than 「できません」. */
+  transportNoPortHere: 'この師団の近くに使える港がありません',
+  transportNoPortThere: '目的地の近くに味方の港がありません',
+  transportSameCoast: '同じ海岸なので、歩いて行けます',
+  transportNoShipping: '輸送船がありません（造船所か船団が要ります）',
+  transportNoRoad: 'その港から目的地まで陸路がありません',
+  transportSailing: (n: number, free: number): string =>
+    `${n}個師団を乗船させました · 空き船腹 ${free}`,
   pickEnemy: '対象',
   divisionsInArmy: '個師団',
   /** A division's name: the 12 in 第12歩兵師団. */

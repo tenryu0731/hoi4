@@ -7,9 +7,10 @@ import {
   resolveCombatRound, terrainProfile, tickDivisionUpkeep,
 } from '../../src/sim/military/combat';
 import {
-  captureProvince, hasAccess, isHostile, movementSpeed, orderMove, placeDivision,
-  retreat, sealiftCapacity, tickMilitaryHourly, tickReinforcementDaily,
+  captureProvince, hasAccess, isHostile, isVoyage, movementSpeed, orderMove, placeDivision,
+  planTransport, retreat, sealiftCapacity, tickMilitaryHourly, tickReinforcementDaily,
 } from '../../src/sim/military/movement';
+import { isPort, nearestUsablePort, ports } from '../../src/sim/military/ports';
 import {
   SUPPLY_HUB_VP, SUPPLY_RANGE, computeSupply, encircledProvinces, stackLimit, supplySources,
   tickSupplyDaily,
@@ -22,6 +23,7 @@ import { TERRAIN } from '../../src/sim/core/data';
 import { TERRAIN_TYPES } from '../../src/sim/core/types';
 import type { Division, GameState, ProvinceId } from '../../src/sim/core/types';
 import { makeFixture, type Fixture } from './helpers/fixture';
+import { TimeEngine } from '../../src/sim/time/TimeEngine';
 
 function ctxOf(f: Fixture) {
   return { index: f.index };
@@ -1140,5 +1142,132 @@ describe('supply throughput', () => {
     const heavy = measure(30);
     expect(light).toBeGreaterThan(0);
     expect(heavy).toBeLessThan(light * 0.6);
+  });
+});
+
+
+describe('harbours and transfers by sea', () => {
+  it('gives every coastal country somewhere to put a man on a ship', () => {
+    // 「強襲上陸とは別に港を経由して移動できるように」 only means anything if
+    // there are harbours to go via. Measured on this map: 426 coastal
+    // provinces, 334 of which carry a single victory point and 92 three or
+    // more. The gap is the map saying "there is a town here", so the
+    // threshold reads the data rather than picking a number -- but Bulgaria
+    // and Lithuania have a coastline and no coastal town, and both of them
+    // historically had exactly one port.
+    const f = makeFixture();
+    const harbours = ports(f.index);
+    expect(harbours.size).toBeGreaterThan(60);
+    expect(harbours.size).toBeLessThan(f.index.provinces.length / 8);
+    for (const id of harbours) expect(f.index.get(id).coastal).toBe(true);
+
+    const coastal = new Map<string, number>();
+    for (const p of f.index.provinces) {
+      if (!p.coastal) continue;
+      coastal.set(p.ownerTag, (coastal.get(p.ownerTag) ?? 0) + 1);
+    }
+    for (const tag of coastal.keys()) {
+      const has = [...harbours].some((id) => f.index.get(id).ownerTag === tag);
+      expect(has, `${tag} has a coastline and no harbour`).toBe(true);
+    }
+  });
+
+  it('sails a division from quay to quay instead of storming a beach', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const div = f.state.divisions.find((d) => d.owner === ger.id && !d.dead)!;
+    // East Prussia: German, and unreachable on foot now that a peacetime
+    // border is a border. This is exactly the journey that used to require
+    // invading your own province.
+    const reach = new Set(f.index.reachable(
+      div.provinceId, (q) => f.state.provinces[q]?.controller === ger.id,
+      { includeSea: false },
+    ));
+    const overseas = f.index.provinces.find(
+      (q) => f.state.provinces[q.id]?.controller === ger.id && !reach.has(q.id),
+    )!;
+    expect(overseas).toBeDefined();
+
+    const plan = planTransport(f.state, f.index, ger.id, div.provinceId, overseas.id);
+    expect(plan.block).toBe('ok');
+
+    // Exactly one leg of the route is a voyage; the rest is marching. That is
+    // what "via a port" means -- march to the quay, sail, march inland.
+    let prev = div.provinceId;
+    const voyages: [number, number][] = [];
+    for (const step of plan.path) {
+      if (isVoyage(f.index, prev, step)) {
+        voyages.push([prev, step]);
+      }
+      prev = step;
+    }
+    expect(voyages).toHaveLength(1);
+    // And it runs between two harbours, not between two beaches.
+    expect(isPort(f.index, voyages[0][0])).toBe(true);
+    expect(isPort(f.index, voyages[0][1])).toBe(true);
+    expect(plan.path[plan.path.length - 1]).toBe(overseas.id);
+  });
+
+  it('lands a transfer in good order and an assault in bad', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const sim = new Simulation(f.state, f.index);
+    const div = f.state.divisions.find((d) => d.owner === ger.id && !d.dead)!;
+    const reach = new Set(f.index.reachable(
+      div.provinceId, (q) => f.state.provinces[q]?.controller === ger.id,
+      { includeSea: false },
+    ));
+    const overseas = f.index.provinces.find(
+      (q) => f.state.provinces[q.id]?.controller === ger.id && !reach.has(q.id),
+    )!;
+
+    const before = div.org;
+    sim.execute({ t: 'transportDivisions', divisions: [div.id], target: overseas.id });
+    const time = new TimeEngine(f.state.clock.totalHours);
+    time.on((c) => sim.tick(c));
+    for (let day = 0; day < 90 && div.path.length > 0; day++) time.step(24);
+    expect(div.provinceId).toBe(overseas.id);
+    // Nobody was shooting at the quay, so the men walked off in the order they
+    // walked on. Recovery cannot mask this: organisation only grows, so a
+    // landing penalty would have to have been paid and then paid back.
+    expect(div.org).toBeGreaterThanOrEqual(before * 0.95);
+  });
+
+  it('says which of the five reasons a transfer cannot be arranged', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const div = f.state.divisions.find((d) => d.owner === ger.id && !d.dead)!;
+
+    // Somewhere on the same coast: this is a march, and saying so is more use
+    // than sailing a division in a circle.
+    const home = nearestUsablePort(f.state, f.index, ger.id, div.provinceId)!;
+    expect(home).not.toBeNull();
+    expect(planTransport(f.state, f.index, ger.id, div.provinceId, home).block)
+      .toBe('sameCoast');
+
+    // Nowhere at the far end we or an ally hold. Britain, not Poland: a Polish
+    // harbour has a German one within marching distance across the corridor,
+    // so the honest answer there is that the road from the quay is shut --
+    // which is 'noRoad', and is what the simulation says.
+    const eng = f.country('ENG');
+    const britain = [...ports(f.index)].find(
+      (id) => f.state.provinces[id]?.controller === eng.id,
+    );
+    expect(britain).toBeDefined();
+    expect(planTransport(f.state, f.index, ger.id, div.provinceId, britain!).block)
+      .toBe('noPortThere');
+
+    // And a power with no hulls cannot lift anybody, whatever the geography.
+    ger.economy.dockyards = 0;
+    ger.economy.stockpile.convoy = 0;
+    const reach = new Set(f.index.reachable(
+      div.provinceId, (q) => f.state.provinces[q]?.controller === ger.id,
+      { includeSea: false },
+    ));
+    const overseas = f.index.provinces.find(
+      (q) => f.state.provinces[q.id]?.controller === ger.id && !reach.has(q.id),
+    )!;
+    expect(planTransport(f.state, f.index, ger.id, div.provinceId, overseas.id).block)
+      .toBe('noShipping');
   });
 });

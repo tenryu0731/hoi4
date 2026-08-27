@@ -3,14 +3,14 @@
   "counts": {
     "flags": 30,
     "resourceIcons": 6,
-    "uiIcons": 29,
+    "uiIcons": 30,
     "equipmentIcons": 9,
     "unitIcons": 12,
     "portraitFallbacks": 8,
     "portraits": 100
   },
-  "totalBytes": 159118,
-  "totalGzipBytes": 146029,
+  "totalBytes": 159513,
+  "totalGzipBytes": 146269,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -326,6 +326,11 @@
       "path": "assets/icons/ui-plan-spearhead.svg",
       "bytes": 192,
       "gzipBytes": 166
+    },
+    {
+      "path": "assets/icons/ui-plan-transport.svg",
+      "bytes": 395,
+      "gzipBytes": 240
     },
     {
       "path": "assets/icons/ui-play.svg",

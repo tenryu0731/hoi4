@@ -1,4 +1,5 @@
 import type { Game, PlanTool } from '../app/Game';
+import type { TransportBlock } from '../sim/military/movement';
 import type { MapMode } from '../render/palette';
 import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
@@ -117,6 +118,20 @@ function iconNode(cls: string, path: string): HTMLElement {
   node.style.setProperty('--icon', `url("${assetUrl(path)}")`);
   return node;
 }
+
+/**
+ * Why a sea transfer did not happen, in words the player can act on.
+ *
+ * Typed against the union rather than a plain record, so adding a reason to
+ * the simulation and forgetting to explain it here is a compile error.
+ */
+const TRANSPORT_WHY: Record<Exclude<TransportBlock, 'ok'>, string> = {
+  noPortHere: UI.transportNoPortHere,
+  noPortThere: UI.transportNoPortThere,
+  sameCoast: UI.transportSameCoast,
+  noShipping: UI.transportNoShipping,
+  noRoad: UI.transportNoRoad,
+};
 
 export function mountHud(game: Game, root: HTMLElement): () => void {
   root.innerHTML = '';
@@ -617,6 +632,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     ['spearhead', UI.toolSpearhead, UI.toolSpearheadHint, 'plan-spearhead'],
     ['garrison', UI.toolGarrison, UI.toolGarrisonHint, 'plan-garrison'],
     ['invade', UI.toolInvade, UI.toolInvadeHint, 'plan-invade'],
+    ['transport', UI.toolTransport, UI.toolTransportHint, 'plan-transport'],
   ];
   const toolNodes = new Map<Exclude<PlanTool, null>, HTMLButtonElement>();
   for (const [tool, label, hint, icon] of TOOLS) {
@@ -677,6 +693,9 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     syncPlanBar();
   });
   planTools.append(planClear);
+
+  /** Cleared when the next message replaces it, so two do not race. */
+  let transportNotice = 0;
 
   function syncPlanBar(): void {
     for (const [tool, btn] of toolNodes) {
@@ -1054,6 +1073,21 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     // Same for a plan tool: drawing with it puts it down, and the bar has to
     // stop looking armed on the frame that happens.
     if (planBar.classList.contains('is-armed') !== (game.planTool !== null)) syncPlanBar();
+    // A transfer that could not be arranged says which of the five reasons it
+    // was. An order that silently does nothing is the worst kind of failure on
+    // a screen with no status bar.
+    if (game.transportBlock !== null) {
+      const why = game.transportBlock;
+      game.transportBlock = null;
+      setText(planHint, why === 'ok'
+        ? UI.transportSailing(game.selection.divisions.length, game.sealiftFree())
+        : TRANSPORT_WHY[why]);
+      planBar.classList.add('is-armed');
+      window.clearTimeout(transportNotice);
+      transportNotice = window.setTimeout(() => {
+        planBar.classList.toggle('is-armed', game.planTool !== null);
+      }, 4000);
+    }
 
     if (openPanel !== null) PANELS[openPanel].refresh?.(game, sheetBody);
 
