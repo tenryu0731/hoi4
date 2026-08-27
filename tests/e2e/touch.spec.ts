@@ -178,7 +178,20 @@ test.describe('touch input', () => {
           (p) => p.ownerTag === 'GER'
             && g.state.provinces[p.id].divisions.some((d) => g.state.divisions[d].owner === me),
         )!;
-        const target = g.index.provinces.find((p) => p.ownerTag === 'POL')!;
+        // The far end of our own ground, not the neighbour's. An army may not
+        // cross a border it has no right to cross, so a drag into Poland is
+        // now correctly refused -- and this test is about the gesture. Taken
+        // from the same land-connected piece of Germany, because East Prussia
+        // is German and cannot be marched to across the Polish Corridor.
+        const home = [...g.index.reachable(
+          ger.id, (id) => g.state.provinces[id].controller === me, { includeSea: false },
+        )];
+        let target = g.index.get(ger.id);
+        let far = 0;
+        for (const id of home) {
+          const d = g.index.distance(ger.id, id);
+          if (d > far) { far = d; target = g.index.get(id); }
+        }
         g.renderer.camera.centerOn(
           (ger.centerX + target.centerX) / 2,
           (ger.centerY + target.centerY) / 2,
@@ -377,7 +390,17 @@ test.describe('touch input', () => {
         (p) => p.ownerTag === 'GER'
           && g.state.provinces[p.id].divisions.some((d) => g.state.divisions[d].owner === me),
       )!;
-      const target = g.index.provinces.find((p) => p.ownerTag === 'POL')!;
+      // Our own ground: a drag into a neutral Poland is refused now, and this
+      // test is about an order surviving a pause.
+      const home = [...g.index.reachable(
+        ger.id, (id) => g.state.provinces[id].controller === me, { includeSea: false },
+      )];
+      let target = g.index.get(ger.id);
+      let far = 0;
+      for (const id of home) {
+        const d = g.index.distance(ger.id, id);
+        if (d > far) { far = d; target = g.index.get(id); }
+      }
       g.renderer.camera.centerOn(
         (ger.centerX + target.centerX) / 2,
         (ger.centerY + target.centerY) / 2,
@@ -1074,6 +1097,38 @@ test.describe('touch input', () => {
     // And the row says what that factory is bringing in, not just what it cost.
     const row = page.locator('.panel-row', { hasText: '／日を輸入中' }).first();
     await expect(row).toBeVisible();
+  });
+
+
+  test('a division cannot be sent into a country we are not at war with', async ({ page }) => {
+    await bootGame(page);
+
+    const result = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const div = s.divisions.find((d) => d.owner === me && !d.dead)!;
+      const neutral = g.index.provinces.find(
+        (p) => p.ownerTag === 'POL' && s.provinces[p.id].controller !== me,
+      )!;
+      const atWar = s.countries[me].atWarWith
+        .includes(s.provinces[neutral.id].controller);
+      g.selectDivisions([div.id], { centre: false });
+      g.issue({ t: 'moveDivisions', divisions: [div.id], target: neutral.id });
+      return {
+        atWar,
+        path: s.divisions[div.id].path.length,
+        where: s.divisions[div.id].provinceId,
+        started: div.provinceId,
+      };
+    });
+
+    // The premise: Poland is a neutral, not an enemy.
+    expect(result.atWar).toBe(false);
+    // And the order goes nowhere. 「平時に非同盟国の領土に師団を置けるのは
+    // おかしい」 -- nothing used to stop it.
+    expect(result.path).toBe(0);
+    expect(result.where).toBe(result.started);
   });
 
 });
