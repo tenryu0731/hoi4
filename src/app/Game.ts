@@ -9,7 +9,27 @@ import { MapRenderer, type PlanLine, type SelectionScope } from '../render/MapRe
 import type { MapMode } from '../render/palette';
 import { TouchController } from '../input/TouchController';
 import { ZOOM_AGGREGATE_STATES } from '../render/layers/UnitLayer';
+import {
+  planTransport, sealiftCapacity, type TransportBlock,
+} from '../sim/military/movement';
+import { nextArmyName } from '../sim/military/command';
 import { UI } from '../ui/strings';
+
+/**
+ * The tools on the battle-plan bar.
+ *
+ * `front`, `offensive` and `garrison` are painted -- a stroke along the ground
+ * they cover. `spearhead` and `invade` are aimed: one province is the target,
+ * and a stroke would be four ways of saying the same thing.
+ */
+export type PlanTool =
+  | 'front' | 'offensive' | 'garrison' | 'spearhead' | 'invade' | 'transport' | null;
+
+/** Tools drawn with a stroke rather than a tap. */
+const PAINTED = new Set<PlanTool>(['front', 'offensive', 'garrison']);
+
+/** Tools that take a single objective from a tap. */
+const AIMED = new Set<PlanTool>(['spearhead', 'invade', 'transport']);
 
 /**
  * Composition root. Owns the loop and wires the three halves of the program
@@ -112,6 +132,32 @@ export class Game {
    */
   boxSelectArmed = false;
 
+  /**
+   * Whether the rectangle being drawn raises a formation instead of selecting.
+   *
+   * 「下の追加から範囲選択して未所属、他の軍に所属してる師団を新たに一つの軍に
+   * できたりとか、今一個ずつタップで編成に加えてる」. Boxing and then forming
+   * were two separate acts with a menu between them, so building an army out
+   * of odds and ends meant tapping each division in. The ＋ on the officer
+   * strip sets this, and the box that follows is the army.
+   */
+  boxRaisesArmy = false;
+
+  /**
+   * The battle-plan tool the player has picked up, or null.
+   *
+   * The reference has a 「戦闘計画」 toolbar along the foot of the screen and a
+   * plan is drawn by dragging on the map with one of its tools held. Picking
+   * one up here does the same thing: the next stroke paints instead of panning.
+   */
+  planTool: PlanTool = null;
+
+  /** Provinces the current stroke has passed over, in the order they were hit. */
+  planDraft: ProvinceId[] = [];
+
+  /** Set while a stroke is in progress, so the map can draw what is being drawn. */
+  planPainting = false;
+
   private constructor(index: ProvinceIndex, renderer: MapRenderer, state: GameState) {
     this.index = index;
     this.renderer = renderer;
@@ -126,6 +172,8 @@ export class Game {
       onOrderDrag: (phase, fx, fy, tx, ty) => this.handleOrderDrag(phase, fx, fy, tx, ty),
       canStartBoxSelect: () => this.boxSelectArmed,
       onBoxSelect: (phase, x0, y0, x1, y1) => this.handleBoxSelect(phase, x0, y0, x1, y1),
+      canStartPaint: () => this.planTool !== null && PAINTED.has(this.planTool),
+      onPaint: (phase, wx, wy) => this.handlePaint(phase, wx, wy),
       onCameraChange: () => { /* camera is read every frame; nothing to invalidate */ },
     });
     this.input.attach(renderer.canvas);
@@ -216,6 +264,8 @@ export class Game {
     this.input.update(dtMs);
     this.renderer.setDragOrder(this.dragOrder);
     this.renderer.setPlans(this.planLines());
+    // Harbours are pointed out while a tool that needs one is in hand.
+    this.renderer.setPortsLit(this.planTool === 'transport' || this.planTool === 'invade');
     this.renderer.update(dtMs, this.state);
     for (const fn of this.listeners) fn();
   }
@@ -325,6 +375,9 @@ export class Game {
    * it, and a front line the player cannot tell from the marching orders
    * heading toward it is not showing them anything.
    */
+  /** The stroke in progress, in the reference's own pale plan blue. */
+  private static readonly PLAN_DRAFT_COLOR = 0x9fe8ff;
+
   private static readonly PLAN_COLORS = [
     0x5ec8ff, 0xff7a5c, 0x7fe07f, 0xc79bff, 0x2fd6c0, 0xff5ca8,
   ];
@@ -336,6 +389,20 @@ export class Game {
       (a) => a.owner === me && !a.isArmyGroup,
     );
     const out: PlanLine[] = [];
+    // What the finger is drawing right now, ahead of any of the standing
+    // orders: a stroke the player cannot see as they make it is a stroke they
+    // cannot correct.
+    if (this.planPainting && this.planDraft.length > 0) {
+      out.push({
+        owner: me,
+        provinces: [...this.planDraft],
+        targets: this.planTool === 'offensive' ? [this.planDraft[this.planDraft.length - 1]] : [],
+        color: Game.PLAN_DRAFT_COLOR,
+        selected: true,
+        executing: true,
+        label: UI.planDrafting,
+      });
+    }
     for (let i = 0; i < armies.length; i++) {
       const army = armies[i];
       if (army.frontProvinces.length === 0) continue;
@@ -393,6 +460,21 @@ export class Game {
     // provinces are frequently narrower than that on screen.
     const slackWorld = 22 / Math.max(1e-4, this.renderer.camera.zoom);
     const id = this.index.pickNearest(worldX, worldY, slackWorld);
+
+    // A tool that is aimed rather than drawn takes the tap outright: a
+    // spearhead has one objective and a landing has one beach, and a stroke
+    // would be four ways of saying the same thing. Painted tools fall through
+    // -- a stroke is what those are for -- so a tap with one held is just a
+    // tap, and the player can still read the ground while holding a pen.
+    if (id !== null && AIMED.has(this.planTool)) {
+      const tool = this.planTool;
+      this.planDraft = [id];
+      if (tool === 'invade') { this.orderInvasion(id); return; }
+      if (tool === 'transport') { this.orderTransport(id); return; }
+      this.commitPlanDraft();
+      return;
+    }
+
     const hit = this.renderer.units.pickCounter(screenX, screenY);
 
     // Counter or ground? Both are under the same finger -- a counter is drawn
@@ -536,12 +618,15 @@ export class Game {
     if (phase === 'cancel') {
       this.boxSelect = null;
       this.boxSelectArmed = false;
+      this.boxRaisesArmy = false;
       return;
     }
     this.boxSelect = { x0, y0, x1, y1 };
     if (phase !== 'end') return;
     this.boxSelect = null;
     this.boxSelectArmed = false;
+    const raising = this.boxRaisesArmy;
+    this.boxRaisesArmy = false;
 
     const divisions = this.divisionsInRect(x0, y0, x1, y1);
     if (divisions.length === 0) {
@@ -554,7 +639,156 @@ export class Game {
     // The camera stays where the player put it. Centring on the first
     // division would move the map out from under a box they just finished
     // drawing, which is the one moment they are certain where things are.
+    if (raising && this.raiseArmy(divisions)) return;
     this.selectDivisions(divisions, { army: this.armyOf(divisions), centre: false });
+  }
+
+  /**
+   * One stroke of a plan tool.
+   *
+   * Every province the finger crosses joins the draft, in order, with no
+   * duplicates: a stroke that doubles back over itself is the player being
+   * careful, not the player asking for the same province twice. Which
+   * provinces are eligible depends on the tool -- a front is drawn on our own
+   * ground, an offensive on somebody else's -- so a finger that wanders across
+   * the border while tracing a line does not put half the line in Poland.
+   */
+  private handlePaint(phase: 'start' | 'move' | 'end' | 'cancel', wx: number, wy: number): void {
+    if (phase === 'cancel') {
+      this.planDraft = [];
+      this.planPainting = false;
+      this.planTool = null;
+      return;
+    }
+    if (phase === 'start') {
+      this.planDraft = [];
+      this.planPainting = true;
+    }
+    if (phase === 'move' || phase === 'start') {
+      const id = this.index.pickNearest(wx, wy);
+      if (id !== null && this.paintable(id) && !this.planDraft.includes(id)) {
+        this.planDraft.push(id);
+      }
+      return;
+    }
+    // Released. The draft becomes the order, and the tool is put down: a mode
+    // the player has to remember to leave is a mode they get stuck in.
+    this.commitPlanDraft();
+  }
+
+  /**
+   * Ships the selection to a province across the water.
+   *
+   * 「湾から軍を海上輸送できるように」. The crossing itself has been in the
+   * simulation since naval movement was gated -- a route may cross a sea link,
+   * it costs shipping, and a country with no dockyards cannot make one -- but
+   * there was no way to ask for one except by tapping a beach and hoping the
+   * pathfinder felt like going that way. This asks for it outright, and says
+   * how many bottoms are free to carry it.
+   */
+  orderInvasion(target: ProvinceId): void {
+    this.planTool = null;
+    this.planDraft = [];
+    const divisions = [...this.selection.divisions];
+    if (divisions.length === 0) return;
+    this.issue({ t: 'moveDivisions', divisions, target });
+  }
+
+  /**
+   * Ships the selection to a harbour, rather than at a beach.
+   *
+   * 「強襲上陸とは別に港を経由して移動できるように」. The result is reported
+   * rather than swallowed: every way this can fail has a different answer --
+   * march inland to a quay, take a harbour first, or build some ships -- and
+   * an order that silently does nothing is the worst of the three.
+   */
+  transportBlock: TransportBlock | null = null;
+
+  orderTransport(target: ProvinceId): void {
+    this.planTool = null;
+    this.planDraft = [];
+    const divisions = [...this.selection.divisions];
+    if (divisions.length === 0) return;
+    // Asked before the command goes out, so the interface can say why nothing
+    // happened. They start in the same place often enough that the first one's
+    // answer is the answer for the group.
+    const first = this.state.divisions[divisions[0]];
+    if (!first) return;
+    this.transportBlock = planTransport(
+      this.state, this.index, first.owner, first.provinceId, target,
+    ).block;
+    if (this.transportBlock !== 'ok') return;
+    this.issue({ t: 'transportDivisions', divisions, target });
+  }
+
+  /** How many more divisions this country can put to sea right now. */
+  sealiftFree(): number {
+    const me = this.state.meta.playerCountry;
+    let afloat = 0;
+    for (const d of this.state.divisions) {
+      if (d.dead || d.owner !== me || d.path.length === 0) continue;
+      if (this.index.isSeaLink(d.provinceId, d.path[0])) afloat++;
+    }
+    return Math.max(0, sealiftCapacity(this.state, me) - afloat);
+  }
+
+  /** Whether the tool in hand may be drawn over this province. */
+  private paintable(id: ProvinceId): boolean {
+    const me = this.state.meta.playerCountry;
+    const controller = this.state.provinces[id]?.controller;
+    return this.planTool === 'offensive' ? controller !== me : controller === me;
+  }
+
+  /**
+   * Turns the stroke into a standing order for the selected army.
+   *
+   * Public so the toolbar can commit a tool that is aimed rather than painted,
+   * and so a plan drawn with nothing selected can say so instead of vanishing.
+   */
+  commitPlanDraft(): boolean {
+    const tool = this.planTool;
+    const drawn = this.planDraft;
+    this.planPainting = false;
+    this.planDraft = [];
+    this.planTool = null;
+    if (tool === null || drawn.length === 0) return false;
+    const army = this.selection.army;
+    if (army === null) return false;
+    const me = this.state.meta.playerCountry;
+    const order = tool === 'front' ? { kind: 'line' as const, anchors: drawn }
+      : tool === 'offensive' ? { kind: 'offensive' as const, targets: drawn }
+        : tool === 'garrison' ? { kind: 'garrison' as const, provinces: drawn }
+          : { kind: 'spearhead' as const, target: drawn[0] };
+    this.issue({ t: 'setArmyOrder', country: me, army, order });
+    return true;
+  }
+
+  /**
+   * Raises a formation and puts these divisions in it.
+   *
+   * Whatever they belonged to before: unassigned, or another army. Moving a
+   * division between armies is what `assignDivisions` does, and the point of
+   * doing it in one act is that a new army is usually made out of pieces of
+   * old ones.
+   *
+   * The command bus does not hand back what it made, so the formation is
+   * identified by difference rather than by "the highest id": the army ceiling
+   * can refuse the command, and taking the newest existing army then would
+   * quietly put the divisions somewhere the player did not ask for.
+   */
+  raiseArmy(divisions: readonly number[]): boolean {
+    if (divisions.length === 0) return false;
+    const me = this.state.meta.playerCountry;
+    const mine = (): number[] => (this.state.armies ?? [])
+      .filter((a) => a.owner === me && !a.isArmyGroup)
+      .map((a) => a.id);
+    const before = new Set(mine());
+    this.issue({ t: 'createArmy', country: me, name: nextArmyName(this.state, me) });
+    const raised = mine().find((id) => !before.has(id));
+    if (raised === undefined) return false;
+    this.issue({ t: 'assignDivisions', country: me, army: raised, divisions: [...divisions] });
+    this.selectDivisions([...divisions], { army: raised, centre: false });
+    return true;
   }
 
   /** The player's divisions whose counters fall inside a screen rectangle. */

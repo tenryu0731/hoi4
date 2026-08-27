@@ -388,6 +388,65 @@ describe('battle plans', () => {
     expect(idle.planning).toBeCloseTo(planned.planning / 2, 3);
   });
 
+  it('walks a drawn line forward with the army that holds it', () => {
+    // 「前線は国ごとの選択じゃなくて自分で国境などに引く」. A drawn line is a list
+    // of provinces the finger passed over, and what makes it a front rather
+    // than a list is that it moves: what the army works out today is what it
+    // anchors on tomorrow.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    ger.isAI = false;
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    const border = frontProvinces(f.state, f.index, ger.id, pol.id);
+    expect(border.length).toBeGreaterThan(1);
+
+    const sim = new Simulation(f.state, f.index);
+    // Two provinces of it, as a finger that traced part of the border would
+    // give -- the rest of the line has to be worked out, not assumed.
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      order: { kind: 'line', anchors: border.slice(0, 2) },
+    });
+    const ctx = ctxOf(f);
+    tickBattlePlansDaily(f.state, ctx);
+    expect(army.frontProvinces.length).toBeGreaterThan(2);
+    for (const p of army.frontProvinces) {
+      expect(f.state.provinces[p].controller).toBe(ger.id);
+    }
+
+    // Take a Polish province and the line follows it forward, without the
+    // player redrawing anything.
+    const taken = f.index.get(army.frontProvinces[0]).neighbors
+      .find((n) => f.state.provinces[n]?.controller === pol.id)!;
+    f.state.provinces[taken].controller = ger.id;
+    tickBattlePlansDaily(f.state, ctx);
+    expect(army.frontProvinces).toContain(taken);
+  });
+
+  it('re-forms a drawn line behind itself when every anchor is lost', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    ger.isAI = false;
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    const border = frontProvinces(f.state, f.index, ger.id, pol.id);
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      order: { kind: 'line', anchors: border.slice(0, 3) },
+    });
+    // Overrun: everything the line was drawn on changes hands.
+    for (const p of border.slice(0, 3)) f.state.provinces[p].controller = pol.id;
+    tickBattlePlansDaily(f.state, ctxOf(f));
+    // A driven-back army re-forms behind the old line rather than losing its
+    // plan outright, which is what dropping the order would amount to.
+    expect(army.frontProvinces.length).toBeGreaterThan(0);
+    for (const p of army.frontProvinces) {
+      expect(f.state.provinces[p].controller).toBe(ger.id);
+    }
+  });
+
   it('holds an offensive still until the plan is executed', () => {
     // 「将軍のアイコンの上の計画実行ボタン（矢印のあるボタン）をクリックして
     // 軍や軍集団ごとに実行し」 -- drawing a plan and running it are two acts,

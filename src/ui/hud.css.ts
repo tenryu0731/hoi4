@@ -63,16 +63,28 @@ export const HUD_CSS = `
    but measured on Chromium it does not: a swipe scrolls these rows to 287px
    with the body rule in force and with it removed alike. So these are an
    explicit statement of intent, not a fix for anything. */
-.hud-figures { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* One band, scrolling sideways, holding all three groups. Three stacked rows
+   cost 112px of a 915px screen; side by side they cost 38, and a strip that
+   runs off the edge is a thing a thumb already knows how to deal with. */
+.hud-figures {
+  display: flex; flex-direction: row; align-items: stretch; gap: 8px;
+  min-width: 0; overflow-x: auto; scrollbar-width: none; touch-action: pan-x;
+}
+.hud-figures::-webkit-scrollbar { display: none; }
+.hud-figures > * { flex: 0 0 auto; }
+/* A hairline between the groups, so alerts do not read as another resource. */
+.hud-figures > * + * {
+  border-left: 1px solid #100f0d; box-shadow: -1px 0 0 var(--edge-hi);
+  padding-left: 8px;
+}
 .hud-stats, .hud-resources {
-  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
-  touch-action: pan-x;
+  display: flex; gap: 4px; scrollbar-width: none;
 }
 /* Should a row still not fit, fading the trailing edge is what tells the
    player it continues, rather than the last chip being guillotined by the
    screen edge with no affordance at all. Applied only when the row actually
    overflows: unconditionally, it dimmed the last chip of a row that fits. */
-.hud-stats.is-clipped, .hud-resources.is-clipped, .hud-alerts.is-clipped {
+.hud-figures.is-clipped {
   -webkit-mask-image: linear-gradient(90deg, #000 94%, transparent);
           mask-image: linear-gradient(90deg, #000 94%, transparent);
 }
@@ -124,8 +136,7 @@ export const HUD_CSS = `
 
 /* The alert row. Amber for something idle, red for something being lost. */
 .hud-alerts {
-  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
-  touch-action: pan-x;
+  display: flex; gap: 4px; scrollbar-width: none;
 }
 .hud-alerts.is-empty { display: none; }
 .hud-alerts::-webkit-scrollbar { display: none; }
@@ -688,6 +699,55 @@ export const HUD_CSS = `
 }
 .hud-nav-icon { width: 22px; height: 22px; }
 
+/* --- the battle-plan bar --------------------------------------------------- */
+/* Above the officers, along the foot, the way the reference lays it out. The
+   tools scroll sideways rather than wrapping: a second row would take another
+   44px of map, and this bar is on screen the whole time. */
+.hud-plans {
+  position: absolute; left: 0; right: 0;
+  bottom: calc(var(--hud-officers-h, 0px));
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  pointer-events: none;
+}
+.hud-plan-tools {
+  display: flex; gap: 3px; max-width: 100%;
+  padding: 3px 6px; margin: 0 6px;
+  overflow-x: auto; scrollbar-width: none; touch-action: pan-x;
+  background: linear-gradient(180deg, rgba(52,48,38,0.96) 0%, rgba(32,29,23,0.96) 100%);
+  border: 1px solid #0f0e0c; border-bottom: none; border-radius: 4px 4px 0 0;
+  box-shadow: var(--bevel), 0 -3px 12px rgba(0,0,0,0.5);
+  pointer-events: auto;
+}
+.hud-plan-tools::-webkit-scrollbar { display: none; }
+.hud-plan-tool {
+  flex: 0 0 auto; min-width: 44px; min-height: 44px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; padding: 3px 5px;
+  background: linear-gradient(180deg, #3b352a 0%, #2a2620 100%);
+  border: 1px solid #100f0c; border-radius: 2px; box-shadow: var(--bevel);
+  color: var(--ink-dim); cursor: pointer;
+}
+.hud-plan-icon { width: 18px; height: 18px; display: block; }
+.hud-plan-glyph { font-size: 14px; line-height: 18px; }
+.hud-plan-l { font-size: 9px; line-height: 10px; letter-spacing: 0; white-space: nowrap; }
+.hud-plan-tool.is-on {
+  background: linear-gradient(180deg, #e0bd7c 0%, #b08f4e 100%);
+  border-color: #6d5730; color: #1a1811;
+}
+.hud-plan-tool.is-go { color: #b6c77e; }
+.hud-plan-tool.is-stop { color: #e2796c; }
+.hud-plan-tool.is-clear { color: #b0a595; }
+/* What the tool in hand will do, said once, above the row. Two characters on a
+   button cannot explain a gesture nobody has made yet. */
+.hud-plan-hint {
+  max-width: calc(100% - 24px); padding: 2px 8px;
+  font-size: 11px; color: var(--ink);
+  background: rgba(18,17,14,0.86); border: 1px solid #0f0e0c; border-radius: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0; transition: opacity 140ms ease;
+}
+.hud-plans.is-armed .hud-plan-hint { opacity: 1; }
+
 /* --- the officer strip ---------------------------------------------------- */
 /* Centred along the foot of the screen, the way the reference lays it out, and
    scrolling sideways when there are more armies than fit. Seven armies is the
@@ -755,6 +815,13 @@ export const HUD_CSS = `
    a share of his bonuses, and this is the only place that says so without the
    command panel being open. */
 .hud-officer.is-over .hud-officer-count { color: #f0a49a; }
+/* The ＋ at the end of the strip: raise a formation from a box on the map. */
+.hud-officer-add {
+  justify-content: center; gap: 3px;
+  border-style: dashed; border-color: #5a5342; border-bottom: none;
+  background: linear-gradient(180deg, #2b2823 0%, #1e1c18 100%);
+}
+.hud-officer-plus { font-size: 22px; line-height: 22px; color: var(--accent); }
 .hud-officer.is-over { border-color: #6b2f28; }
 
 /* --- outcome ------------------------------------------------------------- */
@@ -816,11 +883,6 @@ export const HUD_CSS = `
   /* The map modes would sit on top of the docked panel. */
   .hud-modes { top: auto; bottom: calc(var(--safe-bottom) + 62px); flex-direction: row; }
   .hud-toasts { max-width: 34%; left: auto; right: 10px; }
-  /* The figures go side by side. Measured on its side: 395px of stats and
-     320px of resources, each stacked in its own 853px row, so the bar spent
-     32px of a 412px screen saying nothing. */
-  .hud-figures { flex-direction: row; align-items: flex-start; }
-  .hud-figures > * { flex: 0 1 auto; min-width: 0; }
   /* Every pixel of bar is a pixel of map. */
   .hud-top { gap: 3px; padding-bottom: 5px; }
   .hud-stats > .hud-stat, .hud-resources > .hud-res { padding: 1px 6px 2px; }
@@ -843,6 +905,19 @@ button:active { transform: scale(0.96); }
   border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
 .panel-chip:disabled { opacity: 0.4; }
+/* The order of battle as a list you tick. */
+.panel-oob-head {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 5px;
+}
+.panel-oob-count { font-size: 11px; color: var(--ink-dim); }
+.panel-tick {
+  flex: 0 0 auto; width: 18px; height: 18px; margin-right: 7px;
+  display: grid; place-items: center;
+  font-size: 12px; line-height: 1; color: #1a1811;
+  background: #14130f; border: 1px solid #5a5342; border-radius: 2px;
+}
+.panel-oob-row.is-picked .panel-tick { background: var(--accent); border-color: #6d5730; }
+.panel-oob-row.is-picked { border-color: #6d5730; }
 /* The plan pair. The red halt on the left of the arrow, as the reference has
    them, and coloured so which is which reads before the label does. */
 .panel-chip.is-stop:not(:disabled) { color: #e2796c; border-color: #6b2f28; }

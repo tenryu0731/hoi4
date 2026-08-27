@@ -130,6 +130,60 @@ export function assignToFront(
   }
 }
 
+/** How far a drawn line may walk from its anchors in one day. */
+export const LINE_DRIFT = 3;
+
+/**
+ * Where a hand-drawn line actually stands today.
+ *
+ * The anchors are ground the finger passed over, which is where the line was
+ * yesterday. From the ones we still hold, walk out through our own territory
+ * as far as LINE_DRIFT and keep whatever faces somebody else: that is the
+ * border in this neighbourhood, wherever it has moved to. Bounded, because an
+ * unbounded search would let a line drawn on the Rhine reappear on the Vistula
+ * the day Poland fell.
+ */
+export function lineFront(
+  state: GameState, ctx: MilitaryContext, army: Army, anchors: readonly ProvinceId[],
+): ProvinceId[] {
+  const ours = (id: ProvinceId): boolean => state.provinces[id]?.controller === army.owner;
+
+  let ring = anchors.filter(ours);
+  if (ring.length === 0) {
+    // Every anchor was lost. Start from our own ground next to where the line
+    // used to be, so a driven-back army re-forms behind the old line rather
+    // than losing its plan outright.
+    const seeds = new Set<ProvinceId>();
+    for (const a of anchors) {
+      for (const nb of ctx.index.get(a).neighbors) if (ours(nb)) seeds.add(nb);
+    }
+    ring = [...seeds];
+  }
+  if (ring.length === 0) return [];
+
+  const seen = new Set<ProvinceId>(ring);
+  for (let hop = 0; hop < LINE_DRIFT; hop++) {
+    const next: ProvinceId[] = [];
+    for (const id of ring) {
+      for (const nb of ctx.index.get(id).neighbors) {
+        if (seen.has(nb) || !ours(nb)) continue;
+        seen.add(nb);
+        next.push(nb);
+      }
+    }
+    if (next.length === 0) break;
+    ring = next;
+  }
+
+  const facing: ProvinceId[] = [];
+  for (const id of seen) {
+    for (const nb of ctx.index.get(id).neighbors) {
+      if (!ours(nb)) { facing.push(id); break; }
+    }
+  }
+  return facing.length > 0 ? facing : [...seen];
+}
+
 /** Divisions of one country standing in a province. */
 function friendlyStack(state: GameState, owner: CountryId, id: ProvinceId): number {
   let n = 0;
@@ -429,6 +483,14 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
         // A named enemy we no longer touch anywhere leaves the army facing
         // whoever else is shooting at us, rather than standing idle.
         if (front.length === 0) front = hostileFront(state, ctx.index, army.owner);
+        if (spread) assignToFront(state, ctx, army, front);
+        break;
+      case 'line':
+        front = lineFront(state, ctx, army, army.order.anchors);
+        // What the line worked out today is what it anchors on tomorrow, so a
+        // drawn front walks forward with the army that holds it instead of
+        // staying pinned to the ground it was first traced over.
+        if (front.length > 0) army.order.anchors = front;
         if (spread) assignToFront(state, ctx, army, front);
         break;
       case 'garrison':

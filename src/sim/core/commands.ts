@@ -41,6 +41,16 @@ export type Command =
   | { t: 'createTemplate'; country: CountryId; name: string; battalions: BattalionType[]; supports: SupportType[] }
   | { t: 'recruitDivision'; country: CountryId; template: number; province: ProvinceId }
   | { t: 'moveDivisions'; divisions: DivisionId[]; target: ProvinceId }
+  /**
+   * Ships divisions from harbour to harbour, rather than storming a beach.
+   *
+   * 「強襲上陸とは別に港を経由して移動できるように」. `moveDivisions` will cross a
+   * strait if the route happens to want one, and that crossing is an assault:
+   * the men arrive disorganised because somebody may be shooting at them. This
+   * is the other journey -- march to the quay, sail, march inland -- and it can
+   * only put in at a harbour we or an ally hold, so it can never take ground.
+   */
+  | { t: 'transportDivisions'; divisions: DivisionId[]; target: ProvinceId }
   | { t: 'stopDivisions'; divisions: DivisionId[] }
   /*
    * There was a setDivisionOrder here, and it is gone: nothing in the game

@@ -2138,60 +2138,13 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
   const me = game.state.countries[game.state.meta.playerCountry];
   const box = el('div', 'panel-chips');
 
-  for (const enemy of frontCandidates(game).slice(0, 5)) {
-    const chip = el('button', 'panel-chip', `${UI.setOrderFront}: ${country(enemy.tag)}`);
-    chip.classList.toggle(
-      'is-on', army.order?.kind === 'front' && army.order.against === enemy.id,
-    );
-    chip.addEventListener('click', () => {
-      game.issue({
-        t: 'setArmyOrder', country: me.id, army: army.id,
-        order: { kind: 'front', against: enemy.id },
-      });
-      rebuild();
-    });
-    box.append(chip);
-
-    // An offensive needs objectives, and picking them province by province is
-    // not something a thumb can do. Naming the enemy aims the army at what it
-    // would actually be sent to take: the places worth victory points.
-    const targets = objectivesAgainst(game, enemy.id);
-    if (targets.length === 0) continue;
-    const push = el('button', 'panel-chip', `${UI.setOrderAttack}: ${country(enemy.tag)}`);
-    push.classList.toggle(
-      'is-on',
-      army.order?.kind === 'offensive'
-      && army.order.targets.length === targets.length
-      && army.order.targets[0] === targets[0],
-    );
-    push.addEventListener('click', () => {
-      game.issue({
-        t: 'setArmyOrder', country: me.id, army: army.id,
-        order: { kind: 'offensive', targets },
-      });
-      rebuild();
-    });
-    box.append(push);
-
-    // The same push down one corridor instead of across a face -- 「1プロヴィンス
-    // のみの前線から先鋒の目標を設定した場合。目標のワルシャワまでの経路のみ
-    // 進攻する計画になる」. Aimed at the single most valuable thing the enemy
-    // holds, because that is the objective a player draws a spearhead at.
-    const tip = targets[0];
-    const drive = el('button', 'panel-chip',
-      `${UI.setOrderSpearhead}: ${game.index.get(tip).name}`);
-    drive.classList.toggle(
-      'is-on', army.order?.kind === 'spearhead' && army.order.target === tip,
-    );
-    drive.addEventListener('click', () => {
-      game.issue({
-        t: 'setArmyOrder', country: me.id, army: army.id,
-        order: { kind: 'spearhead', target: tip },
-      });
-      rebuild();
-    });
-    box.append(drive);
-  }
+  // No "front against Poland" chips any more. Naming a country was the touch
+  // stand-in for drawing a line, and it was the wrong stand-in: the reference
+  // draws plans on the ground -- 「前線は国ごとの選択じゃなくて自分で国境などに
+  // 引く」 -- and the battle-plan bar along the foot of the map does that now.
+  // What is left here is what a panel is better at than a map: saying what the
+  // plan is, and taking it back.
+  box.append(el('div', 'panel-note', UI.planDrawnOnMap));
 
   const clear = el('button', 'panel-chip', UI.setOrderClear);
   clear.classList.toggle('is-on', army.order === null);
@@ -2226,7 +2179,7 @@ function orderControls(game: Game, army: Army, rebuild: () => void): HTMLElement
  * the map, so a single division can be pulled out of a front without
  * dissolving the formation around it.
  */
-function orderOfBattle(game: Game, army: Army): HTMLElement {
+function orderOfBattle(game: Game, army: Army, rebuild: () => void): HTMLElement {
   const state = game.state;
   const box = el('div', 'panel-oob');
   box.append(el('div', 'panel-label', `${UI.orderOfBattle} ${army.divisions.length}`));
@@ -2237,9 +2190,45 @@ function orderOfBattle(game: Game, army: Army): HTMLElement {
     box.append(el('div', 'panel-empty', UI.unassigned));
     return box;
   }
+  // The reference's army panel is a list you tick, not a list you open one row
+  // of at a time -- 「軍の師団のやつが縦に並んで選択したり外したりできたり」.
+  // The tick is the map selection: what is checked here is what is under
+  // orders out there, so the two never disagree about what "selected" means.
+  const chosen = new Set(game.selection.divisions);
+  const head = el('div', 'panel-oob-head');
+  const allOn = live.every((d) => chosen.has(d.id));
+  const pickAll = el('button', 'panel-chip', allOn ? UI.selectNone : UI.selectAll);
+  pickAll.addEventListener('click', () => {
+    game.selectDivisions(
+      allOn ? [] : live.map((d) => d.id), { army: allOn ? null : army.id, centre: false },
+    );
+    rebuild();
+  });
+  head.append(pickAll);
+
+  const picked = live.filter((d) => chosen.has(d.id));
+  if (picked.length > 0) {
+    head.append(el('span', 'panel-oob-count', UI.selectedCount(picked.length)));
+    // Out of this army altogether: the divisions stay on the map and stop
+    // following its plan. This is the other half of "select and deselect".
+    const drop = el('button', 'panel-chip', UI.dropFromArmy);
+    drop.addEventListener('click', () => {
+      game.issue({
+        t: 'assignDivisions', country: army.owner, army: null,
+        divisions: picked.map((d) => d.id),
+      });
+      rebuild();
+    });
+    head.append(drop);
+  }
+  box.append(head);
+
   for (const d of live) {
     const tpl = state.countries[d.owner].templates.find((t) => t.id === d.templateId);
     const row = el('button', 'panel-oob-row');
+    const tick = el('span', 'panel-tick', chosen.has(d.id) ? '✓' : '');
+    row.classList.toggle('is-picked', chosen.has(d.id));
+    row.append(tick);
     const main = el('div', 'panel-row-main');
     main.append(el('div', 'panel-row-title',
       UI.divisionName(d.ordinal, tpl?.name ?? UI.newTemplate)));
@@ -2256,9 +2245,15 @@ function orderOfBattle(game: Game, army: Army): HTMLElement {
     row.append(main);
     if (d.combatId !== null) row.classList.add('is-fighting');
     if (d.detached) row.classList.add('is-detached');
+    // Tapping a row adds it to the selection or takes it out, rather than
+    // replacing the selection with it. Replacing is what made building a group
+    // of divisions a matter of tapping them in one at a time.
     row.addEventListener('click', () => {
-      game.selectDivisions([d.id], { army: army.id });
-      closeSheet();
+      const next = new Set(game.selection.divisions);
+      if (next.has(d.id)) next.delete(d.id);
+      else next.add(d.id);
+      game.selectDivisions([...next], { army: game.armyOf([...next]), centre: false });
+      rebuild();
     });
     box.append(row);
   }
@@ -2319,6 +2314,7 @@ function orderLabel(game: Game, army: Army): string {
       const target = army.order.target;
       return `${UI.orderSpearhead} · ${game.index.get(target).name}`;
     }
+    case 'line': return `${UI.orderLine} · ${army.order.anchors.length}`;
     case 'garrison': return UI.orderGarrison;
   }
 }
@@ -2496,7 +2492,7 @@ export const commandPanel: Panel = {
           card.append(chips);
         }
 
-        card.append(orderOfBattle(game, army));
+        card.append(orderOfBattle(game, army, rebuild));
 
         // What turns a formation into something you can move. Without this an
         // army was a note in a panel: the map only ever knew about whatever

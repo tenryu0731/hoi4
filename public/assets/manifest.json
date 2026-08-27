@@ -3,14 +3,14 @@
   "counts": {
     "flags": 30,
     "resourceIcons": 6,
-    "uiIcons": 23,
+    "uiIcons": 30,
     "equipmentIcons": 9,
     "unitIcons": 12,
     "portraitFallbacks": 8,
     "portraits": 100
   },
-  "totalBytes": 157627,
-  "totalGzipBytes": 144823,
+  "totalBytes": 159513,
+  "totalGzipBytes": 146269,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -296,6 +296,41 @@
       "path": "assets/icons/ui-pause.svg",
       "bytes": 174,
       "gzipBytes": 160
+    },
+    {
+      "path": "assets/icons/ui-plan-clear.svg",
+      "bytes": 221,
+      "gzipBytes": 195
+    },
+    {
+      "path": "assets/icons/ui-plan-front.svg",
+      "bytes": 250,
+      "gzipBytes": 189
+    },
+    {
+      "path": "assets/icons/ui-plan-garrison.svg",
+      "bytes": 279,
+      "gzipBytes": 222
+    },
+    {
+      "path": "assets/icons/ui-plan-invade.svg",
+      "bytes": 330,
+      "gzipBytes": 255
+    },
+    {
+      "path": "assets/icons/ui-plan-offensive.svg",
+      "bytes": 219,
+      "gzipBytes": 179
+    },
+    {
+      "path": "assets/icons/ui-plan-spearhead.svg",
+      "bytes": 192,
+      "gzipBytes": 166
+    },
+    {
+      "path": "assets/icons/ui-plan-transport.svg",
+      "bytes": 395,
+      "gzipBytes": 240
     },
     {
       "path": "assets/icons/ui-play.svg",

@@ -125,6 +125,8 @@ export const UI = {
   planLabel: (army: string, divisions: number): string => `${army} · ${divisions}個師団`,
   planOffensive: (army: string, divisions: number): string =>
     `${army} · ${divisions}個師団 進攻`,
+  /** The tag on the stroke a finger is making right now. */
+  planDrafting: '作図中',
   planSpearhead: (army: string, divisions: number): string =>
     `${army} · ${divisions}個師団 先鋒`,
   /** Shown while a stack is under orders and the next tap sets its objective. */
@@ -137,13 +139,7 @@ export const UI = {
   orderStopLabel: '移動を中止する',
   orderAssign: '編成',
   orderAssignLabel: '軍へ編成',
-  orderDrawFront: '戦線',
-  orderDrawFrontLabel: '戦線を引く',
-  orderDrawPush: '進攻',
-  orderDrawPushLabel: '進攻・先鋒の計画を引く',
   orderNewArmy: '＋新しい軍',
-  orderNeedsArmy: 'まず軍に編成してください',
-  orderNoEnemy: '接する国がありません',
   /** The marquee tool: a button, because a phone has no modifier key. */
   boxSelectTool: '範囲',
   boxSelectToolLabel: '範囲選択',
@@ -218,10 +214,8 @@ export const UI = {
   orderFront: '戦線を保持',
   orderOffensive: '進攻',
   orderSpearhead: '先鋒',
+  orderLine: '前線',
   orderGarrison: '駐屯',
-  setOrderFront: '戦線',
-  setOrderAttack: '進攻',
-  setOrderSpearhead: '先鋒',
   setOrderClear: '解除',
   /** The arrow button above the general's portrait: 計画実行. */
   planExecute: '計画実行',
@@ -229,11 +223,50 @@ export const UI = {
   planStop: '停止',
   planPreparing: '準備中',
   planExecuting: '実行中',
+  /* The battle-plan bar. The reference labels it 「戦闘計画」 and hangs the
+     tools off it; each one is picked up, then drawn with on the map. */
+  planBar: '戦闘計画',
+  toolFront: '前線',
+  toolFrontHint: '自国領をなぞって前線を引く',
+  toolOffensive: '攻撃線',
+  toolOffensiveHint: '敵地をなぞって進攻目標にする',
+  toolSpearhead: '先鋒',
+  toolSpearheadHint: '敵地を一箇所たたいて突破目標にする',
+  toolGarrison: '駐屯',
+  toolGarrisonHint: '自国領をなぞって駐屯地にする',
+  toolInvade: '強襲上陸',
+  toolInvadeHint: '敵の海岸を一箇所たたいて強襲上陸する（組織率を大きく失う）',
+  toolTransport: '海上輸送',
+  toolTransportHint: '味方の港へ一箇所たたいて船で送る（港から港へ）',
+  toolClear: '削除',
+  toolClearHint: '計画を消す',
+  planNeedsArmy: 'まず軍を選んでください',
+  planDrawnOnMap: '計画は地図の下の「戦闘計画」から引きます',
+  planDrawn: (n: number): string => `${n}州の計画を引いた`,
+  planCleared: '計画を消した',
+  /* Why a sea transfer could not be arranged. Each has a different answer, so
+     each says which one it is rather than 「できません」. */
+  transportNoPortHere: 'この師団の近くに使える港がありません',
+  transportNoPortThere: '目的地の近くに味方の港がありません',
+  transportSameCoast: '同じ海岸なので、歩いて行けます',
+  transportNoShipping: '輸送船がありません（造船所か船団が要ります）',
+  transportNoRoad: 'その港から目的地まで陸路がありません',
+  transportSailing: (n: number, free: number): string =>
+    `${n}個師団を乗船させました · 空き船腹 ${free}`,
   pickEnemy: '対象',
   divisionsInArmy: '個師団',
   /** A division's name: the 12 in 第12歩兵師団. */
   divisionName: (ordinal: number, template: string): string => `第${ordinal}${template}`,
   orderOfBattle: '隷下師団',
+  selectAll: '全選択',
+  /* Not 「選択解除」: that is what the ✕ on the order bar is called, and two
+     controls with the same name is two controls a screen reader cannot tell
+     apart. This one is the counterpart of 全選択 and reads as one. */
+  selectNone: '全解除',
+  selectedCount: (n: number): string => `${n}個選択中`,
+  dropFromArmy: '軍から外す',
+  newArmyFromBox: '範囲選択して新しい軍',
+  newArmyArmed: '地図をなぞると、囲んだ師団で新しい軍を編成します',
   onTheMove: '移動中',
   detached: '独立行動',
   rejoinPlan: '計画に復帰',

@@ -1,5 +1,6 @@
 import { effectiveTemplate, techModifiers } from '../research';
 import { commandModifiers } from './command';
+import { nearestUsablePort } from './ports';
 import { DRY_SPEED, fuelPenalty } from '../economy/fuel';
 import { INITIAL_RESISTANCE } from '../economy/occupation';
 import {
@@ -173,16 +174,39 @@ function sealiftInUse(state: GameState, ctx: MilitaryContext, owner: CountryId):
   let n = 0;
   for (const d of state.divisions) {
     if (d.dead || d.owner !== owner || d.path.length === 0) continue;
-    if (ctx.index.isSeaLink(d.provinceId, d.path[0])) n++;
+    if (isVoyage(ctx.index, d.provinceId, d.path[0])) n++;
   }
   return n;
 }
+
+/**
+ * True when this step of a route is made by ship.
+ *
+ * Two provinces that touch across water is a strait crossing -- an assault, or
+ * a ferry. Two provinces that do not touch at all can only be a voyage: the
+ * pathfinder never produces such a step, so the only thing that puts one in a
+ * route is `orderTransport`, and this is how the rest of the code finds it
+ * again without a second field to keep in step with the path.
+ */
+export function isVoyage(index: ProvinceIndex, from: ProvinceId, to: ProvinceId): boolean {
+  return index.isSeaLink(from, to) || !index.areAdjacent(from, to);
+}
+
+/**
+ * Speed over water, in the same units the land march uses.
+ *
+ * The ship's speed, not the men's: a motorised division does not cross the
+ * Mediterranean faster than a foot one. Ten knots is what a wartime convoy
+ * made, which on this map's scale is about 440km a day -- a little over twice
+ * the 210 a marching division covers.
+ */
+const NAVAL_TRANSPORT_KMH = 18;
 
 /** True when any step of this route crosses water. */
 function routeCrossesSea(ctx: MilitaryContext, from: ProvinceId, path: ProvinceId[]): boolean {
   let prev = from;
   for (const step of path) {
-    if (ctx.index.isSeaLink(prev, step)) return true;
+    if (isVoyage(ctx.index, prev, step)) return true;
     prev = step;
   }
   return false;
@@ -229,6 +253,85 @@ export function orderMove(
   d.moveProgress = 0;
   d.order = { kind: 'move', target };
   return true;
+}
+
+/**
+ * Reasons a transfer by sea cannot be arranged.
+ *
+ * Named rather than boolean, because "it did not work" is not something a
+ * player can act on and each of these has a different answer: march inland
+ * first, take a harbour, or build some ships.
+ */
+export type TransportBlock =
+  | 'ok'
+  /** Nowhere on this side of the water to embark from. */
+  | 'noPortHere'
+  /** Nowhere at the far end to put in at. */
+  | 'noPortThere'
+  /** Both harbours are the same one, so this is a march. */
+  | 'sameCoast'
+  /** No hulls: a power with no dockyards and no convoys cannot lift anybody. */
+  | 'noShipping'
+  /** The destination cannot be reached on foot from the harbour that serves it. */
+  | 'noRoad';
+
+/**
+ * Ships a division from one harbour to another.
+ *
+ * 「強襲上陸とは別に港を経由して移動できるように」. Three legs: march to the
+ * quay, sail, march inland. Only the middle one is a voyage, and the route
+ * stores it as a step between two provinces that do not touch -- which is
+ * exactly what a voyage is, and is how the hourly tick recognises one without
+ * having to be told.
+ *
+ * Distinct from an assault in both directions. A transfer may only put in at a
+ * harbour we or an ally hold, so it cannot take ground; and because nobody is
+ * shooting at the quay, the men walk off in the order they walked on.
+ */
+export function planTransport(
+  state: GameState, index: ProvinceIndex, owner: CountryId,
+  from: ProvinceId, target: ProvinceId,
+): { block: TransportBlock; path: ProvinceId[] } {
+  const no = (block: TransportBlock) => ({ block, path: [] as ProvinceId[] });
+  if (target === from) return no('sameCoast');
+  if (sealiftCapacity(state, owner) <= 0) return no('noShipping');
+
+  const embark = nearestUsablePort(state, index, owner, from);
+  if (embark === null) return no('noPortHere');
+  const debark = nearestUsablePort(state, index, owner, target);
+  if (debark === null) return no('noPortThere');
+  // Same harbour at both ends: the two places are on one coast and the
+  // division should walk. Saying so is more use than sailing it in a circle.
+  if (embark === debark) return no('sameCoast');
+
+  const land = (a: ProvinceId, b: ProvinceId): ProvinceId[] | null => {
+    if (a === b) return [a];
+    return index.path(a, b, {
+      allowSea: false,
+      blocked: (id) => !hasAccess(state, owner, id),
+      cost: (id) => 1 / TERRAIN[index.get(id).terrain].speed,
+    });
+  };
+  const toQuay = land(from, embark);
+  if (!toQuay) return no('noPortHere');
+  const inland = land(debark, target);
+  if (!inland) return no('noRoad');
+
+  // march ++ voyage ++ march. The first element of each leg is where the
+  // previous one ended, so it is dropped.
+  return { block: 'ok', path: [...toQuay.slice(1), debark, ...inland.slice(1)] };
+}
+
+export function orderTransport(
+  state: GameState, ctx: MilitaryContext, d: Division, target: ProvinceId,
+): TransportBlock {
+  if (d.dead) return 'sameCoast';
+  const { block, path } = planTransport(state, ctx.index, d.owner, d.provinceId, target);
+  if (block !== 'ok') return block;
+  d.path = path;
+  d.moveProgress = 0;
+  d.order = { kind: 'move', target };
+  return 'ok';
 }
 
 export function stopDivision(d: Division): void {
@@ -316,7 +419,14 @@ function endCombat(
       captureProvince(state, ctx, combat.province, combat.attackerCountry);
       placeDivision(state, winner, combat.province);
       winner.moveProgress = 0;
-      winner.path = winner.path.filter((p) => p !== combat.province);
+      // Everything up to and including the province just taken, rather than
+      // that province wherever it appears. Filtering could splice a hole in
+      // the middle of a route, and a route with a hole in it now reads as a
+      // voyage -- `isVoyage` calls any step between provinces that do not
+      // touch a crossing by sea, because that is the only thing that produces
+      // one.
+      const taken = winner.path.indexOf(combat.province);
+      if (taken >= 0) winner.path = winner.path.slice(taken + 1);
     }
   } else {
     for (const d of attackers) {
@@ -479,20 +589,28 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
   }
   // Shipping is a live resource: a division waits on the quay until a hull is
   // free, which is what stops an entire army crossing in one tide.
-  const crossing = ctx.index.isSeaLink(d.provinceId, next);
+  const crossing = isVoyage(ctx.index, d.provinceId, next);
   if (crossing && d.moveProgress === 0
       && sealiftInUse(state, ctx, d.owner) >= sealiftCapacity(state, d.owner)) {
     return;
   }
   const distance = Math.max(1, ctx.index.distance(d.provinceId, next));
-  const kmThisHour = movementSpeed(state, ctx, d, next);
+  // A ship's speed over water, the division's own on land: a motorised
+  // division does not cross the Mediterranean faster than a foot one.
+  const kmThisHour = crossing ? NAVAL_TRANSPORT_KMH : movementSpeed(state, ctx, d, next);
   d.moveProgress += kmThisHour / distance;
   if (d.moveProgress < 1) return;
 
   d.moveProgress = 0;
-  if (crossing) {
-    // Ashore, and disorganised. Without this an amphibious assault is strictly
-    // better than a land attack, because it arrives where the enemy is not.
+  const controller = state.provinces[next].controller;
+  // Ashore, and disorganised -- but only where somebody is holding the beach.
+  // Without a penalty an amphibious assault would be strictly better than a
+  // land attack, because it arrives where the enemy is not; applied to every
+  // crossing, putting a corps down at one of our own quays wrecked it as
+  // thoroughly as storming a defended shore. 「強襲上陸とは別に港を経由して
+  // 移動できるように」: an assault is a landing under fire, a transfer is a
+  // gangway, and only the first of them costs the men their order.
+  if (crossing && isHostile(state, d.owner, controller)) {
     const tplNow = effectiveTemplate(state, d.owner, templateOf(state, d));
     // An officer who has done this before lands his men in better order.
     const practised = commandModifiers(state, d).traits.has('naval_invader')
@@ -502,7 +620,6 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
     );
     d.org = Math.min(d.org, tplNow.maxOrg * kept);
   }
-  const controller = state.provinces[next].controller;
 
   if (isHostile(state, d.owner, controller)) {
     // Contested: join or open a battle instead of walking in.
