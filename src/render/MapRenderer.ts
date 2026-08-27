@@ -509,10 +509,13 @@ export class MapRenderer {
    * tapped province is outlined; at state scope every province of its state is,
    * which is the only way to see on the map how far a state reaches.
    */
-  setSelection(id: ProvinceId | null, ordering = false, scope: SelectionScope = 'province'): void {
+  setSelection(
+    id: ProvinceId | null, ordering = false, scope: SelectionScope = 'province',
+    occupied?: Iterable<ProvinceId>,
+  ): void {
     this.selected = id;
     this.selectScope = scope;
-    this.units.setSelection(id, ordering);
+    this.units.setSelection(id, ordering, occupied);
   }
 
   setHover(id: ProvinceId | null): void {

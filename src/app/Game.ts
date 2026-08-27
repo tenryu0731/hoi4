@@ -263,6 +263,9 @@ export class Game {
     this.time.advance(dtMs);
     this.input.update(dtMs);
     this.renderer.setDragOrder(this.dragOrder);
+    // The rings follow the divisions: they march, and a ring left on the
+    // province they set out from is a ring on nothing.
+    if (this.selection.divisions.length > 0) this.pushSelection();
     this.renderer.setPlans(this.planLines());
     // Harbours are pointed out while a tool that needs one is in hand.
     this.renderer.setPortsLit(this.planTool === 'invade');
@@ -544,7 +547,16 @@ export class Game {
   }
 
   private pushSelection(): void {
-    this.renderer.setSelection(this.selection.province, this.ordering, this.selection.scope);
+    // Every province the selected divisions are standing in gets a ring, not
+    // only the one the tap landed on: 「範囲選択の時に選択されたやつ全部光ってない」.
+    const occupied = new Set<ProvinceId>();
+    for (const id of this.selection.divisions) {
+      const d = this.state.divisions[id];
+      if (d && !d.dead) occupied.add(d.provinceId);
+    }
+    this.renderer.setSelection(
+      this.selection.province, this.ordering, this.selection.scope, occupied,
+    );
   }
 
   /** Divisions of the player's that are alive and standing in this province. */

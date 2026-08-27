@@ -1450,6 +1450,58 @@ test.describe('touch input', () => {
     expect(caught).toBeGreaterThan(1);
     await expect(rows).toHaveCount(caught);
 
+    // Every province the catch is standing in gets a ring, not only the one
+    // the tap landed on: 「範囲選択の時に選択されたやつ全部光ってない」. Counted
+    // from the layer, because a ring is drawn into a canvas and cannot be
+    // queried any other way.
+    const rings = await page.evaluate(() => {
+      const g = window.__game!;
+      g.tickFrame(16.667);
+      const provinces = new Set(
+        g.selection.divisions.map((d) => g.state.divisions[d].provinceId),
+      );
+      // Only the ones on screen can carry a ring: a counter outside the
+      // viewport is not drawn at all, which is the same cull `collect` does.
+      const view = g.renderer.camera.visibleRect();
+      const pad = 200 / Math.max(1e-4, g.renderer.camera.zoom);
+      const onScreen = [...provinces].filter((id) => {
+        const p = g.index.get(id);
+        return p.centerX >= view.minX - pad && p.centerX <= view.maxX + pad
+          && p.centerY >= view.minY - pad && p.centerY <= view.maxY + pad;
+      }).length;
+      return { provinces: provinces.size, onScreen, lit: g.renderer.units.litCount };
+    });
+    expect(rings.provinces).toBeGreaterThan(1);
+    // More than the one the tap landed on, which is all there used to be.
+    expect(rings.lit).toBeGreaterThan(1);
+    expect(rings.lit).toBeLessThanOrEqual(rings.onScreen);
+
+    // Exactly, above the zoom where counters stop standing in for whole
+    // states: below it several of these provinces share one plate, and one
+    // plate can only carry one ring.
+    const close = await page.evaluate(() => {
+      const g = window.__game!;
+      const c = g.renderer.camera;
+      c.zoom = 0.4;
+      const held = g.selection.divisions.map((d) => g.state.divisions[d].provinceId);
+      const first = g.index.get(held[0]);
+      c.x = first.centerX;
+      c.y = first.centerY;
+      c.velocityX = 0;
+      c.velocityY = 0;
+      for (let i = 0; i < 60; i++) g.tickFrame(16.667);
+      const view = c.visibleRect();
+      const pad = 200 / Math.max(1e-4, c.zoom);
+      const onScreen = new Set(held.filter((id) => {
+        const p = g.index.get(id);
+        return p.centerX >= view.minX - pad && p.centerX <= view.maxX + pad
+          && p.centerY >= view.minY - pad && p.centerY <= view.maxY + pad;
+      })).size;
+      return { onScreen, lit: g.renderer.units.litCount };
+    });
+    expect(close.onScreen).toBeGreaterThan(1);
+    expect(close.lit).toBe(close.onScreen);
+
     // A rectangle catches more than was meant; this is where the extras come
     // off, one row at a time.
     await rows.first().click();
@@ -1474,6 +1526,18 @@ test.describe('touch input', () => {
     });
     expect(after.count).toBe(before + 1);
     expect(after.held).toBe(caught - 1);
+
+    // And it can be got rid of again. 「軍の削除ができない」: the button existed,
+    // at the bottom of the command panel's army card, which since the order of
+    // battle became a list of every division is two dozen rows down a
+    // scrolling sheet.
+    await page.getByRole('button', { name: '軍を解隊' }).click();
+    const gone = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      return (g.state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup).length;
+    });
+    expect(gone).toBe(before);
   });
 
   test('a division sails to an overseas port instead of storming it', async ({ page }) => {

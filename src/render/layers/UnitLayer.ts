@@ -154,6 +154,10 @@ export class UnitLayer {
   readonly hitBoxes: CounterHit[] = [];
   private anchors = new Map<number, ProvinceId>();
   private selectedProvince: ProvinceId | null = null;
+  /** Every province the current selection occupies, for the rings. */
+  private selectedProvinces = new Set<ProvinceId>();
+  /** How many plates were drawn with a selection ring last frame; read by tests. */
+  litCount = 0;
   private ordering = false;
   private neutral = false;
   private drag: DragOrder | null = null;
@@ -172,9 +176,16 @@ export class UnitLayer {
    * for both, so the counter has to say which mode the next tap is in --
    * otherwise a tap meant to inspect a neighbour marches the army into it.
    */
-  setSelection(id: ProvinceId | null, ordering = false): void {
+  setSelection(id: ProvinceId | null, ordering = false, also?: Iterable<ProvinceId>): void {
     this.selectedProvince = id;
     this.ordering = ordering;
+    // Every province the selection stands in, not just the one the tap landed
+    // on. A rectangle over twenty-three provinces used to ring one counter --
+    // measured: 24 divisions across 23 provinces, one of them lit -- so the
+    // player could see that something had been caught but not what.
+    this.selectedProvinces.clear();
+    if (id !== null) this.selectedProvinces.add(id);
+    if (also) for (const p of also) this.selectedProvinces.add(p);
   }
 
   /**
@@ -632,6 +643,10 @@ export class UnitLayer {
       stack.org += tpl ? d.org / Math.max(1, tpl.maxOrg) : 0;
       stack.strength += tpl ? d.hp / Math.max(1, tpl.maxHp) : 0;
       if (d.combatId !== null) stack.inCombat = true;
+      // Lit by the division, not by the plate's anchor. Below the aggregation
+      // zoom one counter stands for a whole state, so its anchor is not any
+      // division's province and matching on it lit nothing at all.
+      if (this.selectedProvinces.has(d.provinceId)) stack.selected = true;
 
       const tally = arms.get(anchorId)!;
       const bns = tpl?.battalions ?? [];
@@ -655,12 +670,16 @@ export class UnitLayer {
         if (tally[k] > bestN) { bestN = tally[k]; best = k; }
       }
       s.kind = best;
-      s.selected = s.province === this.selectedProvince;
-      s.ordering = s.selected && this.ordering;
+      // Ordering marks the one the player tapped: it says which stack the next
+      // tap on the ground moves, and a whole rectangle of them saying it would
+      // say nothing.
+      s.ordering = s.province === this.selectedProvince && this.ordering;
+      if (s.ordering) s.selected = true;
       out.push(s);
     }
     // Stable order so the pool assignment does not shuffle between frames.
     out.sort((a, b) => a.province - b.province);
+    this.litCount = out.reduce((n, s) => n + (s.selected ? 1 : 0), 0);
     return out;
   }
   /**

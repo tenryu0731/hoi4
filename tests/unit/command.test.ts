@@ -277,6 +277,60 @@ describe('battle plans', () => {
     }
   });
 
+  it('leaves a division that is already on the line where it is', () => {
+    // 「戦線に穴が空いた時とか」. The assignment used to be recomputed from
+    // scratch every day -- every division sorted against every post by
+    // distance and crowding -- so a division that arrived yesterday was
+    // re-sorted today and sent somewhere else, and its post stood empty while
+    // it walked. Measured on a six-province line held by twenty-four
+    // divisions: 99 re-orders of a division that was already standing on the
+    // line in sixty days, and a hole somewhere on the line on twenty of them.
+    //
+    // The reference has the same failure and the same workaround: a fallback
+    // line is what its players use when they want a line that "doesn't shuffle
+    // units", and the shuffling is exactly what opens the gaps.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    ger.isAI = false;
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      order: { kind: 'line', anchors: frontProvinces(f.state, f.index, ger.id, pol.id) },
+    });
+    sim.execute({ t: 'declareWar', country: ger.id, target: pol.id });
+
+    const time = new TimeEngine(f.state.clock.totalHours);
+    time.on((c) => sim.tick(c));
+    time.step(24 * 20);
+
+    const where = new Map<number, number>();
+    const at = (id: number) => f.state.divisions.find((d) => d.id === id);
+    for (const id of army.divisions) {
+      const d = at(id);
+      if (d) where.set(id, d.provinceId);
+    }
+    let churn = 0;
+    let holes = 0;
+    for (let day = 0; day < 30; day++) {
+      time.step(24);
+      for (const id of army.divisions) {
+        const d = at(id);
+        if (!d || d.dead) continue;
+        const was = where.get(id);
+        if (was !== undefined && army.frontProvinces.includes(was)
+          && d.path.length > 0 && d.path[d.path.length - 1] !== was) churn++;
+        where.set(id, d.provinceId);
+      }
+      holes += army.frontProvinces.filter((p) => !f.state.provinces[p].divisions.some(
+        (x) => f.state.divisions[x]?.owner === ger.id,
+      )).length;
+    }
+    expect(churn, 'a division standing on the line was sent somewhere else').toBe(0);
+    expect(holes, 'a post of the line stood empty').toBe(0);
+  });
+
   it('leaves a hand-given order alone instead of marching the division back', () => {
     const f = makeFixture();
     const ger = f.country('GER');
