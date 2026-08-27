@@ -355,8 +355,6 @@ export async function buildMap(): Promise<MapDataJson> {
 export interface BuiltProvinces {
   provinces: ProvinceGeoJson[];
   states: StateGeoJson[];
-  /** Admin-unit key to province id; kept for callers that map back. */
-  provinceOfUnit: Map<string, number>;
 }
 
 

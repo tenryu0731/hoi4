@@ -338,7 +338,6 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
 
   // --- 1. Voronoi cells inside each state ----------------------------------
   const raw: RawProvince[] = [];
-  const provinceOfUnit = new Map<string, number>();
   /** Province indices belonging to each state, in build order. */
   const membersOfState: number[][] = groups.map(() => []);
 
@@ -465,7 +464,6 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
       buildingSlots: 0,
     };
   });
-  for (const group of groups) for (const member of group.members) provinceOfUnit.set(member, -1);
 
   const provinces: ProvinceGeoJson[] = raw.map((p, id) => {
     const ringDepth = p.rings.map((r, i) => {
@@ -504,7 +502,7 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   // --- 5. Adjacency --------------------------------------------------------
   computeGeometricAdjacency(provinces);
 
-  return { provinces, states, provinceOfUnit };
+  return { provinces, states };
 }
 
 /**
