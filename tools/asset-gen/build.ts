@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 import { FLAGS, renderFlag } from './flags';
-import { EQUIPMENT_ICONS, RESOURCE_ICONS, UI_ICONS, UNIT_ICONS } from './icons';
+import {
+  EQUIPMENT_ICONS, PORTRAIT_ICONS, RESOURCE_ICONS, UI_ICONS, UNIT_ICONS,
+} from './icons';
 
 /**
  * Writes the generated asset set and a manifest describing it.
@@ -56,6 +58,9 @@ async function main(): Promise<void> {
   for (const [name, body] of Object.entries(UNIT_ICONS)) {
     await writeAsset(`units/${name}.svg`, body, entries);
   }
+  for (const [name, body] of Object.entries(PORTRAIT_ICONS)) {
+    await writeAsset(`portraits/${name}.svg`, body, entries);
+  }
 
   entries.sort((a, b) => a.path.localeCompare(b.path));
   const totalBytes = entries.reduce((s, e) => s + e.bytes, 0);
@@ -69,6 +74,7 @@ async function main(): Promise<void> {
       uiIcons: Object.keys(UI_ICONS).length,
       equipmentIcons: Object.keys(EQUIPMENT_ICONS).length,
       unitIcons: Object.keys(UNIT_ICONS).length,
+      portraits: Object.keys(PORTRAIT_ICONS).length,
     },
     totalBytes,
     totalGzipBytes: totalGzip,

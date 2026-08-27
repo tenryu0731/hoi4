@@ -3,12 +3,13 @@
   "counts": {
     "flags": 30,
     "resourceIcons": 6,
-    "uiIcons": 22,
+    "uiIcons": 23,
     "equipmentIcons": 9,
-    "unitIcons": 12
+    "unitIcons": 12,
+    "portraits": 8
   },
-  "totalBytes": 27147,
-  "totalGzipBytes": 17201,
+  "totalBytes": 33201,
+  "totalGzipBytes": 20397,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -326,6 +327,11 @@
       "gzipBytes": 255
     },
     {
+      "path": "assets/icons/ui-trade.svg",
+      "bytes": 377,
+      "gzipBytes": 240
+    },
+    {
       "path": "assets/icons/ui-victory_point.svg",
       "bytes": 220,
       "gzipBytes": 186
@@ -344,6 +350,46 @@
       "path": "assets/icons/ui-warning.svg",
       "bytes": 205,
       "gzipBytes": 176
+    },
+    {
+      "path": "assets/portraits/0.svg",
+      "bytes": 761,
+      "gzipBytes": 378
+    },
+    {
+      "path": "assets/portraits/1.svg",
+      "bytes": 594,
+      "gzipBytes": 329
+    },
+    {
+      "path": "assets/portraits/2.svg",
+      "bytes": 609,
+      "gzipBytes": 334
+    },
+    {
+      "path": "assets/portraits/3.svg",
+      "bytes": 759,
+      "gzipBytes": 397
+    },
+    {
+      "path": "assets/portraits/4.svg",
+      "bytes": 787,
+      "gzipBytes": 396
+    },
+    {
+      "path": "assets/portraits/5.svg",
+      "bytes": 714,
+      "gzipBytes": 366
+    },
+    {
+      "path": "assets/portraits/6.svg",
+      "bytes": 724,
+      "gzipBytes": 386
+    },
+    {
+      "path": "assets/portraits/7.svg",
+      "bytes": 729,
+      "gzipBytes": 370
     },
     {
       "path": "assets/units/air.svg",

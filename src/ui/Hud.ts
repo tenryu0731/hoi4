@@ -9,7 +9,9 @@ import { HUD_CSS } from './hud.css';
 import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
 import { RESOURCE, RESOURCE_SHORT, UI, country, eventText, outcomeReason } from './strings';
-import { MAX_ARMIES, nextArmyName } from '../sim/military/command';
+import {
+  COMMAND_LIMIT, MAX_ARMIES, commandLimit, commanderById, nextArmyName,
+} from '../sim/military/command';
 
 /**
  * The heads-up display.
@@ -43,7 +45,7 @@ const NAV: [PanelId, string, string][] = [
   ['research', UI.navResearch, 'ui-research'],
   ['construction', UI.navConstruction, 'ui-construction'],
   ['production', UI.navProduction, 'ui-production'],
-  ['trade', UI.navTrade, 'ui-diplomacy'],
+  ['trade', UI.navTrade, 'ui-trade'],
   ['command', UI.navCommand, 'ui-command'],
   ['army', UI.navArmy, 'ui-army'],
   ['diplomacy', UI.navDiplomacy, 'ui-diplomacy'],
@@ -487,16 +489,99 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   zoomIn.addEventListener('click', () => sheetView.stepZoom(1));
   const unbindPinch = sheetView.bindPinch(sheetBody);
 
-  // --- bottom navigation ---------------------------------------------------
+  // --- the tab strip -------------------------------------------------------
+  //
+  // At the top, under the national figures, which is where the reference puts
+  // it: HOI4's tabs are a row of icons directly beneath the resource line, and
+  // the bottom of its screen belongs to the officers. This used to be a
+  // bottom bar of icon-plus-label, which is the phone convention and not this
+  // game's -- and it was standing where the commander strip goes.
+  //
+  // Icons without labels, because eight labelled tabs do not fit across 412px
+  // and the labels were already clipped: 徴兵 and 国家方針 in the same 51px
+  // slot. The label survives as the accessible name.
   const nav = el('div', 'hud-nav');
   const navButtons: HTMLElement[] = [];
   for (const [id, label, icon] of NAV) {
     const b = el('button', 'hud-nav-btn');
     b.dataset.panel = id;
-    b.append(iconNode('hud-nav-icon', `icons/${icon}.svg`), el('span', 'hud-nav-label', label));
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.append(iconNode('hud-nav-icon', `icons/${icon}.svg`));
     b.addEventListener('click', () => togglePanel(id));
     navButtons.push(b);
     nav.append(b);
+  }
+
+  // --- the officer strip ---------------------------------------------------
+  //
+  // The row of generals along the foot of the screen, which is the shape of
+  // the reference and the one part of its chrome this had nothing at all
+  // standing in for. Each card is an army: its commander, its name, and the
+  // divisions it holds against what its general can actually command.
+  //
+  // It is not decoration. Until now the only way to find out that the 3rd
+  // Army was nineteen divisions over its general's limit -- which costs every
+  // one of them a share of his bonuses -- was to open the command panel and
+  // expand the card. Here it is on screen the whole time, and tapping it puts
+  // that army under orders on the map.
+  const officers = el('div', 'hud-officers');
+  let lastOfficerKey = '';
+
+  function syncOfficers(): void {
+    const state = game.state;
+    const me = state.meta.playerCountry;
+    const mine = (state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup);
+    // Keyed on everything drawn, so the strip is rebuilt when it changes and
+    // left alone the rest of the time -- it sits under the player's thumb and
+    // a row that rebuilds every frame cannot be tapped.
+    const key = mine
+      .map((a) => `${a.id}:${a.name}:${a.commander}:${a.divisions.length}`)
+      .join('|');
+    if (key === lastOfficerKey) return;
+    lastOfficerKey = key;
+
+    officers.innerHTML = '';
+    officers.classList.toggle('is-empty', mine.length === 0);
+    for (const army of mine) {
+      const commander = commanderById(state, army.commander);
+      const limit = commander ? commandLimit(commander) : COMMAND_LIMIT;
+      const over = army.divisions.length > limit;
+
+      const card = el('button', 'hud-officer');
+      card.dataset.army = String(army.id);
+      card.classList.toggle('is-over', over);
+      card.title = commander ? `${commander.name} — ${army.name}` : army.name;
+
+      const plate = el('div', 'hud-officer-plate');
+      if (commander) {
+        const face = el('img', 'hud-officer-face');
+        face.alt = '';
+        // Eight portraits and a stable pick, so a general keeps his face for
+        // the whole campaign rather than changing it when the list reorders.
+        face.src = assetUrl(`portraits/${commander.id % 8}.svg`);
+        face.addEventListener('error', () => { face.removeAttribute('src'); });
+        plate.append(face);
+        if (commander.rank === 'field_marshal') plate.classList.add('is-marshal');
+      } else {
+        // An empty frame, which is what the reference puts either side of its
+        // officers and what this actually is: a formation with nobody in
+        // charge of it. Giving it a portrait anyway made five armies with no
+        // general into five copies of the same man.
+        plate.classList.add('is-vacant');
+      }
+
+      card.append(
+        plate,
+        el('span', 'hud-officer-name', commander?.name ?? army.name),
+        el('span', 'hud-officer-count', `${army.divisions.length}/${limit}`),
+      );
+      card.addEventListener('click', () => {
+        if (army.divisions.length === 0) { game.openPanel?.('command'); return; }
+        game.selectDivisions([...army.divisions], { army: army.id });
+      });
+      officers.append(card);
+    }
   }
 
   // --- alerts --------------------------------------------------------------
@@ -552,13 +637,15 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // half of the 853px it had.
   const figures = el('div', 'hud-figures');
   figures.append(stats, resStrip);
-  top.append(topRow, figures, alertRow);
+  top.append(topRow, figures, alertRow, nav);
 
   // The rubber band, in the document rather than on the canvas: it is a band
   // on the glass, and drawing it here costs four style writes a frame instead
   // of a Graphics rebuild.
   const marquee = el('div', 'hud-marquee');
-  root.append(top, modeBar, armedHint, marquee, orderHint, toasts, sheet, nav, outcome);
+  root.append(
+    top, modeBar, armedHint, marquee, orderHint, toasts, officers, sheet, outcome,
+  );
 
   // Everything below the top bar is placed against its measured height rather
   // than a constant. The constant was 78px, chosen when the bar was one row;
@@ -571,9 +658,15 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // column has to fit inside: the sheet covers everything below it.
   function measureBand(): void {
     const topH = top.getBoundingClientRect().height;
+    // The officer strip is the floor when no panel is open. Measured rather
+    // than assumed: it is empty before the first army is raised, and a
+    // constant 56px was the height of a tab bar that no longer lives there.
+    const footH = officers.classList.contains('is-empty')
+      ? 0 : Math.round(officers.getBoundingClientRect().height);
+    root.style.setProperty('--hud-foot-h', `${footH}px`);
     const sheetTop = sheet.classList.contains('is-open')
       ? sheet.getBoundingClientRect().top
-      : window.innerHeight - 56;
+      : window.innerHeight - footH;
     root.style.setProperty('--map-band', `${Math.max(60, Math.round(sheetTop - topH))}px`);
   }
 
@@ -595,6 +688,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
 
   const topObserver = new ResizeObserver(() => { measureTop(); measureBand(); markOverflow(); });
   topObserver.observe(top);
+  topObserver.observe(officers);
   measureTop();
   measureBand();
   markOverflow();
@@ -782,6 +876,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     tweens.civ.set(me.economy.civilianFactories, dt);
     tweens.mil.set(me.economy.militaryFactories, dt);
     syncAlerts();
+    syncOfficers();
     tweens.stab.set(me.stability * 100, dt);
     tweens.ws.set(me.warSupport * 100, dt);
     tweens.fuel.set(me.economy.fuel, dt);

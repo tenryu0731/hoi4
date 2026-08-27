@@ -210,14 +210,23 @@ test.describe('touch input', () => {
       // province leaves the viewport and seven runs in ten fail, and at 0.22 the
       // margins are thin enough to fail about one in ten. Asserting the framing
       // turns a flake into a message that says which end was off.
-      const frame = await page.evaluate(() => ({
-        w: window.innerWidth,
-        h: window.innerHeight,
-        top: document.querySelector('.hud-top')!.getBoundingClientRect().bottom,
-        nav: document.querySelector('.hud-nav')!.getBoundingClientRect().top,
-      }));
+      const frame = await page.evaluate(() => {
+        // The floor of the map. The tab strip used to be down here and its top
+        // edge was the floor; the tabs are at the top now and the officers are
+        // the thing standing on the bottom.
+        const foot = document.querySelector('.hud-officers');
+        const floor = foot && !foot.classList.contains('is-empty')
+          ? foot.getBoundingClientRect().top
+          : window.innerHeight;
+        return {
+          w: window.innerWidth,
+          h: window.innerHeight,
+          top: document.querySelector('.hud-top')!.getBoundingClientRect().bottom,
+          floor,
+        };
+      });
       const onMap = (pt: { x: number; y: number }) => pt.x > 24 && pt.x < frame.w - 24
-        && pt.y > frame.top + 24 && pt.y < frame.nav - 24;
+        && pt.y > frame.top + 24 && pt.y < frame.floor - 24;
       expect(onMap(from), `drag start ${JSON.stringify(from)} is off the map ${JSON.stringify(frame)}`)
         .toBe(true);
       expect(onMap(to), `drag end ${JSON.stringify(to)} is off the map ${JSON.stringify(frame)}`)
@@ -661,11 +670,14 @@ test.describe('touch input', () => {
 
       const rect = g.renderer.canvas.getBoundingClientRect();
       const top = document.querySelector('.hud-top')!.getBoundingClientRect().bottom;
-      const nav = document.querySelector('.hud-nav')!.getBoundingClientRect().top;
+      const foot = document.querySelector('.hud-officers');
+      const floor = foot && !foot.classList.contains('is-empty')
+        ? foot.getBoundingClientRect().top
+        : window.innerHeight;
       const own = g.renderer.units.hitBoxes.filter(
         (b) => b.owner === me
           && b.x > 40 && b.x < rect.width - 90
-          && rect.top + b.y > top + 70 && rect.top + b.y < nav - 70,
+          && rect.top + b.y > top + 70 && rect.top + b.y < floor - 70,
       );
       if (own.length < 2) return null;
       own.sort((a, b) => a.y - b.y || a.x - b.x);
@@ -1129,6 +1141,73 @@ test.describe('touch input', () => {
     // おかしい」 -- nothing used to stop it.
     expect(result.path).toBe(0);
     expect(result.where).toBe(result.started);
+  });
+
+
+  test('the officer strip lists the armies and puts one under orders', async ({ page }) => {
+    await bootGame(page);
+
+    const strip = page.locator('.hud-officers');
+    await expect(strip).toBeVisible();
+
+    const expected = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      return (g.state.armies ?? [])
+        .filter((a) => a.owner === me && !a.isArmyGroup)
+        .map((a) => ({ id: a.id, divisions: a.divisions.length }));
+    });
+    expect(expected.length).toBeGreaterThan(0);
+
+    const cards = page.locator('.hud-officer');
+    await expect(cards).toHaveCount(expected.length);
+
+    // The count each card carries is the army's, against what its general can
+    // actually command -- the number that was only visible with the command
+    // panel open and its card expanded.
+    const first = page.locator(`.hud-officer[data-army="${expected[0].id}"]`);
+    await expect(first.locator('.hud-officer-count'))
+      .toContainText(`${expected[0].divisions}/`);
+
+    await first.click();
+    const selected = await page.evaluate(() => {
+      const g = window.__game!;
+      return { divisions: g.selection.divisions.length, army: g.selection.army };
+    });
+    expect(selected.army).toBe(expected[0].id);
+    expect(selected.divisions).toBe(expected[0].divisions);
+  });
+
+  test('the tabs are at the top, above the map', async ({ page }) => {
+    await bootGame(page);
+    const geometry = await page.evaluate(() => {
+      const nav = document.querySelector('.hud-nav')!.getBoundingClientRect();
+      const top = document.querySelector('.hud-top')!.getBoundingClientRect();
+      const foot = document.querySelector('.hud-officers')!.getBoundingClientRect();
+      return {
+        navTop: nav.top,
+        navBottom: nav.bottom,
+        topBottom: top.bottom,
+        footTop: foot.top,
+        height: window.innerHeight,
+        buttons: [...document.querySelectorAll('.hud-nav-btn')]
+          .map((b) => b.getBoundingClientRect())
+          .map((r) => ({ w: r.width, h: r.height, right: r.right })),
+      };
+    });
+    // Inside the top bar, not pinned to the floor.
+    expect(geometry.navBottom).toBeLessThanOrEqual(geometry.topBottom + 1);
+    expect(geometry.navTop).toBeLessThan(geometry.height / 2);
+    // And the officers have the floor.
+    expect(geometry.footTop).toBeGreaterThan(geometry.height / 2);
+
+    // Every tab is still a thumb-sized target and on the screen.
+    expect(geometry.buttons.length).toBe(8);
+    for (const b of geometry.buttons) {
+      expect(b.h).toBeGreaterThanOrEqual(44);
+      expect(b.w).toBeGreaterThanOrEqual(40);
+      expect(b.right).toBeLessThanOrEqual(413);
+    }
   });
 
 });
