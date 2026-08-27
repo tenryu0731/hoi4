@@ -733,6 +733,20 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
         syncForce();
       }));
     }
+    // Getting rid of a formation, where the player is when they want to.
+    // 「軍の削除ができない」: the button existed, at the bottom of the command
+    // panel's army card -- which since the order of battle became a list of
+    // every division is twenty-four rows down a scrolling sheet.
+    if (army) {
+      forceTools.append(forceButton(UI.forceDisband, () => {
+        game.issue({ t: 'disbandArmy', country: me, army: army.id });
+        game.selectDivisions([], { centre: false });
+        game.unitSelected = false;
+        syncForce();
+        syncOrder();
+        syncOfficers();
+      }));
+    }
     forceTools.append(forceButton(UI.forceClear, () => {
       game.selectDivisions([], { centre: false });
       game.unitSelected = false;

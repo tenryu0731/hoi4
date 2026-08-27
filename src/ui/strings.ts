@@ -271,6 +271,7 @@ export const UI = {
   forceExpand: 'ひらく',
   forceClear: '選択を解除',
   forceNewArmy: '新しい軍にする',
+  forceDisband: '軍を解隊',
   forceDetach: '軍から外す',
   forceMixed: '複数の軍',
   forceNone: '未所属',

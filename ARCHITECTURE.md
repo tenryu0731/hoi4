@@ -108,28 +108,32 @@ interface TimeEngine {
 **ビルド時パイプライン** (`tools/map-build/`):
 
 ```
-Natural Earth 50m (GeoJSON)
-  ├ ne_50m_admin_0_countries      国境ポリゴン
-  ├ ne_50m_land                   陸地マスク
-  ├ ne_50m_lakes                  湖
-  ├ ne_50m_rivers_lake_centerlines 河川 (描画のみ)
-  └ ne_50m_populated_places       主要都市 (プロヴィンス種点 & 州都)
+Natural Earth (GeoJSON, パブリックドメイン)
+  ├ ne_10m_admin_1_states_provinces  実在の行政単位 ← ステートの素材
+  ├ ne_10m_land                      陸地マスク
+  ├ ne_10m_populated_places          都市 (プロヴィンス種点 & 命名)
+  ├ ne_50m_lakes                     湖
+  └ ne_50m_rivers_lake_centerlines   河川 (描画のみ)
         │
-        │ 1. bbox クリップ  lon [-25, 50], lat [32, 72]  (ヨーロッパ + 北アフリカ沿岸 + 西部ソ連)
-        │ 2. 投影  Lambert Conformal Conic (λ0=15°E, φ1=40°N, φ2=65°N)  ← ヨーロッパの歪みが最小
-        │ 3. 簡略化  Visvalingam-Whyatt, 面積閾値 = (0.35 world-unit)^2
-        │ 4. 微小島除去  面積 < 8 world-unit^2 を削除 (Malta 等の史実重要島は allowlist で保持)
+        │ 1. bbox クリップ  lon [-26, 52], lat [27.5, 72]
+        │ 2. 1936年の持ち主へ  historical.ts の帰属表と切り出し規則
+        │    ケーニヒスベルク→独、クレシ→波、ベッサラビア→羅、
+        │    カレリア地峡→芬、イストリア→伊 …
+        │ 3. 投影  Lambert Conformal Conic (λ0=15°E, φ1=40°N, φ2=62°N)
+        │ 4. トポロジー  共有アークに切って一度だけ簡略化
+        │    (Visvalingam-Whyatt, 16 km²)  ← 隣国どうしが離れない
+        │ 5. 併合  8,500 km² (植民地は 55,000) 未満の単位を隣へ溶かす
         ▼
-  regions[]  ← 第1イテレーション: 1 region = 1 国
+  states[]  (~490)  境界はすべて実在の行政境界の上にある
         │
-        │ (第2イテレーション) 5. Voronoi 細分化
-        │    種点 = 人口上位都市 + 国土面積に応じた Poisson-disk 追加点
-        │    Voronoi セル ∩ 国ポリゴン = province
+        │ 6. Voronoi 細分化  ステートの内側だけで
+        │    種点 = 人口上位都市 + 最遠点サンプリングの補充点
+        │    Voronoi セル ∩ ステートのポリゴン = province
         ▼
-  provinces[]  (~200)  →  states[] (~55, 隣接プロヴィンスを人口/地形でクラスタリング)
+  provinces[]  (~1720)  必ずどれか一つのステートの中に収まる
 ```
 
-出力 `public/data/map.json` (gzip 後 ~350KB 目標):
+出力 `public/data/map.json` (1.6MB, gzip 後 ~475KB):
 
 ```ts
 interface MapData {

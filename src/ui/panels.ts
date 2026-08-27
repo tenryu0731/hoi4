@@ -2533,6 +2533,17 @@ export const commandPanel: Panel = {
           card.append(chips);
         }
 
+        // Above the order of battle, not below it: the list is every division
+        // in the army, so anything under it is twenty-four rows down a
+        // scrolling sheet and might as well not exist.
+        const drop = el('button', 'panel-btn wide danger', UI.disband);
+        drop.addEventListener('click', () => {
+          game.issue({ t: 'disbandArmy', country: me.id, army: army.id });
+          openArmy = -1;
+          rebuild();
+        });
+        card.append(drop);
+
         card.append(orderOfBattle(game, army, rebuild));
 
         // What turns a formation into something you can move. Without this an
@@ -2548,14 +2559,6 @@ export const commandPanel: Panel = {
           closeSheet();
         });
         card.append(take);
-
-        const drop = el('button', 'panel-btn wide danger', UI.disband);
-        drop.addEventListener('click', () => {
-          game.issue({ t: 'disbandArmy', country: me.id, army: army.id });
-          openArmy = -1;
-          rebuild();
-        });
-        card.append(drop);
 
         const bench = idleCommanders(state, me.id).filter((c) => c.rank === 'general');
         if (bench.length > 0) {

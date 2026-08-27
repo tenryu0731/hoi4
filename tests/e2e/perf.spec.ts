@@ -138,10 +138,13 @@ test.describe('performance', () => {
     // room to roughly double. 2,000 is that headroom spent.
     //
     // It was 1,400 while the map had 323 provinces. One Graphics per province
-    // is the structure, so subdividing to 1,266 moved this and nothing else --
-    // the per-frame cost above is unchanged.
+    // is the structure, so subdividing moved this and nothing else -- and it
+    // has moved twice: 1,266 provinces built 4,000-odd nodes, and the
+    // administrative map's 1,717 build 5,100, of which 1,601 are visible. The
+    // per-frame cost above is what actually matters and it barely felt it:
+    // p50 2.1ms against a 16.6ms frame, p99 14.4ms against a 33.3ms floor.
     expect(scene.visible).toBeLessThan(2000);
-    expect(scene.nodes).toBeLessThan(4000);
+    expect(scene.nodes).toBeLessThan(6000);
   });
 
   test('recolouring the whole map is cheap', async ({ page }) => {

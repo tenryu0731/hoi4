@@ -8,10 +8,12 @@ import { pipeline } from 'node:stream/promises';
 import {
   type Bbox, type Pt, type Ring,
   LandMask, bboxOfRing, clipRing, closestApproach, distToSegment,
-  poleOfInaccessibility, projectLcc, ringArea,
+  projectLcc, ringArea,
   type LccParams,
 } from './geo';
-import { assembleRing, buildTopology, simplifyArc, type ArcRef } from './topology';
+import { buildTopology, simplifyArc } from './topology';
+import { adminUnits1936, groupIntoStates, type AdminFeature } from './states';
+import { CITY_NAMES_1936 } from './historical';
 import { MEMBER_TO_TAG, NATIONS, NATION_BY_TAG } from '../../src/sim/scenario/nations';
 import { subdivideProvinces } from './provinces';
 import type {
@@ -28,11 +30,13 @@ const NE_BASE =
   'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson';
 
 const LAYERS = [
-  'ne_50m_admin_0_countries',
-  'ne_50m_land',
+  // The world's real administrative units: the raw material for states.
+  'ne_10m_admin_1_states_provinces',
+  // Coast and towns come at the same resolution so the two agree along a shore.
+  'ne_10m_land',
+  'ne_10m_populated_places',
   'ne_50m_lakes',
   'ne_50m_rivers_lake_centerlines',
-  'ne_50m_populated_places',
 ] as const;
 
 /** Europe plus the Mediterranean rim and the western Soviet Union. */
@@ -46,7 +50,7 @@ const PROJ: LccParams = {
 };
 
 /** Visvalingam area threshold in square kilometres. */
-const SIMPLIFY_AREA = 12;
+const SIMPLIFY_AREA = 16;
 /** Drop islands smaller than this (square kilometres) unless allow-listed. */
 const MIN_ISLAND_AREA = 260;
 const ISLAND_ALLOWLIST = new Set(['MLT', 'ISL', 'CYP', 'ALD', 'FRO', 'IMN', 'JEY', 'GGY']);
@@ -147,78 +151,57 @@ function prepareRing(coords: number[][]): Ring | null {
 // Main build
 // ---------------------------------------------------------------------------
 
-export interface BuildOptions {
-  /** When true, split each nation into several provinces (iteration 2). */
-  subdivide: boolean;
-  /** Approximate number of states to aim for when subdividing. */
-  stateTarget: number;
-}
-
-export async function buildMap(opts: BuildOptions): Promise<MapDataJson> {
+export async function buildMap(): Promise<MapDataJson> {
   console.log('Natural Earth -> map.json');
-  const [countries, land, lakes, rivers, places] = await Promise.all(
+  const [adm1, land, places, lakes, rivers] = await Promise.all(
     LAYERS.map((l) => ensureLayer(l)),
   );
 
-  // --- 1. Collect the polygons of every playable nation --------------------
-  // Regions are keyed by Natural Earth admin-0 code, not by 1936 tag, so that
-  // topology can tell an internal border (Bohemia/Slovakia) from a coastline.
-  const memberRings = new Map<string, Ring[]>();
-  for (const f of countries.features) {
-    const code = String(f.properties.ADM0_A3 ?? '');
-    const tag = MEMBER_TO_TAG.get(code);
-    if (!tag) continue;
-    const rings: Ring[] = [];
-    for (const poly of polygonsOf(f)) {
-      for (let r = 0; r < poly.length; r++) {
-        const ring = prepareRing(poly[r]);
-        if (!ring) continue;
-        const area = ringArea(ring);
-        // Holes (r > 0) are kept regardless of size; tiny outer islands are not.
-        if (r === 0 && area < MIN_ISLAND_AREA && !ISLAND_ALLOWLIST.has(code)) continue;
-        rings.push(ring);
-      }
-    }
-    if (rings.length === 0) continue;
-    const prev = memberRings.get(code);
-    if (prev) prev.push(...rings);
-    else memberRings.set(code, rings);
-  }
+  // --- 1. Administrative units, put back into their 1936 hands -------------
+  const rawUnits = adminUnits1936(adm1.features as unknown as AdminFeature[], {
+    world: BBOX,
+    tagOf: (code) => MEMBER_TO_TAG.get(code),
+  });
+  const units = rawUnits
+    .map((u) => {
+      const rings = u.lonLat.map((r) => project(r)).sort((a, b) => ringArea(b) - ringArea(a));
+      // Skerries cost more in vertices than they are ever worth in play -- but
+      // only the outlying ones. A unit's largest ring is the unit: dropping it
+      // by area punched holes in the map wherever a city was its own admin
+      // unit, and Paris, Basel and Bristol all fell through one.
+      const kept = rings.filter((r, i) =>
+        i === 0 || ringArea(r) >= MIN_ISLAND_AREA || ISLAND_ALLOWLIST.has(u.adm0));
+      return { ...u, rings: kept };
+    })
+    .filter((u) => u.rings.length > 0);
+  console.log(`  ${units.length} admin units in 1936 hands`);
 
-  const missing = NATIONS.flatMap((n) => n.members).filter((m) => !memberRings.has(m));
-  if (missing.length) console.warn(`  note: no geometry for ${missing.join(', ')}`);
+  const missing = NATIONS.filter((n) => !units.some((u) => u.tag === n.tag));
+  if (missing.length) console.warn(`  note: no geometry for ${missing.map((n) => n.tag).join(', ')}`);
 
   // --- 2. Topology: shared arcs, simplified once ---------------------------
-  const topoInput = [...memberRings].map(([key, rings]) => ({ key, rings }));
-  const topo = buildTopology(topoInput);
-  console.log(`  ${topoInput.length} admin units -> ${topo.arcs.length} arcs`);
-
-  const simplified = topo.arcs.map((a) => simplifyArc(a, SIMPLIFY_AREA, 2));
+  // Every border is cut into arcs at its junctions and each unique arc is
+  // simplified exactly once, so two neighbours can never drift apart into a
+  // sliver of ocean the way independently simplified polygons do.
+  const topo = buildTopology(units.map((u) => ({ key: u.key, rings: u.rings })));
   const beforePts = topo.arcs.reduce((s, a) => s + a.length, 0);
+  const simplified = topo.arcs.map((a) => simplifyArc(a, SIMPLIFY_AREA, 2));
+  for (let i = 0; i < topo.arcs.length; i++) topo.arcs[i] = simplified[i];
   const afterPts = simplified.reduce((s, a) => s + a.length, 0);
-  console.log(`  simplified ${beforePts} -> ${afterPts} points`);
+  console.log(`  ${topo.arcs.length} arcs, simplified ${beforePts} -> ${afterPts} points`);
 
-  // --- 3. Rebuild each admin unit's rings from simplified arcs -------------
-  interface Unit {
-    code: string;
-    tag: string;
-    rings: Ring[];
-    ringRefs: ArcRef[][];
-  }
-  const units: Unit[] = [];
-  for (const [code, ringRefs] of topo.regions) {
-    const rings: Ring[] = [];
-    const keptRefs: ArcRef[][] = [];
-    for (const refs of ringRefs) {
-      const ring = assembleRing(refs, simplified);
-      if (ring.length < 3) continue;
-      rings.push(ring);
-      keptRefs.push(refs);
-    }
-    if (rings.length === 0) continue;
-    units.push({ code, tag: MEMBER_TO_TAG.get(code)!, rings, ringRefs: keptRefs });
-  }
-  units.sort((a, b) => a.code.localeCompare(b.code));
+  // --- 3. Merge the small units upward into states -------------------------
+  const stateGroups = groupIntoStates({
+    units: rawUnits,
+    projected: new Map(units.map((u) => [u.key, u.rings])),
+    topo,
+  });
+  console.log(`  ${stateGroups.length} states`);
+  const stateOfUnit = new Map<string, number>();
+  const tagOfUnit = new Map<string, string>();
+  stateGroups.forEach((g, i) => {
+    for (const member of g.members) { stateOfUnit.set(member, i); tagOfUnit.set(member, g.tag); }
+  });
 
   // --- 4. Cities ------------------------------------------------------------
   const cities: CityJson[] = [];
@@ -231,7 +214,8 @@ export async function buildMap(opts: BuildOptions): Promise<MapDataJson> {
     const tag = MEMBER_TO_TAG.get(code);
     if (!tag) continue;
     const popMax = Number(f.properties.POP_MAX ?? 0);
-    const name = String(f.properties.NAME ?? '');
+    const modern = String(f.properties.NAME ?? '');
+    const name = CITY_NAMES_1936[`${modern}|${code}`] ?? modern;
     const [x, y] = projectLcc(lon, lat, PROJ);
     const nation = NATION_BY_TAG.get(tag)!;
     const isCapital = name === nation.capital;
@@ -256,9 +240,7 @@ export async function buildMap(opts: BuildOptions): Promise<MapDataJson> {
   }
 
   // --- 5. Provinces ---------------------------------------------------------
-  const built = opts.subdivide
-    ? subdivideProvinces({ units, cities, target: opts.stateTarget, projection: PROJ })
-    : oneProvincePerNation(units);
+  const built = subdivideProvinces({ states: stateGroups, cities, projection: PROJ });
 
   const provinces: ProvinceGeoJson[] = built.provinces;
   const states: StateGeoJson[] = built.states;
@@ -322,7 +304,7 @@ export async function buildMap(opts: BuildOptions): Promise<MapDataJson> {
   }
 
   // --- 9. Borders for rendering --------------------------------------------
-  const borders = classifyBorders(units, simplified, topo.arcOwners, built.provinceOfUnit);
+  const borders = classifyBorders(topo.arcs, topo.arcOwners, tagOfUnit, stateOfUnit);
 
   // --- 10. Bounds -----------------------------------------------------------
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -351,7 +333,15 @@ export async function buildMap(opts: BuildOptions): Promise<MapDataJson> {
     rivers: riverLines,
     cities: cities
       .filter((c) => c.province >= 0)
-      .map((c) => ({ ...c, x: Math.round(c.x * 10) / 10, y: Math.round(c.y * 10) / 10 })),
+      .map((c) => {
+        const out: CityJson = {
+          ...c, x: Math.round(c.x * 10) / 10, y: Math.round(c.y * 10) / 10,
+        };
+        // `capitalOf: null` on thirteen hundred towns is thirty kilobytes of
+        // the word "null"; readers already treat the field as optional.
+        if (out.capitalOf === null) delete (out as { capitalOf?: string | null }).capitalOf;
+        return out;
+      }),
     borders,
   };
 
@@ -359,83 +349,14 @@ export async function buildMap(opts: BuildOptions): Promise<MapDataJson> {
 }
 
 // ---------------------------------------------------------------------------
-// Iteration 1: one province per nation
+// What the subdivider hands back
 // ---------------------------------------------------------------------------
 
 export interface BuiltProvinces {
   provinces: ProvinceGeoJson[];
   states: StateGeoJson[];
-  /** Admin-unit code to province id, used to classify border arcs. */
-  provinceOfUnit: Map<string, number>;
 }
 
-interface UnitLike { code: string; tag: string; rings: Ring[]; ringRefs: ArcRef[][] }
-
-function oneProvincePerNation(units: UnitLike[]): BuiltProvinces {
-  const tags = NATIONS.map((n) => n.tag).filter((t) => units.some((u) => u.tag === t));
-  const provinces: ProvinceGeoJson[] = [];
-  const states: StateGeoJson[] = [];
-  const provinceOfUnit = new Map<string, number>();
-
-  tags.forEach((tag, id) => {
-    const nation = NATION_BY_TAG.get(tag)!;
-    const mine = units.filter((u) => u.tag === tag);
-    for (const u of mine) provinceOfUnit.set(u.code, id);
-
-    const rings: Ring[] = [];
-    for (const u of mine) rings.push(...u.rings);
-    // Largest ring first so the renderer and the label picker both see the
-    // mainland before the islands.
-    rings.sort((a, b) => ringArea(b) - ringArea(a));
-    // A ring nested inside an odd number of others is a hole (enclaves such as
-    // San Marino, or the Caspian shoreline cut out of the Soviet Union).
-    const ringDepth = rings.map((r, i) => {
-      let depth = 0;
-      for (let j = 0; j < rings.length; j++) {
-        if (j === i) continue;
-        if (ringArea(rings[j]) > ringArea(r) && pointInRingFast(r[0][0], r[0][1], rings[j])) depth++;
-      }
-      return depth % 2;
-    });
-
-    // Anchor the label on the ring that holds the capital, not the largest one.
-    // The United Kingdom's largest 1936 landmass is Egypt, and France's is
-    // Algeria, so "largest ring" would caption both nations in North Africa.
-    const [capX, capY] = projectLcc(nation.capitalLonLat[0], nation.capitalLonLat[1], PROJ);
-    const homeRing = rings.find((r) => pointInRingFast(capX, capY, r)) ?? rings[0];
-    const center = poleOfInaccessibility([homeRing], 2);
-    const area = rings.reduce((s, r) => s + ringArea(r), 0);
-
-    provinces.push({
-      id, name: nation.name, stateId: id, ownerTag: tag,
-      terrain: nation.terrain, vp: 0, coastal: true,
-      rings: rings.map((r) => flatten(r)),
-      ringDepth,
-      center: [Math.round(center[0] * 10) / 10, Math.round(center[1] * 10) / 10],
-      area: Math.round(area),
-      neighbors: [], seaNeighbors: [],
-    });
-
-    const manpower = Math.round(nation.population * 1000);
-    states.push({
-      id, name: nation.name, ownerTag: tag, provinces: [id],
-      manpower,
-      resources: nation.resources,
-      infrastructure: nation.infrastructure,
-      civilianFactories: nation.civilianFactories,
-      militaryFactories: nation.militaryFactories,
-      dockyards: nation.dockyards,
-      buildingSlots: buildingSlotsFor(
-        manpower, nation.civilianFactories + nation.militaryFactories,
-      ),
-    });
-  });
-
-  // Land adjacency: two provinces touch when their admin units share an arc.
-  // Recomputed here from raw rings so it stays correct after simplification.
-  computeLandAdjacency(units, provinceOfUnit, provinces);
-  return { provinces, states, provinceOfUnit };
-}
 
 /**
  * Factory slots a state offers. Population sets the ceiling, but a state never
@@ -447,39 +368,6 @@ export function buildingSlotsFor(manpower: number, existing: number): number {
   return Math.max(8, existing + 8, Math.min(64, byPopulation));
 }
 
-/** Marks provinces adjacent when their source units share at least one arc. */
-export function computeLandAdjacency(
-  units: UnitLike[],
-  provinceOfUnit: Map<string, number>,
-  provinces: ProvinceGeoJson[],
-): void {
-  const arcUsers = new Map<number, Set<number>>();
-  for (const u of units) {
-    const pid = provinceOfUnit.get(u.code);
-    if (pid === undefined) continue;
-    for (const refs of u.ringRefs) {
-      for (const ref of refs) {
-        let s = arcUsers.get(ref.arc);
-        if (!s) { s = new Set(); arcUsers.set(ref.arc, s); }
-        s.add(pid);
-      }
-    }
-  }
-  const sets = provinces.map(() => new Set<number>());
-  for (const users of arcUsers.values()) {
-    if (users.size < 2) continue;
-    const list = [...users];
-    for (let i = 0; i < list.length; i++) {
-      for (let j = i + 1; j < list.length; j++) {
-        sets[list[i]].add(list[j]);
-        sets[list[j]].add(list[i]);
-      }
-    }
-  }
-  provinces.forEach((p, i) => {
-    p.neighbors = [...sets[i]].sort((a, b) => a - b);
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Shared post-processing
@@ -722,12 +610,11 @@ function markCoastal(provinces: ProvinceGeoJson[], landGeom: Ring[]): void {
 }
 
 function classifyBorders(
-  units: UnitLike[],
   arcs: Pt[][],
   arcOwners: Map<number, Set<string>>,
-  provinceOfUnit: Map<string, number>,
+  tagOfUnit: Map<string, string>,
+  stateOfUnit: Map<string, number>,
 ): MapDataJson['borders'] {
-  const tagOf = new Map<string, string>(units.map((u) => [u.code, u.tag]));
   const country: number[][] = [];
   const province: number[][] = [];
   const coast: number[][] = [];
@@ -735,15 +622,15 @@ function classifyBorders(
   for (const [arcIdx, owners] of arcOwners) {
     const pts = arcs[arcIdx];
     if (!pts || pts.length < 2) continue;
-    const codes = [...owners].filter((c) => tagOf.has(c));
+    const codes = [...owners].filter((c) => tagOfUnit.has(c));
     if (codes.length === 0) continue;
-    const tags = new Set(codes.map((c) => tagOf.get(c)!));
-    const pids = new Set(codes.map((c) => provinceOfUnit.get(c)).filter((v) => v !== undefined));
+    const tags = new Set(codes.map((c) => tagOfUnit.get(c)!));
+    const stateIds = new Set(codes.map((c) => stateOfUnit.get(c)));
     const flat = flatten(pts);
     if (codes.length === 1) coast.push(flat);
     else if (tags.size > 1) country.push(flat);
-    else if (pids.size > 1) province.push(flat);
-    // Same tag and same province: an internal seam, not drawn.
+    else if (stateIds.size > 1) province.push(flat);
+    // Two units of the same state: an internal seam, and nothing to draw.
   }
   return { country, province, coast };
 }
@@ -753,11 +640,7 @@ function classifyBorders(
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const subdivide = process.argv.includes('--subdivide');
-  const targetArg = process.argv.find((a) => a.startsWith('--states='));
-  const stateTarget = targetArg ? Number(targetArg.split('=')[1]) : 56;
-
-  const data = await buildMap({ subdivide, stateTarget });
+  const data = await buildMap();
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(data));
   const size = (await stat(OUT)).size;

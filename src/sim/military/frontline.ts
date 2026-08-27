@@ -4,7 +4,7 @@ import type {
   Army, CountryId, Division, GameState, ProvinceId,
 } from '../core/types';
 import { armyById, commandModifiers, commanderById, overloadScale } from './command';
-import { orderMove, type MilitaryContext } from './movement';
+import { isHostile, orderMove, type MilitaryContext } from './movement';
 import { stackLimit } from './supply';
 
 /**
@@ -97,37 +97,75 @@ export function assignToFront(
       !!d && !d.dead && d.combatId === null && !d.detached);
   if (divisions.length === 0) return;
 
-  // Sorted by victory points so the doubling-up lands on what is worth holding,
-  // and by id after that so the assignment is the same on every machine.
+  const posts = new Set(front);
+  const held = new Map<ProvinceId, number>();
+  const loose: Division[] = [];
+  for (const div of divisions) {
+    // Already on a post, or already walking to one: leave it alone. This is
+    // the whole of the fix. What this replaces sorted every division against
+    // every post from scratch every day, so a division that arrived yesterday
+    // was re-sorted today and sent somewhere else -- measured on a six-province
+    // line held by twenty-four divisions, 99 re-orders of a division that was
+    // already standing on the line in sixty days, with a third of the posts
+    // empty on any given day because their garrison was walking to another
+    // one. The reference has the same failure and the same workaround: a
+    // fallback line is what players use when they want a line that "doesn't
+    // shuffle units", and the shuffling is exactly what opens the gaps.
+    const going = div.order?.kind === 'move' ? div.order.target : null;
+    const settled = posts.has(div.provinceId) ? div.provinceId
+      : (going !== null && posts.has(going) ? going : null);
+    if (settled !== null) {
+      held.set(settled, (held.get(settled) ?? 0) + 1);
+      continue;
+    }
+    loose.push(div);
+  }
+  if (loose.length === 0) return;
+
+  // Holes first: a post of ours with nobody on it and nobody walking to it is
+  // where the enemy comes through.
+  const holes = front.filter((p) => (held.get(p) ?? 0) === 0);
+  const send = (div: Division, choices: readonly ProvinceId[]): boolean => {
+    const from = ctx.index.get(div.provinceId);
+    const order = [...choices].sort((a, b) => {
+      const pa = ctx.index.get(a);
+      const pb = ctx.index.get(b);
+      const da = Math.hypot(from.centerX - pa.centerX, from.centerY - pa.centerY)
+        + (held.get(a) ?? 0) * 4000;
+      const db = Math.hypot(from.centerX - pb.centerX, from.centerY - pb.centerY)
+        + (held.get(b) ?? 0) * 4000;
+      // By id after that, so the assignment is the same on every machine.
+      return da - db || a - b;
+    });
+    for (const target of order) {
+      if (!reorder(state, ctx, div, target)) continue;
+      held.set(target, (held.get(target) ?? 0) + 1);
+      return true;
+    }
+    return false;
+  };
+
+  const spare: Division[] = [];
+  for (const div of loose) {
+    const open = holes.filter((p) => (held.get(p) ?? 0) === 0);
+    if (open.length === 0) { spare.push(div); continue; }
+    // The nearest division fills the nearest hole. Not "whichever division the
+    // sort happens to reach first": the reference's own failure on an
+    // encirclement is that it picks distant divisions and strategic-redeploys
+    // them, which arrives late and disorganised.
+    if (!send(div, open)) spare.push(div);
+  }
+
+  // Everything left over doubles up on the line, thickest where the ground is
+  // worth most. Sorted by victory points so the second rank lands on what is
+  // worth holding rather than on whichever post is nearest to the depot.
+  if (spare.length === 0) return;
   const ranked = [...front].sort((a, b) => {
     const va = state.provinces[a]?.vp ?? 0;
     const vb = state.provinces[b]?.vp ?? 0;
     return vb - va || a - b;
   });
-
-  const taken = new Map<ProvinceId, number>();
-  for (const div of divisions) {
-    const from = ctx.index.get(div.provinceId);
-    // Every post, cheapest first: an empty one before a crowded one, and a
-    // near one before a far one.
-    const order = [...ranked].sort((a, b) => cost(a) - cost(b));
-    function cost(target: ProvinceId): number {
-      const to = ctx.index.get(target);
-      return Math.hypot(from.centerX - to.centerX, from.centerY - to.centerY)
-        + (taken.get(target) ?? 0) * 4000;
-    }
-    // Down the list until one of them can actually be marched to. Posts on the
-    // far side of a neutral country cannot: East Prussia is cut off from the
-    // Reich by the Polish Corridor, and before armies had to respect a border
-    // that did not matter because they walked through Poland. Assigning a
-    // division to a post it cannot reach left it standing with no orders at
-    // all -- measured at five of twenty-four.
-    for (const target of order) {
-      if (!reorder(state, ctx, div, target)) continue;
-      taken.set(target, (taken.get(target) ?? 0) + 1);
-      break;
-    }
-  }
+  for (const div of spare) send(div, ranked);
 }
 
 /** How far a drawn line may walk from its anchors in one day. */
@@ -145,6 +183,7 @@ export const LINE_DRIFT = 3;
  */
 export function lineFront(
   state: GameState, ctx: MilitaryContext, army: Army, anchors: readonly ProvinceId[],
+  engaged = false,
 ): ProvinceId[] {
   const ours = (id: ProvinceId): boolean => state.provinces[id]?.controller === army.owner;
   const faces = (id: ProvinceId): boolean =>
@@ -160,13 +199,7 @@ export function lineFront(
   // provinces two hundred kilometres to the south, half of them behind the
   // line rather than on it. A front that reappears somewhere else is not a
   // front the player drew.
-  // A line none of whose posts faces anybody is a holding line, and it stays
-  // exactly where it was traced. Stepping it forward would walk a reserve line
-  // drawn behind the front onto the front the moment it was given, which is
-  // 「国境線じゃないところに戦線引こうとした時」.
   const held = anchors.filter(ours);
-  if (held.length > 0 && !held.some(faces)) return held;
-
   const out: ProvinceId[] = [];
   const seen = new Set<ProvinceId>();
   for (const a of anchors) {
@@ -175,6 +208,17 @@ export function lineFront(
     seen.add(moved);
     out.push(moved);
   }
+
+  // A line that has never had anybody in front of it is a holding line, and it
+  // stays exactly where it was traced. Stepping it forward would walk a
+  // reserve line drawn behind the front onto the front the moment it was
+  // given, which is 「国境線じゃないところに戦線引こうとした時」.
+  //
+  // Only never: once a line has faced somebody it keeps following its army,
+  // including on the day the army takes the ground in front of it and the
+  // posts briefly face nobody at all. Told apart by the flag rather than by
+  // the geometry, because on the day itself the two are identical.
+  if (!engaged && !held.some(faces)) return held.length > 0 ? held : out;
   return out;
 }
 
@@ -355,10 +399,28 @@ export function pressOffensive(
   for (const id of army.divisions) {
     const div = state.divisions.find((d) => d.id === id);
     if (!div || div.dead || div.combatId !== null || div.detached) continue;
-    // An objective first, the ground in front of it second, and if both are
-    // full or out of reach then nowhere: a division that cannot be fed at the
-    // front is worth more standing where it is than starving on top of the
+    // Empty ground next door first. An offensive in the reference paints
+    // forward: a province the enemy has left goes to whoever is standing
+    // beside it, and the line moves up a square, rather than everybody
+    // marching past it toward a capital three hundred kilometres away. It is
+    // also the only way a breakthrough turns into a pocket -- ground taken
+    // behind a defended province is what cuts it off.
+    const open = ctx.index.get(div.provinceId).neighbors.filter((nb) => {
+      const p = state.provinces[nb];
+      if (!p || p.controller === army.owner) return false;
+      if (!isHostile(state, army.owner, p.controller)) return false;
+      // Undefended: nobody in it to fight. A defended one is a battle, and a
+      // battle is what the objectives below are for.
+      return !p.divisions.some((x) => {
+        const other = state.divisions[x];
+        return other && !other.dead && isHostile(state, army.owner, other.owner);
+      });
+    });
+    // An objective second, the ground in front of it third, and if all of them
+    // are full or out of reach then nowhere: a division that cannot be fed at
+    // the front is worth more standing where it is than starving on top of the
     // ones that can.
+    if (send(div, open)) continue;
     if (!send(div, live)) send(div, staging);
   }
 }
@@ -583,11 +645,14 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
         // The length the finger drew, remembered the first time it is asked
         // for: a save written before the span existed still knows how long its
         // line was, because its anchors are still the ones that were drawn.
-        front = lineFront(state, ctx, army, army.order.anchors);
+        front = lineFront(state, ctx, army, army.order.anchors, army.order.engaged ?? false);
         // What the line worked out today is what it anchors on tomorrow, so a
         // drawn front walks forward with the army that holds it instead of
         // staying pinned to the ground it was first traced over.
         if (front.length > 0) army.order.anchors = front;
+        if (!army.order.engaged && front.some((p) => ctx.index.get(p).neighbors.some(
+          (nb) => state.provinces[nb]?.controller !== army.owner,
+        ))) army.order.engaged = true;
         if (spread) assignToFront(state, ctx, army, front);
         break;
       }
