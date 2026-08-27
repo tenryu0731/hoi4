@@ -6,7 +6,7 @@ import {
   overloadScale, setArmyParent, tickCommandReinforcementDaily, tickCommanderExperienceDaily,
 } from '../../src/sim/military/command';
 import {
-  BASE_MAX_PLANNING, PLANNING_DECAY_PER_DAY, PLANNING_PER_DAY, frontProvinces,
+  BASE_MAX_PLANNING, PLANNING_DECAY_PER_DAY, PLANNING_PER_DAY, frontChain, frontProvinces,
   tickBattlePlansDaily,
 } from '../../src/sim/military/frontline';
 import { COMMANDERS, commandersFor } from '../../src/sim/military/commanderData';
@@ -406,7 +406,7 @@ describe('battle plans', () => {
     // give -- the rest of the line has to be worked out, not assumed.
     sim.execute({
       t: 'setArmyOrder', country: ger.id, army: army.id,
-      order: { kind: 'line', anchors: border.slice(0, 2), span: 2 },
+      order: { kind: 'line', anchors: border.slice(0, 2) },
     });
     const ctx = ctxOf(f);
     tickBattlePlansDaily(f.state, ctx);
@@ -456,11 +456,86 @@ describe('battle plans', () => {
     const sim = new Simulation(f.state, f.index);
     sim.execute({
       t: 'setArmyOrder', country: ger.id, army: army.id,
-      order: { kind: 'line', anchors: inland, span: inland.length },
+      order: { kind: 'line', anchors: inland },
     });
     const ctx = ctxOf(f);
     for (let day = 0; day < 14; day++) tickBattlePlansDaily(f.state, ctx);
     expect([...army.frontProvinces].sort()).toEqual([...inland].sort());
+  });
+
+  it('walks a partial line forward one province at a time, keeping its shape', () => {
+    // 「国境でも国境の一部だけ引くとか」. Drawing four of the nine provinces of the
+    // Polish border and then advancing used to bring the line back two hundred
+    // kilometres to the south, half of it behind the front rather than on it:
+    // the drift searched three hops out from the whole line and kept whichever
+    // border provinces were nearest, and "nearest" over a set has no memory of
+    // shape.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    ger.isAI = false;
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    const border = frontProvinces(f.state, f.index, ger.id, pol.id);
+    const drawn = border.slice(5);
+    expect(drawn.length).toBeGreaterThan(2);
+    expect(drawn.length).toBeLessThan(border.length);
+
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id, order: { kind: 'line', anchors: drawn },
+    });
+    const ctx = ctxOf(f);
+    tickBattlePlansDaily(f.state, ctx);
+    // Left alone it is exactly what was drawn -- not the whole border.
+    expect(army.frontProvinces).toEqual(drawn);
+
+    // Take the ground in front of it. Every post moves, and every post moves
+    // to somewhere it could walk to: one province, not a jump.
+    const was = [...army.frontProvinces];
+    for (const p of was) {
+      for (const n of f.index.get(p).neighbors) {
+        if (f.state.provinces[n]?.controller === pol.id) f.state.provinces[n].controller = ger.id;
+      }
+    }
+    tickBattlePlansDaily(f.state, ctx);
+    for (const p of army.frontProvinces) {
+      expect(f.state.provinces[p].controller).toBe(ger.id);
+      const stepped = was.includes(p)
+        || was.some((old) => f.index.get(old).neighbors.includes(p));
+      expect(stepped, `${p} is not one step from the old line`).toBe(true);
+    }
+    // And it is still a piece of the border, not the whole of it.
+    expect(army.frontProvinces.length).toBeLessThanOrEqual(drawn.length);
+  });
+
+  it('builds a contiguous run along the front, and refuses one across a gap', () => {
+    // 「実際のhoi4みたいに端から延長したり縮めたり」: dragging an end says how far
+    // along the border the line now reaches, and the run between is worked out
+    // rather than traced by a finger that cannot be that accurate.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const border = frontProvinces(f.state, f.index, ger.id, pol.id);
+    const ctx = ctxOf(f);
+
+    const reachable = border.filter(
+      (p) => frontChain(f.state, ctx, ger.id, border[0], p).length > 0,
+    );
+    expect(reachable.length).toBeGreaterThan(1);
+    const chain = frontChain(f.state, ctx, ger.id, border[0], reachable[reachable.length - 1]);
+    expect(chain[0]).toBe(border[0]);
+    expect(chain[chain.length - 1]).toBe(reachable[reachable.length - 1]);
+    for (let i = 1; i < chain.length; i++) {
+      expect(f.index.get(chain[i - 1]).neighbors).toContain(chain[i]);
+    }
+    for (const p of chain) expect(f.state.provinces[p].controller).toBe(ger.id);
+
+    // East Prussia's border is a separate run: no line reaches from one to the
+    // other, and inventing one would draw a front across the Polish Corridor.
+    const cut = border.find(
+      (p) => frontChain(f.state, ctx, ger.id, border[0], p).length === 0 && p !== border[0],
+    );
+    expect(cut, 'the map has a front split by a corridor').toBeDefined();
   });
 
   it('keeps a drawn line the length it was drawn', () => {
@@ -473,7 +548,7 @@ describe('battle plans', () => {
     const sim = new Simulation(f.state, f.index);
     sim.execute({
       t: 'setArmyOrder', country: ger.id, army: army.id,
-      order: { kind: 'line', anchors: drawn, span: drawn.length },
+      order: { kind: 'line', anchors: drawn },
     });
     const ctx = ctxOf(f);
     for (let day = 0; day < 30; day++) tickBattlePlansDaily(f.state, ctx);
@@ -492,7 +567,7 @@ describe('battle plans', () => {
     const sim = new Simulation(f.state, f.index);
     sim.execute({
       t: 'setArmyOrder', country: ger.id, army: army.id,
-      order: { kind: 'line', anchors: border.slice(0, 3), span: 3 },
+      order: { kind: 'line', anchors: border.slice(0, 3) },
     });
     // Overrun: everything the line was drawn on changes hands.
     for (const p of border.slice(0, 3)) f.state.provinces[p].controller = pol.id;

@@ -13,6 +13,7 @@ import {
   planTransport, sealiftCapacity, type TransportBlock,
 } from '../sim/military/movement';
 import { nextArmyName } from '../sim/military/command';
+import { frontChain } from '../sim/military/frontline';
 import { UI } from '../ui/strings';
 
 /**
@@ -764,6 +765,38 @@ export class Game {
     return Math.max(0, sealiftCapacity(this.state, me) - afloat);
   }
 
+  /**
+   * What a stroke with the front-line tool means for this army.
+   *
+   * A stroke that begins somewhere the army's line already runs is not a new
+   * line: it is a hand on one end of the old one. 「実際のhoi4みたいに端から
+   * 延長したり縮めたり」 -- the line becomes the run of border between its far
+   * end and wherever the finger stopped, so dragging outward lengthens it and
+   * dragging back along itself shortens it, from either end, with the same
+   * gesture. A stroke that begins anywhere else draws a new line.
+   *
+   * Deciding by where the stroke *started* rather than by what it covers: the
+   * player's hand is on the end before they have moved it, and a rule that
+   * waited to see the whole stroke would change its mind halfway through the
+   * drag.
+   */
+  private lineFrom(army: number, drawn: readonly ProvinceId[]): ProvinceId[] {
+    const order = this.state.armies?.find((a) => a.id === army)?.order;
+    if (order?.kind !== 'line' || order.anchors.length === 0) return [...drawn];
+    const grabbed = order.anchors.indexOf(drawn[0]);
+    if (grabbed < 0) return [...drawn];
+    // The end the hand is not on. Measured from the middle so that a grab in
+    // the middle of the line still extends past the nearer end rather than
+    // folding the line in half.
+    const far = grabbed * 2 < order.anchors.length
+      ? order.anchors[order.anchors.length - 1] : order.anchors[0];
+    const chain = frontChain(
+      this.state, { index: this.index },
+      this.state.meta.playerCountry, far, drawn[drawn.length - 1],
+    );
+    return chain.length > 0 ? chain : [...drawn];
+  }
+
   /** Whether the tool in hand may be drawn over this province. */
   private paintable(id: ProvinceId): boolean {
     const me = this.state.meta.playerCountry;
@@ -798,8 +831,7 @@ export class Game {
       if (army === null) return false;
     }
     const me = this.state.meta.playerCountry;
-    const order = tool === 'front'
-      ? { kind: 'line' as const, anchors: drawn, span: drawn.length }
+    const order = tool === 'front' ? { kind: 'line' as const, anchors: this.lineFrom(army, drawn) }
       : tool === 'offensive' ? { kind: 'offensive' as const, targets: drawn }
         : tool === 'garrison' ? { kind: 'garrison' as const, provinces: drawn }
           : { kind: 'spearhead' as const, target: drawn[0] };

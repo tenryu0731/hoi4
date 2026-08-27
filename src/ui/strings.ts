@@ -235,6 +235,7 @@ export const UI = {
   planBar: '戦闘計画',
   toolFront: '前線',
   toolFrontHint: '自国領をなぞって前線を引く',
+  toolFrontExtendHint: '前線の端からなぞると延長・短縮、離れた所からなら引き直し',
   toolOffensive: '攻撃線',
   toolOffensiveHint: '敵地をなぞって進攻目標にする',
   toolSpearhead: '先鋒',

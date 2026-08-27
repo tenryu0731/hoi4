@@ -859,7 +859,16 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       btn.setAttribute('aria-pressed', String(on));
     }
     const held = TOOLS.find(([t]) => t === game.planTool);
-    if (held) planHint.textContent = game.selection.army === null ? UI.planNeedsArmy : held[2];
+    if (held) {
+      // With a line already drawn, the tool does two things and the hint has to
+      // say which is which: grabbing an end lengthens or shortens it, starting
+      // clear of it draws a new one.
+      const army = game.selection.army === null
+        ? null : armyById(game.state, game.selection.army);
+      const drawn = army?.order?.kind === 'line' && army.order.anchors.length > 0;
+      planHint.textContent = game.selection.army === null ? UI.planNeedsArmy
+        : (held[0] === 'front' && drawn) ? UI.toolFrontExtendHint : held[2];
+    }
     else if (planHint.textContent === UI.planNeedsArmy) planHint.textContent = '';
     planBar.classList.toggle('is-armed', game.planTool !== null);
   }
