@@ -475,6 +475,18 @@ function declareArmyIntent(state: GameState, ctx: AIContext, c: Country): void {
   });
 }
 
+/**
+ * How long a war has to have been unwinnable before its aggressor forces a
+ * road through a neutral.
+ *
+ * Half a year: long enough that the country has genuinely tried and failed to
+ * come to grips, short enough that a phoney war does not become the campaign.
+ */
+const FORCE_PASSAGE_AFTER_DAYS = 180;
+
+/** How often a country bothers to ask whether its war has become unreachable. */
+const PASSAGE_CHECK_DAYS = 10;
+
 /** How far a crowded division will walk to get off the pile. */
 const DISPERSE_HOPS = 5;
 
@@ -1071,12 +1083,37 @@ function pruneJustifications(state: GameState, c: Country): void {
  * the way, or when the way through is somebody this country cannot fight.
  */
 function blockingNeutral(state: GameState, ctx: AIContext, c: Country): CountryId | null {
+  // Twice the pathfinder per enemy, and A* is already the most expensive thing
+  // the simulation does. The answer moves on a scale of months, so it is asked
+  // on a ten-day cadence, staggered by country id so the cost is spread rather
+  // than landing on one day. Measured: 10.69ms a day for a campaign against a
+  // 16ms budget, back to 7.2 with this.
+  if ((state.clock.totalDays + c.id) % PASSAGE_CHECK_DAYS !== 0) return null;
+
   const mine = state.divisions.find((d) => !d.dead && d.owner === c.id);
   if (!mine) return null;
+  // The same restraint every other declaration goes through: not while our own
+  // ground is being fought over, and not straight after the last one.
+  if (!mayOpenWar(state, c)) return null;
 
   for (const enemyId of c.atWarWith) {
     const enemy = state.countries[enemyId];
     if (enemy.capitulated) continue;
+
+    // Only a war we started, and only one we have had time to fail at.
+    //
+    // Without this the rule fires for everybody at once and the map catches
+    // fire: measured over twelve days in 1940, nine declarations in a row,
+    // among them Britain and France invading Belgium and the Netherlands to
+    // get at Germany. It is the aggressor who forces a road -- the country
+    // that was attacked has a war it did not choose and no reason to widen
+    // it, which is the whole difference between 1914 and 1939 in the Low
+    // Countries.
+    const war = state.wars.find(
+      (w) => !w.ended && w.attackers.includes(c.id) && w.defenders.includes(enemyId),
+    );
+    if (!war) continue;
+    if (state.clock.totalDays - war.startDay < FORCE_PASSAGE_AFTER_DAYS) continue;
     const target = state.provinces.findIndex((p) => p && p.controller === enemyId);
     if (target < 0) continue;
 
