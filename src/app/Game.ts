@@ -22,14 +22,13 @@ import { UI } from '../ui/strings';
  * they cover. `spearhead` and `invade` are aimed: one province is the target,
  * and a stroke would be four ways of saying the same thing.
  */
-export type PlanTool =
-  | 'front' | 'offensive' | 'garrison' | 'spearhead' | 'invade' | 'transport' | null;
+export type PlanTool = 'front' | 'offensive' | 'garrison' | 'spearhead' | 'invade' | null;
 
 /** Tools drawn with a stroke rather than a tap. */
 const PAINTED = new Set<PlanTool>(['front', 'offensive', 'garrison']);
 
 /** Tools that take a single objective from a tap. */
-const AIMED = new Set<PlanTool>(['spearhead', 'invade', 'transport']);
+const AIMED = new Set<PlanTool>(['spearhead', 'invade']);
 
 /**
  * Composition root. Owns the loop and wires the three halves of the program
@@ -265,7 +264,7 @@ export class Game {
     this.renderer.setDragOrder(this.dragOrder);
     this.renderer.setPlans(this.planLines());
     // Harbours are pointed out while a tool that needs one is in hand.
-    this.renderer.setPortsLit(this.planTool === 'transport' || this.planTool === 'invade');
+    this.renderer.setPortsLit(this.planTool === 'invade');
     this.renderer.update(dtMs, this.state);
     for (const fn of this.listeners) fn();
   }
@@ -470,7 +469,6 @@ export class Game {
       const tool = this.planTool;
       this.planDraft = [id];
       if (tool === 'invade') { this.orderInvasion(id); return; }
-      if (tool === 'transport') { this.orderTransport(id); return; }
       this.commitPlanDraft();
       return;
     }
@@ -516,7 +514,7 @@ export class Game {
     }
 
     if (this.ordering && id !== null && id !== this.selection.province) {
-      this.issue({ t: 'moveDivisions', divisions: [...this.selection.divisions], target: id });
+      this.sendTo(id);
       // The stack stays selected, as it does in the real game, so a second
       // objective can be given without hunting for the counter again.
       return;
@@ -639,6 +637,7 @@ export class Game {
     // The camera stays where the player put it. Centring on the first
     // division would move the map out from under a box they just finished
     // drawing, which is the one moment they are certain where things are.
+    this.forceShouldOpen = true;
     if (raising && this.raiseArmy(divisions)) return;
     this.selectDivisions(divisions, { army: this.armyOf(divisions), centre: false });
   }
@@ -689,36 +688,69 @@ export class Game {
   orderInvasion(target: ProvinceId): void {
     this.planTool = null;
     this.planDraft = [];
-    const divisions = [...this.selection.divisions];
-    if (divisions.length === 0) return;
-    this.issue({ t: 'moveDivisions', divisions, target });
+    this.sendTo(target);
   }
 
   /**
-   * Ships the selection to a harbour, rather than at a beach.
+   * Why the last order could not be carried out, for the interface to say.
    *
-   * 「強襲上陸とは別に港を経由して移動できるように」. The result is reported
-   * rather than swallowed: every way this can fail has a different answer --
-   * march inland to a quay, take a harbour first, or build some ships -- and
-   * an order that silently does nothing is the worst of the three.
+   * Only set when something actually went wrong, and cleared by whoever reads
+   * it. Every way a sea crossing can fail has a different answer -- march
+   * inland to a quay, take a harbour first, or build some ships -- and an
+   * order that silently does nothing is the worst of the three.
    */
   transportBlock: TransportBlock | null = null;
 
-  orderTransport(target: ProvinceId): void {
-    this.planTool = null;
-    this.planDraft = [];
+  /**
+   * Asks the selection list to fold itself away.
+   *
+   * Set when an order has been given, cleared by the list when it reads it.
+   * The list stands over the left of the map, and the map is what the player
+   * taps next -- this is the same lesson the map-mode strip and the order bar
+   * both taught: a panel that eats a tap meant for the ground underneath it is
+   * worse than no panel.
+   */
+  forceShouldShut = false;
+
+  /**
+   * Asks the selection list to open itself.
+   *
+   * Set only by a rectangle. Tapping a counter says "I know what this is and I
+   * want to order it", and the next thing that happens is a tap on the ground;
+   * drawing a rectangle asks "what did I catch?", and the next thing that
+   * happens is reading the answer. The list is the answer to the second
+   * question and an obstacle to the first, so it opens for one and not the
+   * other.
+   */
+  forceShouldOpen = false;
+
+  /**
+   * Sends the selection somewhere, by whatever road or sea lane exists.
+   *
+   * 「陸続きじゃない所に師団移動出したら勝手に港を経由するように、海上輸送は
+   * 作戦じゃない」. The routing is `orderMove`'s business -- land, then a
+   * harbour, then a strait -- so this is only the part the map has to do:
+   * issue it, then look at whether anybody actually set off, and say why not
+   * when nobody did.
+   */
+  sendTo(target: ProvinceId): void {
     const divisions = [...this.selection.divisions];
     if (divisions.length === 0) return;
-    // Asked before the command goes out, so the interface can say why nothing
-    // happened. They start in the same place often enough that the first one's
-    // answer is the answer for the group.
+    this.issue({ t: 'moveDivisions', divisions, target });
+    // The list of what is selected is an editor, and the editing is over: the
+    // player has said where these are going. It folds to its header so the
+    // ground it was standing on is ground again.
+    this.forceShouldShut = true;
+    const moving = divisions.some((id) => {
+      const d = this.state.divisions[id];
+      return d && (d.path.length > 0 || d.provinceId === target);
+    });
+    if (moving) return;
     const first = this.state.divisions[divisions[0]];
     if (!first) return;
     this.transportBlock = planTransport(
       this.state, this.index, first.owner, first.provinceId, target,
     ).block;
-    if (this.transportBlock !== 'ok') return;
-    this.issue({ t: 'transportDivisions', divisions, target });
   }
 
   /** How many more divisions this country can put to sea right now. */
@@ -752,10 +784,22 @@ export class Game {
     this.planDraft = [];
     this.planTool = null;
     if (tool === null || drawn.length === 0) return false;
-    const army = this.selection.army;
-    if (army === null) return false;
+
+    // Whose plan is it? The selected army, or -- when the selection is a set of
+    // divisions from several armies or from none -- a formation raised on the
+    // spot to carry it. Discarding the stroke instead is what made redrawing
+    // feel unreliable: a line traced over a mixed selection did nothing at all,
+    // with nothing on screen to say why.
+    let army = this.selection.army;
+    if (army === null) {
+      if (this.selection.divisions.length === 0) return false;
+      if (!this.raiseArmy([...this.selection.divisions])) return false;
+      army = this.selection.army;
+      if (army === null) return false;
+    }
     const me = this.state.meta.playerCountry;
-    const order = tool === 'front' ? { kind: 'line' as const, anchors: drawn }
+    const order = tool === 'front'
+      ? { kind: 'line' as const, anchors: drawn, span: drawn.length }
       : tool === 'offensive' ? { kind: 'offensive' as const, targets: drawn }
         : tool === 'garrison' ? { kind: 'garrison' as const, provinces: drawn }
           : { kind: 'spearhead' as const, target: drawn[0] };
@@ -854,7 +898,7 @@ export class Game {
     this.dragOrder = null;
 
     if (target === null || this.selection.divisions.length === 0) return;
-    this.issue({ t: 'moveDivisions', divisions: [...this.selection.divisions], target });
+    this.sendTo(target);
   }
 
   destroy(): void {

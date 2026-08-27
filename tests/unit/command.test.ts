@@ -406,22 +406,80 @@ describe('battle plans', () => {
     // give -- the rest of the line has to be worked out, not assumed.
     sim.execute({
       t: 'setArmyOrder', country: ger.id, army: army.id,
-      order: { kind: 'line', anchors: border.slice(0, 2) },
+      order: { kind: 'line', anchors: border.slice(0, 2), span: 2 },
     });
     const ctx = ctxOf(f);
     tickBattlePlansDaily(f.state, ctx);
-    expect(army.frontProvinces.length).toBeGreaterThan(2);
+    expect(army.frontProvinces.length).toBeGreaterThan(0);
+    for (const p of army.frontProvinces) {
+      expect(f.state.provinces[p].controller).toBe(ger.id);
+      // Every province of it still faces somebody: it is a front, not a list.
+      expect(f.index.get(p).neighbors.some(
+        (n) => f.state.provinces[n]?.controller !== ger.id,
+      )).toBe(true);
+    }
+
+    // Take the ground in front of it and the line comes with, without the
+    // player redrawing anything.
+    const before = [...army.frontProvinces].sort().join(',');
+    for (const p of [...army.frontProvinces]) {
+      for (const n of f.index.get(p).neighbors) {
+        if (f.state.provinces[n]?.controller === pol.id) f.state.provinces[n].controller = ger.id;
+      }
+    }
+    tickBattlePlansDaily(f.state, ctx);
+    expect([...army.frontProvinces].sort().join(',')).not.toBe(before);
     for (const p of army.frontProvinces) {
       expect(f.state.provinces[p].controller).toBe(ger.id);
     }
+  });
 
-    // Take a Polish province and the line follows it forward, without the
-    // player redrawing anything.
-    const taken = f.index.get(army.frontProvinces[0]).neighbors
-      .find((n) => f.state.provinces[n]?.controller === pol.id)!;
-    f.state.provinces[taken].controller = ger.id;
-    tickBattlePlansDaily(f.state, ctx);
-    expect(army.frontProvinces).toContain(taken);
+  it('keeps a line drawn inland where it was drawn', () => {
+    // 「国境線じゃないところに戦線引こうとした時とか」. A line traced in the
+    // interior faces nobody, and the drift search then returned everything
+    // within three hops of it -- which became tomorrow's anchors, so the plan
+    // fed itself. Measured before the fix: three provinces in the middle of
+    // Germany covered the country inside a week.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    ger.isAI = false;
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    const border = new Set(frontProvinces(f.state, f.index, ger.id, f.country('POL').id));
+    const inland = f.index.provinces
+      .filter((p) => f.state.provinces[p.id]?.controller === ger.id
+        && !border.has(p.id)
+        && p.neighbors.every((n) => f.state.provinces[n]?.controller === ger.id))
+      .slice(0, 3)
+      .map((p) => p.id);
+    expect(inland).toHaveLength(3);
+
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      order: { kind: 'line', anchors: inland, span: inland.length },
+    });
+    const ctx = ctxOf(f);
+    for (let day = 0; day < 14; day++) tickBattlePlansDaily(f.state, ctx);
+    expect([...army.frontProvinces].sort()).toEqual([...inland].sort());
+  });
+
+  it('keeps a drawn line the length it was drawn', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    ger.isAI = false;
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    const border = frontProvinces(f.state, f.index, ger.id, f.country('POL').id);
+    const drawn = border.slice(0, 2);
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id,
+      order: { kind: 'line', anchors: drawn, span: drawn.length },
+    });
+    const ctx = ctxOf(f);
+    for (let day = 0; day < 30; day++) tickBattlePlansDaily(f.state, ctx);
+    // It may move along the border; it may not swallow it.
+    expect(army.frontProvinces.length).toBeLessThanOrEqual(drawn.length);
+    expect(army.frontProvinces.length).toBeGreaterThan(0);
   });
 
   it('re-forms a drawn line behind itself when every anchor is lost', () => {
@@ -434,7 +492,7 @@ describe('battle plans', () => {
     const sim = new Simulation(f.state, f.index);
     sim.execute({
       t: 'setArmyOrder', country: ger.id, army: army.id,
-      order: { kind: 'line', anchors: border.slice(0, 3) },
+      order: { kind: 'line', anchors: border.slice(0, 3), span: 3 },
     });
     // Overrun: everything the line was drawn on changes hands.
     for (const p of border.slice(0, 3)) f.state.provinces[p].controller = pol.id;

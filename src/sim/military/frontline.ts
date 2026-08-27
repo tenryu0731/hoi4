@@ -144,11 +144,23 @@ export const LINE_DRIFT = 3;
  * the day Poland fell.
  */
 export function lineFront(
-  state: GameState, ctx: MilitaryContext, army: Army, anchors: readonly ProvinceId[],
+  state: GameState, ctx: MilitaryContext, army: Army,
+  anchors: readonly ProvinceId[], span: number,
 ): ProvinceId[] {
   const ours = (id: ProvinceId): boolean => state.provinces[id]?.controller === army.owner;
+  const faces = (id: ProvinceId): boolean =>
+    ctx.index.get(id).neighbors.some((nb) => !ours(nb));
+  const held = anchors.filter(ours);
 
-  let ring = anchors.filter(ours);
+  // A line the player traced in the interior faces nobody, and it stays where
+  // it was traced. 「国境線じゃないところに戦線引こうとした時とか」: the drift
+  // search below is a *correction* to a line that is already on a border, and
+  // running it on one that is not walked the plan three provinces sideways
+  // onto the nearest frontier -- 670km on this map -- which is not where the
+  // player put their finger.
+  if (held.length > 0 && !held.some(faces)) return held;
+
+  let ring = held;
   if (ring.length === 0) {
     // Every anchor was lost. Start from our own ground next to where the line
     // used to be, so a driven-back army re-forms behind the old line rather
@@ -175,13 +187,25 @@ export function lineFront(
     ring = next;
   }
 
-  const facing: ProvinceId[] = [];
-  for (const id of seen) {
-    for (const nb of ctx.index.get(id).neighbors) {
-      if (!ours(nb)) { facing.push(id); break; }
-    }
-  }
-  return facing.length > 0 ? facing : [...seen];
+  const facing = [...seen].filter(faces);
+  // Nothing anywhere near it faces us either. Returning the search instead --
+  // everything within three hops -- is what made a line swallow the country:
+  // the result becomes tomorrow's anchors, so the blob fed itself.
+  if (facing.length === 0) return held;
+  if (facing.length <= span) return facing;
+
+  // More border than the player asked for. Keep the part nearest the line they
+  // drew, so the front follows rather than jumping to the far end of it.
+  const near = (id: ProvinceId): number => {
+    let best = Infinity;
+    for (const a of anchors) best = Math.min(best, ctx.index.distance(id, a));
+    return best;
+  };
+  return facing
+    .map((id) => ({ id, d: near(id) }))
+    .sort((a, b) => a.d - b.d || a.id - b.id)
+    .slice(0, span)
+    .map((x) => x.id);
 }
 
 /** Divisions of one country standing in a province. */
@@ -485,14 +509,19 @@ export function tickBattlePlansDaily(state: GameState, ctx: MilitaryContext): vo
         if (front.length === 0) front = hostileFront(state, ctx.index, army.owner);
         if (spread) assignToFront(state, ctx, army, front);
         break;
-      case 'line':
-        front = lineFront(state, ctx, army, army.order.anchors);
+      case 'line': {
+        // The length the finger drew, remembered the first time it is asked
+        // for: a save written before the span existed still knows how long its
+        // line was, because its anchors are still the ones that were drawn.
+        army.order.span ??= army.order.anchors.length;
+        front = lineFront(state, ctx, army, army.order.anchors, army.order.span);
         // What the line worked out today is what it anchors on tomorrow, so a
         // drawn front walks forward with the army that holds it instead of
         // staying pinned to the ground it was first traced over.
         if (front.length > 0) army.order.anchors = front;
         if (spread) assignToFront(state, ctx, army, front);
         break;
+      }
       case 'garrison':
         front = army.order.provinces.filter((p) => state.provinces[p]?.controller === army.owner);
         if (spread) assignToFront(state, ctx, army, front);

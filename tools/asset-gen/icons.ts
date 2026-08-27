@@ -118,14 +118,6 @@ export const UI_ICONS: Record<string, string> = {
     + 'h-2.5c-.5 5.6-5.2 10-11.8 10S4.1 18.8 3.6 13.2H1.1l4-5.6 4 5.6H6.5c.4 3.2 2.8 5.8 5.9 6.5'
     + 'V13.4h-3.2v-3H12z"/>',
   ),
-  /** A transfer by sea: a freighter with a wake, not an anchor. */
-  'plan-transport': solid(
-    '<path d="M13 4h6v3.2h5.4v5.1H26L23 22H9L6 12.3h1.6V7.2H13z'
-    + 'm0 3.2v5.1h6V7.2z"/>'
-    + '<path d="M2 25.4c2.3 0 2.3 2 4.6 2s2.3-2 4.6-2 2.3 2 4.6 2 2.3-2 4.6-2 2.3 2 4.6 2'
-    + 'c2.3 0 2.3-2 4.6-2v3.2c-2.3 0-2.3 2-4.6 2s-2.3-2-4.6-2-2.3 2-4.6 2-2.3-2-4.6-2'
-    + '-2.3 2-4.6 2-2.3-2-4.6-2z"/>',
-  ),
   /** Clearing the plan: a bin, which is what the reference draws too. */
   'plan-clear': solid(
     '<path d="M12 2h8v3h8v3.4H4V5h8zM6.4 10.8h19.2L24 30H8z'

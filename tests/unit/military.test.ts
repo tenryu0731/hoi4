@@ -1222,7 +1222,9 @@ describe('harbours and transfers by sea', () => {
     )!;
 
     const before = div.org;
-    sim.execute({ t: 'transportDivisions', divisions: [div.id], target: overseas.id });
+    // A plain move order. 「陸続きじゃない所に師団移動出したら勝手に港を経由する
+    // ように」: the routing is the order's business, not a second command.
+    sim.execute({ t: 'moveDivisions', divisions: [div.id], target: overseas.id });
     const time = new TimeEngine(f.state.clock.totalHours);
     time.on((c) => sim.tick(c));
     for (let day = 0; day < 90 && div.path.length > 0; day++) time.step(24);

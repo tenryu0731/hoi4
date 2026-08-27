@@ -1343,6 +1343,60 @@ test.describe('touch input', () => {
     expect(await page.evaluate(() => window.__game!.selection.divisions.length)).toBe(0);
   });
 
+  test('a rectangle puts what it caught in a list beside the map', async ({ page }) => {
+    await bootGame(page);
+    // 「全然範囲選択できてないやん」「範囲選択したら横に出るんだよ」. The rectangle
+    // worked -- measured, it caught 24 divisions -- but nothing on screen said
+    // so, and a selection nobody can see is a selection that did not happen.
+    await expect(page.locator('.hud-force')).not.toHaveClass(/is-on/);
+    await page.evaluate(() => { window.__game!.boxSelectArmed = true; });
+
+    const band = await page.evaluate(() => ({
+      top: document.querySelector('.hud-top')!.getBoundingClientRect().bottom,
+      foot: document.querySelector('.hud-plan-tools')!.getBoundingClientRect().top,
+    }));
+    const y0 = band.top + 60;
+    const y1 = band.foot - 60;
+    await page.mouse.move(40, y0);
+    await page.mouse.down();
+    await page.mouse.move(220, (y0 + y1) / 2, { steps: 8 });
+    await page.mouse.move(360, y1, { steps: 8 });
+    await page.mouse.up();
+    await page.evaluate(() => { window.__game!.tickFrame(16.667); });
+
+    const force = page.locator('.hud-force');
+    await expect(force).toHaveClass(/is-on/);
+    const rows = page.locator('.hud-force-row');
+    const caught = await page.evaluate(() => window.__game!.selection.divisions.length);
+    expect(caught).toBeGreaterThan(1);
+    await expect(rows).toHaveCount(caught);
+
+    // A rectangle catches more than was meant; this is where the extras come
+    // off, one row at a time.
+    await rows.first().click();
+    await expect(rows).toHaveCount(caught - 1);
+    expect(await page.evaluate(() => window.__game!.selection.divisions.length))
+      .toBe(caught - 1);
+
+    // And a formation is raised out of what is left, whatever those divisions
+    // belonged to before: 「他に所属してる師団だったら抜けて新たに」.
+    const before = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      return (g.state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup).length;
+    });
+    await page.getByRole('button', { name: '新しい軍にする' }).click();
+    const after = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const armies = (g.state.armies ?? []).filter((a) => a.owner === me && !a.isArmyGroup);
+      const raised = armies.find((a) => a.id === g.selection.army);
+      return { count: armies.length, held: raised?.divisions.length ?? 0 };
+    });
+    expect(after.count).toBe(before + 1);
+    expect(after.held).toBe(caught - 1);
+  });
+
   test('a division sails to an overseas port instead of storming it', async ({ page }) => {
     await bootGame(page);
     // 「強襲上陸とは別に港を経由して移動できるように」. East Prussia is German and
@@ -1363,20 +1417,11 @@ test.describe('touch input', () => {
       return { division: d.id, overseas: overseas.id, org: d.org };
     });
 
-    await page.getByRole('button', { name: '海上輸送' }).click();
-    expect(await page.evaluate(() => window.__game!.planTool)).toBe('transport');
-    // Harbours are pointed out while the tool is in hand, which is the one
-    // moment the player needs to know where a ship can put in. Read after a
-    // frame: the map is told what to light on the frame, as it is told what
-    // plans to draw.
-    expect(await page.evaluate(() => {
-      window.__game!.tickFrame(16.667);
-      return window.__game!.renderer.portsAreLit;
-    })).toBe(true);
-
+    // No tool: 「海上輸送は作戦じゃない」. A plain move order finds the harbours
+    // by itself when there is no road.
     const route = await page.evaluate((s) => {
       const g = window.__game!;
-      g.orderTransport(s.overseas);
+      g.sendTo(s.overseas);
       const d = g.state.divisions.find((x) => x.id === s.division)!;
       let prev = d.provinceId;
       let voyages = 0;
@@ -1384,13 +1429,12 @@ test.describe('touch input', () => {
         if (!g.index.areAdjacent(prev, step)) voyages++;
         prev = step;
       }
-      return { block: g.transportBlock, steps: d.path.length, voyages, tool: g.planTool };
+      return { blocked: g.transportBlock, steps: d.path.length, voyages };
     }, setup);
-    expect(route.block).toBe('ok');
+    expect(route.blocked).toBeNull();
     expect(route.steps).toBeGreaterThan(1);
     // Exactly one leg is a voyage: march to the quay, sail, march inland.
     expect(route.voyages).toBe(1);
-    expect(route.tool).toBeNull();
 
     const arrival = await page.evaluate((s) => {
       const g = window.__game!;

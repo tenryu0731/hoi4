@@ -26,8 +26,7 @@ import {
   tickCapitulationDaily, tickJustificationsDaily, tickTensionMonthly, occupationRatio,
 } from './diplomacy/diplomacy';
 import {
-  orderMove, orderTransport, stopDivision, tickConditionsDaily, tickMilitaryHourly,
-  tickReinforcementDaily,
+  orderMove, stopDivision, tickConditionsDaily, tickMilitaryHourly, tickReinforcementDaily,
 } from './military/movement';
 import { tickSupplyDaily } from './military/supply';
 import {
@@ -141,17 +140,6 @@ export class Simulation {
           // what 「軍の移動がまだ少し変」 was.
           d.detached = true;
           orderMove(state, this.ctx, d, cmd.target);
-        }
-        return;
-      }
-      case 'transportDivisions': {
-        for (const id of cmd.divisions) {
-          const d = state.divisions[id];
-          if (!d || d.dead || d.combatId !== null) continue;
-          // A hand-given order outranks the army's plan and goes on doing so,
-          // exactly as a march does.
-          d.detached = true;
-          orderTransport(state, this.ctx, d, cmd.target);
         }
         return;
       }
