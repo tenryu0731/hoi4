@@ -2,6 +2,7 @@ import type {
   BattalionType, BuildingType, EquipmentType, GameEventBody, Ideology,
   OutcomeReason, ResourceType, SupportType, TerrainType,
 } from '../sim/core/types';
+import { ARMY_GROUP_NAME, ARMY_ORDINALS, ARMY_SUFFIX } from '../sim/military/command';
 
 /**
  * Everything the player reads, in Japanese.
@@ -89,17 +90,49 @@ export const UI = {
     if (short > 0) parts.push(`不足 ${short}`);
     return parts.join(' · ');
   },
-  tradeOffer: (spare: number, bought: number): string =>
-    bought > 0 ? `売却可能 ${spare}／日 · 工場 ${bought} 基で購入中` : `売却可能 ${spare}／日`,
+  tradeOffer: (spare: string, factories: number, shipped: string): string =>
+    factories > 0
+      ? `売却可能 ${spare}／日 · 工場 ${factories} 基で ${shipped}／日を輸入中`
+      : `売却可能 ${spare}／日`,
   tradeLawLine: (law: string, share: number, perFactory: number): string =>
     `${law} · 産出の ${share}% を市場へ · 民需工場 1 基につき ${perFactory}／日`,
+  /* Production, as the reference lays it out: what a line makes a day, how
+     efficient it has become, and the depot against what the army is short. */
+  lines: '生産ライン',
+  /* Equipment marks. The reference calls the window Create Variant; here it is
+     one mark per type, so 「改良」 rather than 「バリアント」. */
+  armyExperience: '陸軍経験',
+  variantOpen: '改良',
+  variantTitle: '装備の改良',
+  variantMark: '改良段階',
+  moduleArmor: '装甲',
+  moduleGun: '主砲',
+  moduleReliability: '信頼性',
+  moduleEngine: '機関',
+  variantLevel: (level: number, max: number): string => `${level} / ${max}`,
+  variantNoExperience: (cost: number): string =>
+    `改良には陸軍経験が ${cost} 必要です。経験は戦闘中の師団からしか得られません。`,
+  noFactories: '工場未割当',
+  closeLine: 'ラインを閉じる',
+  stockHeld: (held: string): string => `在庫 ${held}`,
+  stockShort: (held: string, short: string): string => `在庫 ${held} · 不足 ${short}`,
   cancel: '選択解除',
+  /**
+   * The tag on a front line, as the reference screenshot writes it:
+   * "17 Divs - 4. Armee". A standing order the player cannot see on the map
+   * is a standing order they have to remember they gave.
+   */
+  planLabel: (army: string, divisions: number): string => `${army} · ${divisions}個師団`,
+  planOffensive: (army: string, divisions: number): string =>
+    `${army} · ${divisions}個師団 進攻`,
   /** Shown while a stack is under orders and the next tap sets its objective. */
   orderHint: (n: number): string => `${n}個師団 — 移動先をタップ`,
   /* The order bar's own buttons, on the map rather than in a panel. Two
      characters each: the bar hangs over the map band, and every row it grows
      is a row of counters the player can no longer press. The chips that open
      underneath say the rest, and the aria-labels carry the full wording. */
+  orderStop: '停止',
+  orderStopLabel: '移動を中止する',
   orderAssign: '編成',
   orderAssignLabel: '軍へ編成',
   orderDrawFront: '戦線',
@@ -184,6 +217,17 @@ export const UI = {
   setOrderClear: '解除',
   pickEnemy: '対象',
   divisionsInArmy: '個師団',
+  /** A division's name: the 12 in 第12歩兵師団. */
+  divisionName: (ordinal: number, template: string): string => `第${ordinal}${template}`,
+  orderOfBattle: '隷下師団',
+  onTheMove: '移動中',
+  detached: '独立行動',
+  rejoinPlan: '計画に復帰',
+  detachedCount: (n: number): string => `${n}個師団が独立行動中`,
+  divisionState: (org: number, hp: number): string => `組織率 ${org}% · 兵力 ${hp}%`,
+  armyGroupAssign: '軍集団へ',
+  renameArmy: '名称変更',
+  armyGroupLeave: '軍集団から外す',
   newArmy: '＋軍を編成',
   newArmyGroup: '＋軍集団',
   disband: '解隊',
@@ -234,6 +278,7 @@ export const UI = {
   cost: '建設コスト',
   noStates: '所有する州がありません。',
   nothingUnderConstruction: '建設中のものはありません。',
+  queueWaiting: '順番待ち',
   complete: '完了',
 
   // Army panel
@@ -257,6 +302,45 @@ export const UI = {
   supportCompanies: '支援中隊',
   equipmentPerDivision: '1個師団あたりの装備',
   saveTemplate: '保存',
+  /* The three-column table the real designer puts beside the battalion grid.
+     HOI4 splits them because they answer different questions: what the
+     division is, what it does in a fight, and what it costs to raise. */
+  statsBase: '基本性能',
+  statsCombat: '戦闘性能',
+  statsCost: '装備コスト',
+  statHp: '耐久',
+  statOrg: '組織率',
+  statSpeed: '最高速度',
+  statSupply: '補給消費',
+  statFuel: '燃料消費',
+  statWeight: '編成規模',
+  statSoftAttack: '対人攻撃',
+  statHardAttack: '対甲攻撃',
+  statDefence: '防御',
+  statBreakthrough: '突破',
+  statArmor: '装甲',
+  statPiercing: '貫通',
+  statHardness: '硬度',
+  statWidth: '戦闘正面',
+  statManpower: '必要人的資源',
+  statCost: '生産コスト',
+  /* The Adjusters box. Every one of these numbers is already in the fight and
+     none of them was on screen. */
+  terrainAdjusters: '地形補正',
+  terrainAttack: '攻',
+  terrainDefence: '防',
+  terrainSpeed: '速',
+  terrainFits: '同時投入',
+  /** How many of this division the ground lets into one battle. */
+  divisionsFit: (n: number): string => `${n}個`,
+  battalionAdd: '大隊を追加',
+  supportAdd: '支援中隊を追加',
+  slotEmpty: '＋',
+  designerReset: 'リセット',
+  designerDuplicate: '複製',
+  estimatedCost: '推定生産コスト',
+  pickBattalion: '追加する大隊',
+  pickSupport: '追加する支援中隊',
   back: '戻る',
   edit: '編集',
   softAttack: '攻撃',
@@ -278,6 +362,28 @@ export const UI = {
   demand: '要求',
   joinFaction: '陣営に加入',
   noRelations: '特筆すべき関係なし',
+  improveRelations: '関係改善',
+  guaranteeIndependence: '独立保障',
+  inviteToFaction: '陣営に招待',
+  leaveFaction: '陣営から脱退',
+  opinion: '好感度',
+  diplomaticActions: '外交行動',
+  relationsWith: (name: string): string => `${name}との関係`,
+  powerCost: (n: number): string => `政治力 ${n}`,
+  alreadyGuaranteed: '保障済み',
+  alreadyJustifying: '作成中',
+  blockNotLeader: '盟主のみ',
+  blockAlreadyIn: '加入済み',
+  blockOtherFaction: '他陣営所属',
+  blockTargetAtWar: '交戦中',
+  blockOpinion: (now: number, need: number): string => `好感度 ${now}/${need}`,
+  blockPower: '政治力不足',
+  blockAtWarWith: '交戦中',
+  blockAllied: '同盟国',
+  blockMajorsOnly: '大国から小国へのみ',
+  blockGuaranteed: '独立を保障されている',
+  leaderCannotLeave: '盟主は自陣営から脱退できない',
+  noFactionActions: '陣営に関してできることはない',
 
   // Province info sheet
   owner: '所有国',
@@ -377,6 +483,18 @@ export const SUPPORT: Record<SupportType, string> = {
   artillery_support: '砲兵中隊', logistics: '兵站中隊',
 };
 
+/**
+ * Every character a front-line tag can contain.
+ *
+ * A bitmap font rasterises its glyphs at install time and has no fallback, so
+ * the atlas has to be told. Built from the pieces the tag is built from --
+ * the ordinal army names, the suffixes, and the words around them -- so that
+ * renaming an army can never leave its tag rendering as blanks.
+ */
+export const PLAN_GLYPHS = [...new Set(
+  ARMY_ORDINALS.join('') + ARMY_SUFFIX + ARMY_GROUP_NAME + '個師団 · 進攻',
+)].join('');
+
 export const IDEOLOGY: Record<Ideology, string> = {
   fascist: 'ファシズム', democratic: '民主主義',
   communist: '共産主義', neutral: '中道',
@@ -405,6 +523,11 @@ export function eventText(
       return `${country(body.attacker)}が${country(body.defender)}に宣戦布告`;
     case 'joinedFaction':
       return `${country(body.country)}が${body.faction}に加入`;
+    case 'peaceTerms':
+      return `${country(body.country)}の講和会議：`
+        + body.shares.map((s) => `${country(s.country)} ${s.states}州`).join('・');
+    case 'whitePeace':
+      return `${body.countries.map(country).join('と')}が白紙講和`;
     case 'ceded':
       return `${country(body.country)}が${country(body.by)}に${body.states}ステートを割譲`;
     case 'capitulated':

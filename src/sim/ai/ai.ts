@@ -3,7 +3,8 @@ import { rand } from '../core/rng';
 import {
   RESOURCE_TYPES,
   type Country, type CountryId, type Division, type EquipmentType, type GameState,
-  type Ideology, type ProvinceId, type ResourceType,
+  type Ideology, type ProductionLine, type ProvinceId, type ResourceType,
+  type VariantModule,
 } from '../core/types';
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 import {
@@ -14,12 +15,14 @@ import {
   DEMAND_COST, demandSubmission, guarantee, guarantorsOf, hasWarGoal, joinFaction,
   occupationRatio, opinionOf, startJustification,
 } from '../diplomacy/diplomacy';
-import { orderMove } from '../military/movement';
+import { hasAccess, orderMove } from '../military/movement';
+import { stackLimit } from '../military/supply';
 import { canChangeLaw, changeLaw } from '../politics/politics';
 import { fuelRatio } from '../economy/fuel';
 import {
-  availableToAI, canTradeWith, openTrade, RESOURCE_PER_FACTORY,
+  availableToAI, canTradeWith, MIN_TRADE_LOAD, openTrade, RESOURCE_PER_FACTORY,
 } from '../economy/trade';
+import { VARIANT_LEVEL_XP, canUpgrade, upgradeVariant } from '../economy/variants';
 import { LAW_COST } from '../politics/lawData';
 import { spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY } from '../scenario/europe1936';
 import {
@@ -472,6 +475,108 @@ function declareArmyIntent(state: GameState, ctx: AIContext, c: Country): void {
   });
 }
 
+/**
+ * How long a war has to have been unwinnable before its aggressor forces a
+ * road through a neutral.
+ *
+ * Half a year: long enough that the country has genuinely tried and failed to
+ * come to grips, short enough that a phoney war does not become the campaign.
+ */
+const FORCE_PASSAGE_AFTER_DAYS = 180;
+
+/** How often a country bothers to ask whether its war has become unreachable. */
+const PASSAGE_CHECK_DAYS = 10;
+
+/** How far a crowded division will walk to get off the pile. */
+const DISPERSE_HOPS = 5;
+
+/** Divisions of one country standing in a province. */
+function friendlyStack(state: GameState, owner: CountryId, id: ProvinceId): number {
+  let n = 0;
+  for (const divId of state.provinces[id]?.divisions ?? []) {
+    const d = state.divisions[divId];
+    if (d && !d.dead && d.owner === owner) n++;
+  }
+  return n;
+}
+
+/**
+ * Room left in a province, counting what is standing there and what has been
+ * ordered there today.
+ *
+ * `stackLimit` is the figure `applyThroughput` charges supply against, so this
+ * is the mechanic itself rather than a number picked to dodge it.
+ */
+function roomAt(
+  state: GameState, ctx: AIContext, owner: CountryId,
+  booked: Map<ProvinceId, number>, id: ProvinceId,
+): number {
+  return stackLimit(ctx.index, id) - friendlyStack(state, owner, id) - (booked.get(id) ?? 0);
+}
+
+/**
+ * The nearest of our provinces with room, searched outward.
+ *
+ * Bounded rather than global: a division that has to cross the continent to
+ * find space is not dispersing, it is deserting, and walking every province
+ * for every division would cost more than the rest of the AI put together.
+ */
+function nearestRoom(
+  state: GameState, ctx: AIContext, owner: CountryId,
+  booked: Map<ProvinceId, number>, from: ProvinceId,
+): ProvinceId | null {
+  const seen = new Set<ProvinceId>([from]);
+  let frontier: ProvinceId[] = [from];
+  for (let hop = 0; hop < DISPERSE_HOPS && frontier.length > 0; hop++) {
+    const next: ProvinceId[] = [];
+    for (const id of frontier) {
+      for (const nb of ctx.index.get(id).neighbors) {
+        if (seen.has(nb)) continue;
+        seen.add(nb);
+        if (state.provinces[nb]?.controller !== owner) continue;
+        if (roomAt(state, ctx, owner, booked, nb) > 0) return nb;
+        next.push(nb);
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+/**
+ * Stands a division down where it is, or moves it off a pile if it is on one.
+ *
+ * An army with nowhere to go used to be told to hold, which is right, and left
+ * standing wherever it had accumulated, which is not: measured in a 1946
+ * campaign the Soviet Union had 114 divisions in one province on the heel of
+ * Italy. That province carries about six. Supply reached it at 0.47 and was
+ * divided down to 0.06 by the stack itself, so every one of them fell under
+ * the organisation the AI needs to attack with and 176 of its 183 divisions
+ * sat on `defend` -- unable to move because they had no supply, and without
+ * supply because they would not move. Four years passed without the map
+ * changing hands.
+ */
+function standDown(
+  state: GameState, ctx: AIContext, c: Country,
+  booked: Map<ProvinceId, number>, d: Division,
+): void {
+  const here = d.provinceId;
+  if (roomAt(state, ctx, c.id, booked, here) > 0) {
+    d.path = [];
+    d.order = { kind: 'defend' };
+    return;
+  }
+  const room = nearestRoom(state, ctx, c.id, booked, here);
+  if (room === null) {
+    d.path = [];
+    d.order = { kind: 'defend' };
+    return;
+  }
+  booked.set(room, (booked.get(room) ?? 0) + 1);
+  const heading = d.order?.kind === 'move' ? d.order.target : null;
+  if (heading !== room) orderMove(state, ctx, d, room);
+}
+
 export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
 
@@ -541,21 +646,37 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
   const spare = available.filter((d) => unassigned.has(d.id));
   if (spare.length === 0) return;
   if (standingOnTheDefensive(state, c)) {
+    const holding = new Map<ProvinceId, number>();
     for (const d of spare) {
       if (d.path.length > 0) continue;
-      d.order = { kind: 'defend' };
+      standDown(state, ctx, c, holding, d);
     }
     return;
   }
 
+  // What has been ordered where, so that six armies of one country do not all
+  // pick the same province. Counted from the ground as well as from today's
+  // orders, so it survives across days.
+  const booked = new Map<ProvinceId, number>();
+
   const targets = frontTargets(state, ctx, c);
   if (targets.length === 0) {
+    // Nothing on this continent to walk to. Send what the far shore can hold
+    // and stand the rest down -- marching the whole army at one unreachable
+    // capital only builds the pile that starves it.
     const enemyCapital = c.atWarWith
       .map((id) => state.countries[id])
       .filter((e) => !e.capitulated)
       .map((e) => e.capital)[0];
-    if (enemyCapital !== undefined) {
-      for (const d of spare) if (d.path.length === 0) orderMove(state, ctx, d, enemyCapital);
+    for (const d of spare) {
+      if (d.path.length > 0) continue;
+      if (enemyCapital !== undefined
+        && roomAt(state, ctx, c.id, booked, enemyCapital) > 0) {
+        booked.set(enemyCapital, (booked.get(enemyCapital) ?? 0) + 1);
+        orderMove(state, ctx, d, enemyCapital);
+        continue;
+      }
+      standDown(state, ctx, c, booked, d);
     }
     return;
   }
@@ -571,9 +692,9 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
     const orgFraction = tpl ? d.org / Math.max(1, tpl.maxOrg) : 1;
 
     if (orgFraction < RETREAT_ORG) {
-      // Spent: hold where it is and recover rather than feed it in piecemeal.
-      d.path = [];
-      d.order = { kind: 'defend' };
+      // Spent: recover rather than being fed in piecemeal -- but not on top of
+      // everyone else, because a stack is why it is spent.
+      standDown(state, ctx, c, booked, d);
       continue;
     }
     if (d.path.length > 0) continue;
@@ -582,6 +703,9 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
     let chosenDistance = Infinity;
     for (const t of targets) {
       if (t.overseas && overseasBudget <= 0) continue;
+      // A province that is already carrying as much as it can move is not a
+      // place to send another division: the whole stack starves together.
+      if (roomAt(state, ctx, c.id, booked, t.province) <= 0) continue;
       const dist = ctx.index.distance(d.provinceId, t.province);
       const power = divisionPower(state, d) * ATTACK_RATIO;
       // Attack when locally strong, otherwise close up and wait.
@@ -589,11 +713,11 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
       if (dist < chosenDistance) { chosen = t; chosenDistance = dist; }
     }
     if (!chosen) {
-      d.path = [];
-      d.order = { kind: 'defend' };
+      standDown(state, ctx, c, booked, d);
       continue;
     }
     if (chosen.overseas) overseasBudget--;
+    booked.set(chosen.province, (booked.get(chosen.province) ?? 0) + 1);
     orderMove(state, ctx, d, chosen.province);
   }
 }
@@ -947,6 +1071,81 @@ function pruneJustifications(state: GameState, c: Country): void {
   });
 }
 
+/**
+ * The country standing between this one and an enemy it cannot reach.
+ *
+ * Armies may not cross a border they have no right to cross, which is correct
+ * and which closes roads that used to be open. The historical answer to a
+ * closed road is not to stand still: it is to declare war on whoever owns it.
+ * Belgium in 1914 and again in 1940 is the whole of this rule.
+ *
+ * Returns null when the enemy is reachable already, when nothing neutral is in
+ * the way, or when the way through is somebody this country cannot fight.
+ */
+function blockingNeutral(state: GameState, ctx: AIContext, c: Country): CountryId | null {
+  // Twice the pathfinder per enemy, and A* is already the most expensive thing
+  // the simulation does. The answer moves on a scale of months, so it is asked
+  // on a ten-day cadence, staggered by country id so the cost is spread rather
+  // than landing on one day. Measured: 10.69ms a day for a campaign against a
+  // 16ms budget, back to 7.2 with this.
+  if ((state.clock.totalDays + c.id) % PASSAGE_CHECK_DAYS !== 0) return null;
+
+  const mine = state.divisions.find((d) => !d.dead && d.owner === c.id);
+  if (!mine) return null;
+  // The same restraint every other declaration goes through: not while our own
+  // ground is being fought over, and not straight after the last one.
+  if (!mayOpenWar(state, c)) return null;
+
+  for (const enemyId of c.atWarWith) {
+    const enemy = state.countries[enemyId];
+    if (enemy.capitulated) continue;
+
+    // Only a war we started, and only one we have had time to fail at.
+    //
+    // Without this the rule fires for everybody at once and the map catches
+    // fire: measured over twelve days in 1940, nine declarations in a row,
+    // among them Britain and France invading Belgium and the Netherlands to
+    // get at Germany. It is the aggressor who forces a road -- the country
+    // that was attacked has a war it did not choose and no reason to widen
+    // it, which is the whole difference between 1914 and 1939 in the Low
+    // Countries.
+    const war = state.wars.find(
+      (w) => !w.ended && w.attackers.includes(c.id) && w.defenders.includes(enemyId),
+    );
+    if (!war) continue;
+    if (state.clock.totalDays - war.startDay < FORCE_PASSAGE_AFTER_DAYS) continue;
+    const target = state.provinces.findIndex((p) => p && p.controller === enemyId);
+    if (target < 0) continue;
+
+    // Already reachable: this war needs no new one.
+    const open = ctx.index.path(mine.provinceId, target, {
+      allowSea: true,
+      seaMultiplier: 6,
+      blocked: (id) => !hasAccess(state, c.id, id),
+    });
+    if (open) continue;
+
+    // The road as it would be if every border were open, and the first country
+    // on it that is closed to us.
+    const through = ctx.index.path(mine.provinceId, target, {
+      allowSea: true, seaMultiplier: 6,
+    });
+    if (!through) continue;
+    for (const step of through) {
+      const owner = state.provinces[step]?.controller;
+      if (owner === undefined || hasAccess(state, c.id, step)) continue;
+      const blocker = state.countries[owner];
+      if (blocker.capitulated || blocker.id === c.id) continue;
+      if (areAllied(state, c.id, blocker.id)) continue;
+      // Only somebody this bloc can actually beat, and not while its own
+      // ground is still being fought over.
+      if (blocStrength(state, c.id) < defendingStrength(state, blocker.id, c.id)) continue;
+      return blocker.id;
+    }
+  }
+  return null;
+}
+
 export function runDiplomacyAI(state: GameState, ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
   const doc = doctrineFor(c.tag);
@@ -954,6 +1153,15 @@ export function runDiplomacyAI(state: GameState, ctx: AIContext, c: Country): vo
   maintainGuarantees(state, c, doc);
   considerAlignment(state, ctx, c, doc);
   pruneJustifications(state, c);
+
+  // --- a war we cannot get to ---------------------------------------------
+  // Before anything else: an enemy that cannot be reached is not a war, it is
+  // a standing army and a rising division count. Open the road.
+  const blocker = blockingNeutral(state, ctx, c);
+  if (blocker !== null) {
+    declareWar(state, c.id, blocker);
+    return;
+  }
 
   const faction = c.factionId !== null ? state.factions[c.factionId] : null;
   const isLeader = faction !== null && faction.leader === c.id;
@@ -1083,6 +1291,45 @@ export function tickAIDaily(state: GameState, ctx: AIContext): void {
     if (c.id % 7 === dayOfWeek) {
       runDiplomacyAI(state, ctx, c);
     }
+    runVariantAI(state, c);
+  }
+}
+
+/**
+ * Spending the lessons of the last battle.
+ *
+ * Without this the AI banks army experience for twelve years and never
+ * touches it, which would make equipment marks a mechanic only the human
+ * player has -- the same asymmetry the mobilisation AI exists to prevent, and
+ * a decisive one, because a marked-up division beats an unmarked one at equal
+ * numbers.
+ *
+ * It upgrades what it is actually building, in the order that matters most in
+ * a fight, and only above a reserve. The reserve is what stops it spending
+ * every lesson the moment it is learned and never accumulating enough to lift
+ * a whole design.
+ */
+const AI_VARIANT_RESERVE = VARIANT_LEVEL_XP * 2;
+const AI_MODULE_ORDER: readonly VariantModule[] = ['gun', 'armor', 'reliability', 'engine'];
+
+function runVariantAI(state: GameState, c: Country): void {
+  if ((c.armyExperience ?? 0) < AI_VARIANT_RESERVE + VARIANT_LEVEL_XP) return;
+  // Down the production list in order of effort, not just the largest line.
+  // Taking only the biggest, every AI maxed its rifles -- ten levels, the
+  // whole design -- and then sat on the rest of its experience for the next
+  // six years: measured, Germany finished 1945 with 553 banked and one
+  // upgraded equipment type. A country with lessons to spend and a tank line
+  // open should be spending them on the tanks.
+  const lines: ProductionLine[] = [...c.productionLines]
+    .filter((l) => l.assignedFactories > 0)
+    .sort((a, b) => b.assignedFactories - a.assignedFactories || a.id - b.id);
+
+  for (const line of lines) {
+    for (const module of AI_MODULE_ORDER) {
+      if (!canUpgrade(c, line.equipment, module, 1)) continue;
+      upgradeVariant(state, c.id, line.equipment, module, 1);
+      return;
+    }
   }
 }
 
@@ -1131,6 +1378,8 @@ const AI_TRADE_SHARE = 0.4;
 /** Below this many factories spare, buying is not worth what it costs. */
 const AI_TRADE_FLOOR = 2;
 
+
+
 export function runTradeAI(state: GameState, ctx: AIContext, c: Country): void {
   if (c.capitulated) return;
   const budget = Math.floor(c.economy.freeCivilianFactories * AI_TRADE_SHARE);
@@ -1161,12 +1410,16 @@ export function runTradeAI(state: GameState, ctx: AIContext, c: Country): void {
         available: availableToAI(state, ctx, s.id, resource),
         favour: areAllied(state, c.id, s.id) ? 2 : 1 + opinionOf(state, s.id, c.id) / 200,
       }))
-      .filter((s) => s.available >= RESOURCE_PER_FACTORY)
+      // Worth a factory, without being worth a whole load. A buyer that only
+      // looks at sellers with a full load left ignores most of this map: the
+      // world's tungsten is six countries offering between 0.8 and 3.6 a day,
+      // and at a rate of 8 that is the entire supply invisible.
+      .filter((s) => s.available >= RESOURCE_PER_FACTORY * MIN_TRADE_LOAD)
       .sort((a, b) => b.available * b.favour - a.available * a.favour);
 
     for (const seller of sellers) {
       if (want <= 0) break;
-      const take = Math.min(want, Math.floor(seller.available / RESOURCE_PER_FACTORY));
+      const take = Math.min(want, Math.ceil(seller.available / RESOURCE_PER_FACTORY));
       if (take <= 0) continue;
       if (!openTrade(state, ctx, c.id, seller.id, resource, take)) continue;
       want -= take;

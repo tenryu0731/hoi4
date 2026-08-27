@@ -3,17 +3,23 @@ import { describe, expect, it } from 'vitest';
 import { Simulation } from '../../src/sim/Simulation';
 
 import {
-  ORG_RECOVERY_PER_HOUR, effectiveness, equipmentRatio, findCombatAt,
-  resolveCombatRound, tickDivisionUpkeep,
+  ORG_RECOVERY_PER_HOUR, divisionsPerBattle, effectiveness, equipmentRatio, findCombatAt,
+  resolveCombatRound, terrainProfile, tickDivisionUpkeep,
 } from '../../src/sim/military/combat';
 import {
-  captureProvince, isHostile, movementSpeed, orderMove, placeDivision,
+  captureProvince, hasAccess, isHostile, movementSpeed, orderMove, placeDivision,
   retreat, sealiftCapacity, tickMilitaryHourly, tickReinforcementDaily,
 } from '../../src/sim/military/movement';
 import {
-  computeSupply, encircledProvinces, supplySources, tickSupplyDaily,
+  SUPPLY_HUB_VP, SUPPLY_RANGE, computeSupply, encircledProvinces, stackLimit, supplySources,
+  tickSupplyDaily,
 } from '../../src/sim/military/supply';
-import { spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY } from '../../src/sim/scenario/europe1936';
+import {
+  deriveTemplate, spawnDivision, TEMPLATE_ARMOUR, TEMPLATE_INFANTRY,
+} from '../../src/sim/scenario/europe1936';
+import { leaveFaction } from '../../src/sim/diplomacy/diplomacy';
+import { TERRAIN } from '../../src/sim/core/data';
+import { TERRAIN_TYPES } from '../../src/sim/core/types';
 import type { Division, GameState, ProvinceId } from '../../src/sim/core/types';
 import { makeFixture, type Fixture } from './helpers/fixture';
 
@@ -63,6 +69,77 @@ describe('templates', () => {
     expect(arm.breakthrough).toBeGreaterThan(inf.breakthrough);
     expect(arm.armor).toBeGreaterThan(inf.armor);
     expect(arm.buildCost).toBeGreaterThan(inf.buildCost);
+  });
+});
+
+describe('what a template is worth on each kind of ground', () => {
+  it('reports the same terrain modifiers the battle applies', () => {
+    const f = makeFixture();
+    const inf = f.country('GER').templates[TEMPLATE_INFANTRY];
+    const rows = terrainProfile(inf);
+    expect(rows.map((r) => r.terrain)).toEqual([...TERRAIN_TYPES]);
+    for (const row of rows) {
+      const def = TERRAIN[row.terrain];
+      // No mountain training in the infantry template, so the profile is the
+      // ground and nothing else. If these ever diverge, the panel is lying
+      // about the fight.
+      expect(row.attack).toBeCloseTo(def.attackMod, 6);
+      expect(row.defence).toBeCloseTo(def.defenceMod, 6);
+      expect(row.speed).toBeCloseTo(def.speed, 6);
+      expect(row.width).toBe(def.combatWidth);
+    }
+  });
+
+  it('pays mountain troops on the high ground and nowhere else', () => {
+    const plain = deriveTemplate(-1, 'foot', ['infantry', 'infantry'], []);
+    const alpine = deriveTemplate(-2, 'alpine', ['mountaineers', 'mountaineers'], []);
+    const a = new Map(terrainProfile(plain).map((r) => [r.terrain, r]));
+    const b = new Map(terrainProfile(alpine).map((r) => [r.terrain, r]));
+
+    for (const t of TERRAIN_TYPES) {
+      const rough = t === 'mountain' || t === 'hills';
+      if (rough) {
+        expect(b.get(t)!.attack).toBeGreaterThan(a.get(t)!.attack);
+        expect(b.get(t)!.defence).toBeGreaterThan(a.get(t)!.defence);
+      } else {
+        expect(b.get(t)!.attack).toBeCloseTo(a.get(t)!.attack, 6);
+        expect(b.get(t)!.defence).toBeCloseTo(a.get(t)!.defence, 6);
+      }
+    }
+  });
+
+  it('says how many of a division the ground lets into one battle', () => {
+    const f = makeFixture();
+    const inf = f.country('GER').templates[TEMPLATE_INFANTRY];
+    for (const row of terrainProfile(inf)) {
+      expect(divisionsPerBattle(inf, row.width)).toBe(Math.floor(row.width / inf.width));
+    }
+    // Mountains take fewer than plains, which is the whole point of the number.
+    const plains = TERRAIN.plains.combatWidth;
+    const mountain = TERRAIN.mountain.combatWidth;
+    expect(divisionsPerBattle(inf, mountain)).toBeLessThan(divisionsPerBattle(inf, plains));
+  });
+});
+
+describe('division numbers', () => {
+  it('numbers each division within its own template', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const a = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, ger.capital, 1);
+    const b = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, ger.capital, 1);
+    const c = spawnDivision(f.state, ger.id, TEMPLATE_ARMOUR, ger.capital, 1);
+    expect(b.ordinal).toBe(a.ordinal + 1);
+    // A different template counts separately, the way formation numbers do.
+    expect(c.ordinal).toBeLessThan(b.ordinal);
+  });
+
+  it('never reissues the number of a division that has been destroyed', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const a = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, ger.capital, 1);
+    a.dead = true;
+    const b = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, ger.capital, 1);
+    expect(b.ordinal).toBe(a.ordinal + 1);
   });
 });
 
@@ -503,6 +580,81 @@ describe('supply', () => {
     expect(Math.max(...levels)).toBe(0);
   });
 
+  it('carries as far in world distance however finely the map is cut', () => {
+    // The property none of the other supply tests covered, and the one that
+    // broke. They check the shape of the network -- the capital is full, an
+    // ally is inside it, infrastructure helps, a step costs something -- and
+    // not one of them checks how far it reaches in the units the map is drawn
+    // in. Supply used to lose a flat 0.13 per province crossed, so when the
+    // build was changed to subdivide the map from 323 provinces to 1,266, the
+    // same ground cost twice as much to cross and every front in the game
+    // ended up beyond supply range. Every structural test still passed.
+    //
+    // Walking a corridor and comparing supply against the distance actually
+    // travelled is what catches it: under a flat per-hop charge the two come
+    // apart the moment the hops are short.
+    const f = makeFixture();
+    const sov = f.country('SOV');
+    const other = f.country('TUR').id;
+    for (const st of f.state.states) st.infrastructure = 1;
+
+    // Moscow keeps its capital and nothing else, so the corridor dug below is
+    // the only way supply can travel. Without this the surrounding Soviet
+    // territory offers a shorter route and the corridor is never actually
+    // walked -- which is how the first version of this test came to pass on
+    // the very code it was written to catch.
+    for (let i = 0; i < f.state.provinces.length; i++) {
+      if (i === sov.capital) continue;
+      if (f.state.provinces[i].controller === sov.id) f.state.provinces[i].controller = other;
+    }
+
+    // A long corridor out from Moscow, so the walk crosses edges of many
+    // different lengths -- the map's are 66 to 185 units.
+    let cur = sov.capital;
+    const chain = [cur];
+    let travelled = 0;
+    // Bounded by ground covered, not by hop count: the distance is the
+    // quantity under test, and a fixed number of hops walks a different
+    // distance on every map.
+    // Always the *shortest* unused neighbour. This is what separates the two
+    // formulas: over an average-length edge they charge about the same, and
+    // it is a run of short hops -- exactly what subdividing a map produces --
+    // where a flat per-hop charge drains a line that has barely moved.
+    const target = SUPPLY_RANGE * 0.7;
+    for (let i = 0; i < 40; i++) {
+      let next: number | undefined;
+      let shortest = Infinity;
+      for (const n of f.index.get(cur).neighbors) {
+        if (chain.includes(n)) continue;
+        const leg = f.index.distance(cur, n);
+        if (leg < shortest) { shortest = leg; next = n; }
+      }
+      if (next === undefined || travelled + shortest > target) break;
+      f.state.provinces[next].controller = sov.id;
+      travelled += shortest;
+      chain.push(next);
+      cur = next;
+    }
+    // Enough hops that a flat 0.13 per hop would have spent the whole line
+    // before the end of it -- nine of them is 1.17 against a full tank of 1.
+    expect(chain.length).toBeGreaterThan(8);
+
+    const levels = computeSupply(f.state, f.index, sov.id, supplySources(f.state, f.index, sov.id));
+    const spent = 1 - levels[cur];
+    expect(travelled).toBeLessThan(SUPPLY_RANGE);
+
+    // It has to arrive. Nine hops at the old flat 0.13 is 1.17 spent against
+    // a full tank of 1, so the line ran dry inside a corridor that had
+    // covered barely half the range.
+    expect(levels[cur], `after ${chain.length - 1} hops over ${travelled.toFixed(0)} units`)
+      .toBeGreaterThan(0);
+    // And it must never cost more than the ground actually covered. Not an
+    // equality: the search is best-first over the whole friendly network, so
+    // it is free to find a shorter way round than the corridor this test dug,
+    // and it does.
+    expect(spent).toBeLessThanOrEqual(travelled / SUPPLY_RANGE + 1e-6);
+  });
+
   it('leaves peacetime countries fully supplied', () => {
     const f = makeFixture();
     tickSupplyDaily(f.state, f.index);
@@ -568,6 +720,130 @@ describe('encirclement', () => {
       const pocket = encircledProvinces(f.state, f.index, c.id);
       expect([...pocket].map((p) => f.index.get(p).name), tag).toEqual([]);
     }
+  });
+
+  it('makes a captured city feed the army that took it', () => {
+    // Conquest used to add ground and never add supply, so a successful
+    // advance starved itself at a fixed radius from its own capital: measured
+    // in a 1945 campaign, Germany's median division stood 3189 world units
+    // from Berlin against a range of 1200, at supply 0.08, holding 78
+    // provinces taken from somebody else.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const sov = f.country('SOV');
+    declareWar(f.state, ger.id, sov.id);
+
+    // A Soviet city far enough from Berlin that no supply reaches it, plus a
+    // corridor of Soviet ground for Germany to have walked in along.
+    const city = f.index.provinces
+      .filter((p) => p.ownerTag === 'SOV' && p.vp >= SUPPLY_HUB_VP)
+      .sort((a, b) => f.index.distance(b.id, ger.capital) - f.index.distance(a.id, ger.capital))[0];
+    expect(city).toBeTruthy();
+    // Far enough that Berlin alone can never reach it, which is what makes
+    // this a test of the depot rather than of the range.
+    expect(f.index.distance(city.id, ger.capital)).toBeGreaterThan(SUPPLY_RANGE);
+
+    const dry = computeSupply(f.state, f.index, ger.id, supplySources(f.state, f.index, ger.id));
+    expect(dry[city.id]).toBe(0);
+
+    // Germany takes it, and everything between it and home.
+    for (const p of f.index.provinces) {
+      if (p.ownerTag === 'SOV' || p.ownerTag === 'POL') f.state.provinces[p.id].controller = ger.id;
+    }
+    const sources = supplySources(f.state, f.index, ger.id);
+    expect(sources.some((s) => s.province === city.id)).toBe(true);
+    const wet = computeSupply(f.state, f.index, ger.id, sources);
+    expect(wet[city.id]).toBeGreaterThan(0.2);
+  });
+
+  it('gives a pocket no supply however many cities are inside it', () => {
+    // The depots must not undo the one mechanic that makes an encirclement
+    // worth making: a city only feeds an army that can trace a line home.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const sov = f.country('SOV');
+    declareWar(f.state, ger.id, sov.id);
+
+    // Hand Germany a Soviet city and nothing else -- no corridor to it.
+    const city = f.index.provinces.find(
+      (p) => p.ownerTag === 'SOV' && p.vp >= SUPPLY_HUB_VP && !p.coastal,
+    )!;
+    f.state.provinces[city.id].controller = ger.id;
+
+    expect(encircledProvinces(f.state, f.index, ger.id).has(city.id)).toBe(true);
+    const sources = supplySources(f.state, f.index, ger.id);
+    expect(sources.some((s) => s.province === city.id)).toBe(false);
+    tickSupplyDaily(f.state, f.index);
+    expect(f.state.provinces[city.id].supply).toBe(0);
+  });
+
+  it('sizes a stack against what the ground under it can move', () => {
+    const f = makeFixture();
+    // The figure the AI reads before it sends another division somewhere. It
+    // has to be the same one applyThroughput charges against, or the AI is
+    // planning around a number the simulation does not use.
+    for (const p of f.index.provinces.slice(0, 50)) {
+      const limit = stackLimit(f.index, p.id);
+      expect(limit).toBeGreaterThanOrEqual(2);
+      expect(limit).toBeLessThanOrEqual(12);
+    }
+  });
+
+  it('will not let an army walk into a country it is not at war with', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const div = f.state.divisions.find((d) => d.owner === ger.id && !d.dead)!;
+
+    // Somewhere Polish, and the border it sits behind.
+    const polish = f.index.provinces.find((p) => p.ownerTag === 'POL')!;
+    expect(hasAccess(f.state, ger.id, polish.id)).toBe(false);
+    expect(orderMove(f.state, { index: f.index }, div, polish.id)).toBe(false);
+    expect(div.path).toEqual([]);
+
+    // War opens it, and it is an attack rather than a visit.
+    declareWar(f.state, ger.id, pol.id);
+    expect(hasAccess(f.state, ger.id, polish.id)).toBe(true);
+    expect(orderMove(f.state, { index: f.index }, div, polish.id)).toBe(true);
+    expect(div.path.length).toBeGreaterThan(0);
+  });
+
+  it('opens a border to a country in the same bloc', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const ita = f.country('ITA');
+    // Both begin in the Axis.
+    expect(ger.factionId).not.toBeNull();
+    expect(ita.factionId).toBe(ger.factionId);
+    const italian = f.index.provinces.find((p) => p.ownerTag === 'ITA')!;
+    expect(hasAccess(f.state, ger.id, italian.id)).toBe(true);
+
+    // And closes it again when the bloc no longer holds them both.
+    leaveFaction(f.state, ita.id);
+    expect(hasAccess(f.state, ger.id, italian.id)).toBe(false);
+  });
+
+  it('will not route around the world through neutral ground', () => {
+    // The rule has to hold on the route as well as the destination: marching
+    // *through* a neutral is the same trespass as stopping in one. East
+    // Prussia is the case that matters -- it is German, and reaching it
+    // overland means crossing the Polish Corridor.
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const div = f.state.divisions.find(
+      (d) => d.owner === ger.id && !d.dead
+        && f.index.get(d.provinceId).name.includes('Berlin'),
+    );
+    const eastPrussia = f.index.provinces.find(
+      (p) => p.ownerTag === 'GER' && p.name.includes('Kaliningrad'),
+    );
+    if (!div || !eastPrussia) return;
+
+    const route = f.index.path(div.provinceId, eastPrussia.id, {
+      allowSea: false,
+      blocked: (id) => !hasAccess(f.state, ger.id, id),
+    });
+    expect(route).toBeNull();
   });
 
   it('keeps East Prussia supplied through its own port', () => {

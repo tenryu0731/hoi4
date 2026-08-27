@@ -177,6 +177,16 @@ export interface DivisionTemplate {
   buildCost: number;
 }
 
+/**
+ * The four things a country can change about a piece of equipment.
+ *
+ * Not every type has all four: a rifle has no engine. See VARIANT_MODULES.
+ */
+export type VariantModule = 'armor' | 'gun' | 'reliability' | 'engine';
+
+/** How many levels a country has put into each module of one equipment type. */
+export type EquipmentVariant = Record<VariantModule, number>;
+
 export type UnitOrder =
   | { kind: 'move'; target: ProvinceId }
   | { kind: 'attack'; target: ProvinceId }
@@ -215,6 +225,32 @@ export interface Division {
    * striking late, and what a defensive general is for.
    */
   entrenchment: number;
+  /**
+   * This division's number within its template: the 12 in 第12歩兵師団.
+   *
+   * A formation needs a name before an order of battle can be read. Before
+   * this, an army of twenty-four was twenty-four rows all reading 歩兵師団,
+   * and the only way to tell one from another was the province it stood in --
+   * which changes, and is not what a division is called.
+   */
+  ordinal: number;
+  /**
+   * Set while the division is following an order of its own rather than its
+   * army's plan.
+   *
+   * A battle plan re-issues its assignments every day, so before this existed
+   * a hand-given order survived for less than one: measured with an army of
+   * twenty-four on a live front, twenty divisions started for Berlin and by
+   * the following day one was still going and the nine that had arrived had
+   * been marched back out again. An order the player gives has to outlive the
+   * plan that did not know about it, and the only way for it to do that is to
+   * say so on the division.
+   *
+   * Cleared when the army is given a new plan, and when the division changes
+   * army: both are a fresh start, and neither is something the plan did on
+   * its own.
+   */
+  detached?: boolean;
   /** Set when the division has been destroyed; kept so ids stay stable. */
   dead: boolean;
   /** Hours the unit must spend recovering before it may attack again. */
@@ -355,6 +391,17 @@ export interface War {
   defenders: CountryId[];
   startDay: number;
   ended: boolean;
+  /**
+   * Victory points each participant has taken off the other side, by country.
+   *
+   * What the peace conference divides the spoils by. Counted from captures
+   * rather than from casualties because a capture is the thing the map
+   * actually records, and because it is what a conference argues about: a
+   * coalition member who took nothing has nothing to table.
+   *
+   * Optional so a save written before conferences existed still loads.
+   */
+  contribution?: Record<CountryId, number>;
 }
 
 export interface Justification {
@@ -525,6 +572,30 @@ export interface Country {
   productionLines: ProductionLine[];
   constructionQueue: ConstructionItem[];
   templates: DivisionTemplate[];
+  /**
+   * How many divisions this country has ever raised on each template, so the
+   * next one can be numbered.
+   *
+   * Optional because the 1936 scenario table predates it; spawnDivision fills
+   * it on first use, the way research and focus fill theirs. Never decremented
+   * -- the 12th infantry division stays the 12th after the 4th is destroyed,
+   * which is what a formation number is for.
+   */
+  divisionOrdinals?: Partial<Record<number, number>>;
+  /**
+   * The mark each equipment type is currently built to; see sim/economy/variants.
+   *
+   * Optional because the 1936 scenario table predates it, and absent means
+   * every type is at its base mark.
+   */
+  variants?: Partial<Record<EquipmentType, EquipmentVariant>>;
+  /**
+   * Lessons paid for in blood, spent on equipment marks.
+   *
+   * Earned only by divisions in combat, so a country at peace has none. That
+   * is the pressure that makes the opening years about industry.
+   */
+  armyExperience?: number;
   research: ResearchState;
   /** National focus state. Created on first use by sim/focus. */
   focus?: CountryFocus;
@@ -639,6 +710,8 @@ export type GameEventBody =
   | { k: 'warDeclared'; attacker: string; defender: string }
   | { k: 'joinedFaction'; country: string; faction: string }
   | { k: 'capitulated'; country: string; occupation: number }
+  | { k: 'peaceTerms'; country: string; shares: { country: string; states: number }[] }
+  | { k: 'whitePeace'; countries: string[] }
   | { k: 'annexed'; country: string; by: string }
   | { k: 'ceded'; country: string; by: string; states: number }
   | { k: 'itemCompleted'; country: string; item: string }
@@ -648,7 +721,8 @@ export type GameEventBody =
 
 export interface GameEvent {
   day: number;
-  kind: 'war' | 'combat' | 'production' | 'construction' | 'research' | 'focus' | 'diplomacy' | 'capitulation' | 'outcome';
+  kind: 'war' | 'combat' | 'production' | 'construction' | 'research' | 'focus' | 'diplomacy'
+  | 'capitulation' | 'peace' | 'outcome';
   body: GameEventBody;
   /** Optional province to focus the camera on when tapped. */
   province?: ProvinceId;

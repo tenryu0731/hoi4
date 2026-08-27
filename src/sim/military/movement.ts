@@ -69,6 +69,31 @@ export function canEnterFreely(state: GameState, country: CountryId, province: P
   return controller === country || !isHostile(state, country, controller);
 }
 
+/**
+ * Whether an army may set foot in a province at all.
+ *
+ * Three grounds and no others: it is ours, it belongs to somebody in our bloc,
+ * or we are at war with whoever holds it -- and that last one is an attack,
+ * not a visit.
+ *
+ * Nothing checked this before, so a division could march into any neutral
+ * country in peacetime and stand there. 「平時に非同盟国の領土に師団を置ける
+ * のはおかしい」 is exactly right: a border is the first thing a country has,
+ * and a map where armies drift across them has no diplomacy in it -- there is
+ * no reason to declare war on Belgium if you can simply walk through it.
+ *
+ * A treaty of passage would be the fuller answer and is a bigger feature; a
+ * bloc is the version of it this game already models.
+ */
+export function hasAccess(state: GameState, country: CountryId, province: ProvinceId): boolean {
+  const controller = state.provinces[province]?.controller;
+  if (controller === undefined || controller === country) return true;
+  if (isHostile(state, country, controller)) return true;
+  const c = state.countries[country];
+  const other = state.countries[controller];
+  return c.factionId !== null && c.factionId === other.factionId;
+}
+
 // ---------------------------------------------------------------------------
 // Province occupancy bookkeeping
 // ---------------------------------------------------------------------------
@@ -179,6 +204,10 @@ export function orderMove(
   const path = ctx.index.path(d.provinceId, target, {
     allowSea: true,
     seaMultiplier: 6,
+    // A border is a wall unless there is a reason for it not to be. Checked on
+    // the route as well as the destination: marching *through* a neutral is
+    // the same trespass as stopping in one.
+    blocked: (id) => !hasAccess(state, d.owner, id),
     cost: (id) => {
       const terrain = TERRAIN[ctx.index.get(id).terrain];
       const hostile = isHostile(state, d.owner, state.provinces[id].controller);
@@ -225,7 +254,19 @@ export function tickMilitaryHourly(state: GameState, ctx: MilitaryContext): void
   }
 
   // 3. Prune finished battles.
-  if (state.combats.length > 64) {
+  //
+  // Every hour, not once the list passes some length. The threshold version
+  // only swept at more than 64 open records, which never happens once a war
+  // winds down, so ended battles accumulated and stayed: measured at the end
+  // of a ten-year campaign, five combats had been sitting closed since 1942
+  // with no live participant on either side, and mid-war the list carried
+  // about thirty-three of them on any given day. Nothing reads an ended
+  // combat -- findCombatAt and the invariants both skip them -- so this cost
+  // no correctness, but it made state.combats useless as a measure of how
+  // much fighting was going on, which is exactly what it was reached for.
+  let live = 0;
+  for (const c of state.combats) if (!c.ended) live++;
+  if (live !== state.combats.length) {
     state.combats = state.combats.filter((c) => !c.ended);
   }
 }
@@ -334,11 +375,42 @@ function retreatOptions(
   return out;
 }
 
+/**
+ * Writes a capture into the ledger every open war keeps.
+ *
+ * The peace conference divides a beaten country by what each of the winners
+ * actually did, and this is where "what it did" is measured. Victory points
+ * rather than provinces, because a coalition partner who took the capital has
+ * a different claim from one who took a fortnight of empty steppe.
+ *
+ * Kept here rather than in the diplomacy layer because that layer already
+ * reaches into this one, and a capture is a thing the map does.
+ */
+function creditCapture(
+  state: GameState, ctx: MilitaryContext,
+  province: ProvinceId, from: CountryId, by: CountryId,
+): void {
+  if (from === by) return;
+  const vp = ctx.index.get(province).vp;
+  if (vp <= 0) return;
+  for (const w of state.wars) {
+    if (w.ended) continue;
+    const asAttacker = w.attackers.includes(by);
+    const asDefender = w.defenders.includes(by);
+    if (!asAttacker && !asDefender) continue;
+    const other = asAttacker ? w.defenders : w.attackers;
+    if (!other.includes(from)) continue;
+    if (!w.contribution) w.contribution = {};
+    w.contribution[by] = (w.contribution[by] ?? 0) + vp;
+  }
+}
+
 export function captureProvince(
   state: GameState, ctx: MilitaryContext, province: ProvinceId, by: CountryId,
 ): void {
   const p = state.provinces[province];
   if (p.controller === by) return;
+  creditCapture(state, ctx, province, p.controller, by);
   p.controller = by;
   p.lastChangeHour = state.clock.totalHours;
   p.fortLevel = 0;
@@ -396,6 +468,15 @@ function advanceMovement(state: GameState, ctx: MilitaryContext, d: Division): v
   if (d.org < tpl.maxOrg * MIN_ORG_TO_MOVE || d.retreatCooldown > 0) return;
 
   const next = d.path[0];
+  // The border may have closed since the order was given -- a war ended, an
+  // ally left the bloc -- and a march that was legal on Monday is a trespass
+  // on Tuesday. Stop at the frontier rather than walking through it.
+  if (!hasAccess(state, d.owner, next)) {
+    d.path = [];
+    d.moveProgress = 0;
+    d.order = { kind: 'defend' };
+    return;
+  }
   // Shipping is a live resource: a division waits on the quay until a hull is
   // free, which is what stops an entire army crossing in one tide.
   const crossing = ctx.index.isSeaLink(d.provinceId, next);

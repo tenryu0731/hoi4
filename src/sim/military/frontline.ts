@@ -5,6 +5,7 @@ import type {
 } from '../core/types';
 import { armyById, commandModifiers, commanderById, overloadScale } from './command';
 import { orderMove, type MilitaryContext } from './movement';
+import { stackLimit } from './supply';
 
 /**
  * Battle plans: front lines, offensives, and the bonus for having thought
@@ -86,7 +87,8 @@ export function assignToFront(
   if (front.length === 0) return;
   const divisions = army.divisions
     .map((id) => state.divisions.find((d) => d.id === id))
-    .filter((d): d is NonNullable<typeof d> => !!d && !d.dead && d.combatId === null);
+    .filter((d): d is NonNullable<typeof d> =>
+      !!d && !d.dead && d.combatId === null && !d.detached);
   if (divisions.length === 0) return;
 
   // Sorted by victory points so the doubling-up lands on what is worth holding,
@@ -99,28 +101,57 @@ export function assignToFront(
 
   const taken = new Map<ProvinceId, number>();
   for (const div of divisions) {
-    let best: ProvinceId | null = null;
-    let bestCost = Infinity;
-    for (const target of ranked) {
-      // Prefer an empty post; only stack once every post has somebody.
-      const load = taken.get(target) ?? 0;
-      const from = ctx.index.get(div.provinceId);
+    const from = ctx.index.get(div.provinceId);
+    // Every post, cheapest first: an empty one before a crowded one, and a
+    // near one before a far one.
+    const order = [...ranked].sort((a, b) => cost(a) - cost(b));
+    function cost(target: ProvinceId): number {
       const to = ctx.index.get(target);
-      const distance = Math.hypot(from.centerX - to.centerX, from.centerY - to.centerY);
-      const cost = distance + load * 4000;
-      if (cost < bestCost) { bestCost = cost; best = target; }
+      return Math.hypot(from.centerX - to.centerX, from.centerY - to.centerY)
+        + (taken.get(target) ?? 0) * 4000;
     }
-    if (best === null) continue;
-    taken.set(best, (taken.get(best) ?? 0) + 1);
-    reorder(state, ctx, div, best);
+    // Down the list until one of them can actually be marched to. Posts on the
+    // far side of a neutral country cannot: East Prussia is cut off from the
+    // Reich by the Polish Corridor, and before armies had to respect a border
+    // that did not matter because they walked through Poland. Assigning a
+    // division to a post it cannot reach left it standing with no orders at
+    // all -- measured at five of twenty-four.
+    for (const target of order) {
+      if (!reorder(state, ctx, div, target)) continue;
+      taken.set(target, (taken.get(target) ?? 0) + 1);
+      break;
+    }
   }
+}
+
+/** Divisions of one country standing in a province. */
+function friendlyStack(state: GameState, owner: CountryId, id: ProvinceId): number {
+  let n = 0;
+  for (const divId of state.provinces[id]?.divisions ?? []) {
+    const d = state.divisions[divId];
+    if (d && !d.dead && d.owner === owner) n++;
+  }
+  return n;
 }
 
 /**
  * Pushes an army at its objectives.
  *
- * Every division is sent at the nearest target rather than being spread over
- * them: an offensive that divides itself between two objectives takes neither.
+ * Divisions go at the nearest objective that still has room, and once the
+ * objectives are full the rest fan out over the ground the attack is mounted
+ * from. What they must not do is all go to the same place: measured in a 1946
+ * campaign, the Soviet AI had six armies on offensive orders and every one of
+ * them sent every division at the single nearest target, which put **114
+ * divisions in one province** on the heel of Italy. That province carries
+ * about six. Its supply came out of the map at 0.47 and was divided down to
+ * 0.06 by the stack standing on it, so all 114 fell below the organisation
+ * the AI needs to attack with, and 176 of the country's 183 divisions were
+ * sitting on `defend` -- unable to attack because they had no supply, and
+ * with no supply because they were all standing in one place. The map did not
+ * change hands again for four years.
+ *
+ * `stackLimit` is the same figure `applyThroughput` charges against, so the
+ * ceiling here is the mechanic rather than a number chosen to dodge it.
  */
 export function pressOffensive(
   state: GameState, ctx: MilitaryContext, army: Army, targets: ProvinceId[],
@@ -130,18 +161,51 @@ export function pressOffensive(
     return p && p.controller !== army.owner;
   });
   if (live.length === 0) return;
+
+  // The ground the attack goes in from: ours, and touching an objective.
+  const staging: ProvinceId[] = [];
+  const seen = new Set<ProvinceId>();
+  for (const t of live) {
+    for (const nb of ctx.index.get(t).neighbors) {
+      if (seen.has(nb)) continue;
+      seen.add(nb);
+      if (state.provinces[nb]?.controller === army.owner) staging.push(nb);
+    }
+  }
+
+  // Counted from the divisions actually on the ground, so the armies of one
+  // country stay out of each other's way without being told about each other.
+  const booked = new Map<ProvinceId, number>();
+  const room = (id: ProvinceId): number =>
+    stackLimit(ctx.index, id) - friendlyStack(state, army.owner, id) - (booked.get(id) ?? 0);
+
+  /** Somewhere with room this division can actually march to, nearest first. */
+  const send = (div: Division, choices: readonly ProvinceId[]): boolean => {
+    const here = ctx.index.get(div.provinceId);
+    const order = choices
+      .filter((id) => room(id) > 0)
+      .sort((a, b) => {
+        const pa = ctx.index.get(a);
+        const pb = ctx.index.get(b);
+        return Math.hypot(here.centerX - pa.centerX, here.centerY - pa.centerY)
+          - Math.hypot(here.centerX - pb.centerX, here.centerY - pb.centerY);
+      });
+    for (const target of order) {
+      if (!reorder(state, ctx, div, target)) continue;
+      booked.set(target, (booked.get(target) ?? 0) + 1);
+      return true;
+    }
+    return false;
+  };
+
   for (const id of army.divisions) {
     const div = state.divisions.find((d) => d.id === id);
-    if (!div || div.dead || div.combatId !== null) continue;
-    let best = live[0];
-    let bestCost = Infinity;
-    const from = ctx.index.get(div.provinceId);
-    for (const target of live) {
-      const to = ctx.index.get(target);
-      const distance = Math.hypot(from.centerX - to.centerX, from.centerY - to.centerY);
-      if (distance < bestCost) { bestCost = distance; best = target; }
-    }
-    reorder(state, ctx, div, best);
+    if (!div || div.dead || div.combatId !== null || div.detached) continue;
+    // An objective first, the ground in front of it second, and if both are
+    // full or out of reach then nowhere: a division that cannot be fed at the
+    // front is worth more standing where it is than starving on top of the
+    // ones that can.
+    if (!send(div, live)) send(div, staging);
   }
 }
 
@@ -158,10 +222,10 @@ export function pressOffensive(
  */
 function reorder(
   state: GameState, ctx: MilitaryContext, div: Division, target: ProvinceId,
-): void {
-  if (div.provinceId === target) return;
-  if (div.order?.kind === 'move' && div.order.target === target && div.path.length > 0) return;
-  orderMove(state, ctx, div, target);
+): boolean {
+  if (div.provinceId === target) return true;
+  if (div.order?.kind === 'move' && div.order.target === target && div.path.length > 0) return true;
+  return orderMove(state, ctx, div, target);
 }
 
 /** The ceiling this army's planning may reach, with its officers' help. */

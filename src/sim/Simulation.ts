@@ -14,8 +14,6 @@ import type { EquipmentType, GameState } from './core/types';
  * stops being a choice. Twenty-four line battalions is a little above the
  * largest historical division, which leaves room to be wrong on purpose.
  */
-const MAX_BATTALIONS = 24;
-const MAX_SUPPORTS = 4;
 import type { ProvinceIndex } from './map/ProvinceIndex';
 import type { TickContext } from './time/TimeEngine';
 import {
@@ -23,9 +21,9 @@ import {
   tickEconomyDaily,
 } from './economy/production';
 import {
-  declareWar, demandSubmission, guarantee, improveRelations,
-  joinFaction, leaveFaction, startJustification, tickCapitulationDaily,
-  tickJustificationsDaily, tickTensionMonthly, occupationRatio,
+  canLeaveFaction, declareWar, demandSubmission, guarantee, improveRelations,
+  inviteToFaction, joinFaction, joinableFactions, leaveFaction, startJustification,
+  tickCapitulationDaily, tickJustificationsDaily, tickTensionMonthly, occupationRatio,
 } from './diplomacy/diplomacy';
 import {
   orderMove, stopDivision, tickConditionsDaily, tickMilitaryHourly, tickReinforcementDaily,
@@ -36,8 +34,10 @@ import {
   setArmyParent, tickCommandReinforcementDaily, tickCommanderExperienceDaily,
 } from './military/command';
 import { tickBattlePlansDaily } from './military/frontline';
+import { MAX_BATTALIONS, MAX_SUPPORTS } from './core/data';
+import { tickArmyExperienceDaily, upgradeVariant } from './economy/variants';
 import { tickAIDaily } from './ai/ai';
-import { cancelResearch, startResearch, tickResearchDaily } from './research';
+import { startResearch, tickResearchDaily } from './research';
 import { closeTrade, openTrade, tickTradeDaily } from './economy/trade';
 import { cancelFocus, startFocus, tickFocusDaily } from './focus';
 import { tickVictoryCheck } from './scenario/victory';
@@ -134,6 +134,11 @@ export class Simulation {
           if (!d || d.dead) continue;
           // A division locked in a battle cannot walk away from it.
           if (d.combatId !== null) continue;
+          // An order given by hand outranks the army's plan and goes on
+          // outranking it. The plan re-issues its assignments every day, so
+          // without this the order is gone by tomorrow morning -- which is
+          // what 「軍の移動がまだ少し変」 was.
+          d.detached = true;
           orderMove(state, this.ctx, d, cmd.target);
         }
         return;
@@ -141,19 +146,11 @@ export class Simulation {
       case 'stopDivisions': {
         for (const id of cmd.divisions) {
           const d = state.divisions[id];
-          if (d && !d.dead) stopDivision(d);
-        }
-        return;
-      }
-      case 'setDivisionOrder': {
-        for (const id of cmd.divisions) {
-          const d = state.divisions[id];
           if (!d || d.dead) continue;
-          if (cmd.order === 'attack' && cmd.target !== undefined) {
-            orderMove(state, this.ctx, d, cmd.target);
-          } else {
-            stopDivision(d);
-          }
+          // Stopping is an order too: a halt the plan undoes tomorrow is not
+          // a halt.
+          d.detached = true;
+          stopDivision(d);
         }
         return;
       }
@@ -166,6 +163,10 @@ export class Simulation {
         const held = armiesOf(state, cmd.country).filter((a) => a.isArmyGroup === group);
         if (held.length >= MAX_ARMIES) return;
         createArmy(state, cmd.country, cmd.name, group);
+        return;
+      }
+      case 'upgradeVariant': {
+        upgradeVariant(state, cmd.country, cmd.equipment, cmd.module, cmd.step);
         return;
       }
       case 'changeLaw': {
@@ -207,6 +208,13 @@ export class Simulation {
         // for one thing; it does not transfer to another.
         if (JSON.stringify(army.order) !== JSON.stringify(cmd.order)) army.planning = 0;
         army.order = cmd.order;
+        // And it takes the whole formation back under command. A division sent
+        // somewhere by hand stays there until the army is given something new
+        // to do, which is the moment the player has said they want it back.
+        for (const id of army.divisions) {
+          const d = state.divisions[id];
+          if (d) d.detached = false;
+        }
         return;
       }
       case 'createTemplate': {
@@ -257,16 +265,19 @@ export class Simulation {
         return;
       }
       case 'inviteToFaction': {
-        const inviter = state.countries[cmd.country];
-        if (inviter.factionId === null) return;
-        joinFaction(state, cmd.target, inviter.factionId);
+        inviteToFaction(state, cmd.country, cmd.target);
         return;
       }
       case 'joinFaction': {
+        // Walking in uninvited is the mirror of being invited: an invitation
+        // asks whether the country thinks well of the bloc, an application
+        // whether the bloc's leader thinks well of the country.
+        if (!joinableFactions(state, cmd.country).includes(cmd.faction)) return;
         joinFaction(state, cmd.country, cmd.faction);
         return;
       }
       case 'leaveFaction': {
+        if (!canLeaveFaction(state, cmd.country)) return;
         leaveFaction(state, cmd.country);
         return;
       }
@@ -274,10 +285,6 @@ export class Simulation {
       // --- research -------------------------------------------------------
       case 'startResearch': {
         startResearch(state, cmd.country, cmd.slot, cmd.tech);
-        return;
-      }
-      case 'cancelResearch': {
-        cancelResearch(state, cmd.country, cmd.slot);
         return;
       }
 
@@ -309,6 +316,7 @@ export class Simulation {
       tickCommandReinforcementDaily(state);
       tickBattlePlansDaily(state, this.ctx);
       tickCommanderExperienceDaily(state);
+      tickArmyExperienceDaily(state);
       tickSupplyDaily(state, this.index);
       // Before the economy, so a deal broken by yesterday's declaration of war
       // is already gone when today's resource supply is added up.

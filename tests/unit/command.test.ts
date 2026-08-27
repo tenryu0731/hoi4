@@ -250,13 +250,106 @@ describe('battle plans', () => {
     // than a day's march away never arrives at all.
     expect(standing.length).toBe(army.divisions.length);
 
+    // Evenly, but only among posts that can actually be reached from one
+    // another. East Prussia is cut off from the Reich by the Polish Corridor,
+    // and now that an army may not march through a neutral country its five
+    // posts there are held by the five divisions already in them while the
+    // other nineteen mass on the main border: 1,1,1,1,1 and 5,5,5,4. A single
+    // flat spread across all nine would mean the corridor was being walked
+    // through, which is the thing that should not happen.
     const perProvince = new Map<number, number>();
     for (const id of army.divisions) {
       const d = f.state.divisions.find((x) => x.id === id)!;
       perProvince.set(d.provinceId, (perProvince.get(d.provinceId) ?? 0) + 1);
     }
-    const counts = [...perProvince.values()];
-    expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
+    const german = (p: number): boolean => f.state.provinces[p].controller === ger.id;
+    const theatres: Set<number>[] = [];
+    for (const post of army.frontProvinces) {
+      if (theatres.some((t) => t.has(post))) continue;
+      theatres.push(new Set(f.index.reachable(post, german, { includeSea: false })));
+    }
+    expect(theatres.length).toBeGreaterThan(1);
+    for (const theatre of theatres) {
+      const counts = [...perProvince.entries()]
+        .filter(([p]) => theatre.has(p))
+        .map(([, n]) => n);
+      expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('leaves a hand-given order alone instead of marching the division back', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    army.order = { kind: 'front', against: pol.id };
+
+    const sim = new Simulation(f.state, f.index);
+    const time = new TimeEngine(f.state.clock.totalHours);
+    time.on((c) => sim.tick(c));
+    // Let the plan take hold first, so the divisions are somewhere the plan
+    // chose rather than where the scenario left them.
+    time.step(24 * 20);
+
+    // One division, sent somewhere the plan would never send it.
+    const moved = f.state.divisions.find(
+      (d) => army.divisions.includes(d.id) && d.combatId === null && !d.dead,
+    )!;
+    const home = ger.capital;
+    expect(moved.provinceId).not.toBe(home);
+    sim.execute({ t: 'moveDivisions', divisions: [moved.id], target: home });
+    expect(moved.detached).toBe(true);
+
+    // The plan runs every day and used to reclaim it inside one: measured with
+    // a whole army sent to Berlin, nine had arrived and by the next morning
+    // none of them were there any more.
+    time.step(24 * 40);
+    expect(moved.provinceId).toBe(home);
+    expect(moved.detached).toBe(true);
+
+    // The rest of the army is still the plan's business.
+    const onPlan = army.divisions.filter((id) => {
+      const d = f.state.divisions.find((x) => x.id === id)!;
+      return !d.detached && army.frontProvinces.includes(d.provinceId);
+    });
+    expect(onPlan.length).toBeGreaterThan(0);
+  });
+
+  it('takes the whole formation back the moment the army is given orders', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const pol = f.country('POL');
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    army.order = { kind: 'front', against: pol.id };
+    const sim = new Simulation(f.state, f.index);
+
+    const div = f.state.divisions.find((d) => army.divisions.includes(d.id) && !d.dead)!;
+    sim.execute({ t: 'moveDivisions', divisions: [div.id], target: ger.capital });
+    expect(div.detached).toBe(true);
+
+    // Re-issuing the order it already has is what the 計画に復帰 chip sends, so
+    // it has to be enough on its own -- and it must not throw the preparation
+    // away, because nothing about the plan changed.
+    army.planning = 0.2;
+    sim.execute({
+      t: 'setArmyOrder', country: ger.id, army: army.id, order: { ...army.order },
+    });
+    expect(div.detached).toBe(false);
+    expect(army.planning).toBeCloseTo(0.2, 5);
+  });
+
+  it('puts a division back under command when it changes army', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    const army = armiesOf(f.state, 'GER').find((a) => !a.isArmyGroup)!;
+    const div = f.state.divisions.find((d) => army.divisions.includes(d.id) && !d.dead)!;
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({ t: 'moveDivisions', divisions: [div.id], target: ger.capital });
+    expect(div.detached).toBe(true);
+
+    const other = createArmy(f.state, ger.id, 'test');
+    assignDivisions(f.state, other.id, [div.id]);
+    expect(div.detached).toBe(false);
   });
 
   it('accumulates preparation while still and sheds it once moving', () => {

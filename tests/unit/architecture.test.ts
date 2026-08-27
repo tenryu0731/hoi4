@@ -106,6 +106,49 @@ describe('architecture', () => {
 });
 
 /**
+ * Every command has something that sends it.
+ *
+ * This has now been the same bug three times: a command written into the bus
+ * with the subsystem, correct and tested, and no button anywhere that could
+ * reach it. Eight of them were dead at the last count and five of those were
+ * the whole non-belligerent half of diplomacy -- so the game had guarantees
+ * and factions in the simulation and a diplomacy panel that could only start
+ * a war. A feature nothing can invoke is a feature that does not exist, and
+ * it looks exactly like a finished one from inside the source.
+ */
+describe('the command bus', () => {
+  const COMMANDS = join(SRC, 'sim', 'core', 'commands.ts');
+  const BUS = join(SRC, 'sim', 'Simulation.ts');
+
+  // The union is written one variant per line as `| { t: 'name'; ... }`. Read
+  // from the raw source rather than through `code()`, which blanks exactly the
+  // string literals the names live in.
+  const commandNames = (): string[] => [...new Set(
+    [...readFileSync(COMMANDS, 'utf8').matchAll(/\|\s*\{\s*t:\s*'([a-zA-Z]+)'/g)]
+      .map((m) => m[1]),
+  )];
+
+  it('names enough commands to be worth checking', () => {
+    expect(commandNames().length).toBeGreaterThan(20);
+  });
+
+  it('has a caller for every command it accepts', () => {
+    const senders = walk(SRC)
+      .filter((f) => f !== COMMANDS && f !== BUS)
+      .map((f) => readFileSync(f, 'utf8'))
+      .join('\n');
+    const dead = commandNames().filter((n) => !senders.includes(`t: '${n}'`));
+    expect(dead, `no caller sends: ${dead.join(', ')}`).toEqual([]);
+  });
+
+  it('handles every command it accepts', () => {
+    const bus = readFileSync(BUS, 'utf8');
+    const unhandled = commandNames().filter((n) => !bus.includes(`case '${n}':`));
+    expect(unhandled, `no case in the bus for: ${unhandled.join(', ')}`).toEqual([]);
+  });
+});
+
+/**
  * Terrain colours must stay separable.
  *
  * The map mode is a legend, not a landscape: seven categories that share a

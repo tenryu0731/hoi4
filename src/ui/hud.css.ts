@@ -501,6 +501,11 @@ export const HUD_CSS = `
   border-color: #1a0d0b;
 }
 .panel-row.is-dead { opacity: 0.45; }
+/* A queued project the factories have not reached. Dimmed rather than hidden:
+   it is still in the queue, and moving it up is the point. */
+.panel-row.is-idle .panel-row-title,
+.panel-row.is-idle .panel-row-sub { color: var(--ink-dim); }
+.panel-row.is-idle .panel-bar-fill { filter: grayscale(1) brightness(0.7); }
 .panel-row-main { flex: 1 1 auto; min-width: 0; }
 .panel-row-title {
   font-size: 13px; font-weight: 700;
@@ -551,6 +556,18 @@ export const HUD_CSS = `
   background: linear-gradient(180deg, #e2c184 0%, #a8853f 100%);
 }
 .panel-empty { font-size: 11px; color: var(--ink-dim); padding: 8px 0; }
+/* An editable field on a card. Sized as a control rather than as text: a
+   44px target and 16px type, which is also the size Safari stops zooming the
+   page in on focus. */
+.panel-rename { display: flex; gap: 5px; align-items: center; margin-top: 6px; }
+.panel-input {
+  flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0 8px;
+  background: #191713; color: var(--ink);
+  border: 1px solid #100f0d; border-radius: 2px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.7);
+  font-size: 16px; font-family: inherit;
+}
+.panel-input:focus { outline: 1px solid var(--accent); }
 .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
 .panel-build {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
@@ -741,6 +758,156 @@ button:active { transform: scale(0.96); }
   border-color: #6d5730; color: #1a1811; font-weight: 700;
 }
 .panel-note { font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; }
+
+/* --- production ---------------------------------------------------------- */
+/* One card per line, three bands: who and what, the figures beside the
+   silhouette, and the factories along the bottom. The reference stacks the
+   same three horizontally because it has 380px of width to do it in. */
+.panel-line {
+  background: var(--panel, #23221e);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 3px;
+  padding: 5px 7px 6px; margin-bottom: 5px;
+}
+.panel-line-top { display: flex; align-items: center; gap: 6px; }
+/* The rank number, as the reference numbers its lines: production order is a
+   real thing here -- it is what the resource allocator walks. */
+.panel-line-rank {
+  min-width: 18px; text-align: center;
+  color: var(--ink-dim); font-size: 11px;
+}
+.panel-line-name { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--ink); }
+.panel-line-body { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.panel-line-art {
+  display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 36px; flex: 0 0 auto;
+  background: rgba(0,0,0,0.28); border: 1px solid #100f0d; border-radius: 2px;
+}
+.panel-line-icon { width: 28px; height: 28px; opacity: 0.92; }
+.panel-line-figures { flex: 1 1 auto; min-width: 0; }
+/* The output a day is the number a player is here for, so it is the biggest
+   thing in the row. */
+.panel-line-rate { color: var(--accent); font-size: 15px; font-weight: 700; line-height: 1.2; }
+.panel-line-eff { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.panel-line-eff .panel-bar { flex: 1 1 auto; }
+.panel-line-effv { font-size: 11px; color: var(--ink-dim); min-width: 30px; text-align: right; }
+.panel-line-stock { font-size: 11px; color: var(--ink-dim); }
+.panel-line-stock.is-short { color: #d8574a; }
+.panel-line-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 4px;
+}
+.panel-blocks {
+  display: flex; flex-wrap: wrap; align-content: center; gap: 2px;
+  flex: 1 1 auto; min-width: 0;
+}
+.panel-block {
+  width: 7px; height: 11px;
+  background: linear-gradient(180deg, #8fd48f 0%, #4f8f4f 100%);
+  border: 1px solid #14200f; border-radius: 1px;
+}
+.panel-blocks-more { font-size: 11px; color: var(--ink-dim); margin-left: 3px; }
+.panel-build-icon { width: 22px; height: 22px; opacity: 0.9; margin-bottom: 2px; }
+/* A type the army is already short of: the line worth opening next. */
+.panel-build.is-wanted { border-color: var(--accent); }
+
+/* --- division designer --------------------------------------------------- */
+/* The reference puts support companies in a column down the left and the line
+   battalions in a grid to their right, and that arrangement carries the whole
+   distinction between the two before any label does. It survives on a phone
+   because it is a grid either way -- only the proportions change. */
+.panel-board {
+  display: grid; grid-template-columns: auto 1fr; gap: 6px;
+  margin-bottom: 8px;
+}
+.panel-board-support {
+  display: grid; grid-auto-rows: 44px; align-content: start; gap: 4px;
+  padding-right: 6px; border-right: 1px solid var(--edge-lo, #0f0e0c);
+}
+.panel-board-combat {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 44px; gap: 4px;
+}
+.panel-slot {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 2px 4px;
+  background: linear-gradient(180deg, #35322b 0%, #24221d 100%);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 3px;
+  color: var(--ink); font: inherit; font-size: 11px; line-height: 1.15;
+  text-align: center; cursor: pointer;
+}
+/* A filled slot stacks its silhouette over its name, which is the only way to
+   fit both into a 44px square. */
+.panel-slot { flex-direction: column; gap: 1px; }
+.panel-slot-icon { width: 20px; height: 20px; opacity: 0.9; }
+.panel-slot-name { overflow: hidden; font-size: 10px; }
+.panel-chip-icon { width: 16px; height: 16px; opacity: 0.9; margin-right: 4px; vertical-align: -3px; }
+/* An empty slot is a hole in the establishment, not a button with a label:
+   quieter ground, a lighter plus, no bevel to suggest something is there. */
+.panel-slot.is-empty {
+  background: rgba(0,0,0,0.22); box-shadow: none;
+  border-style: dashed; border-color: #3a352c; color: var(--ink-dim);
+  font-size: 15px;
+}
+/* Establishment the division has not used. Present, so the grid still says how
+   big a division may be, but quiet enough not to look like 23 buttons. */
+.panel-slot.is-spare {
+  background: rgba(0,0,0,0.14); box-shadow: none;
+  border-style: dashed; border-color: #2a251e; cursor: default;
+}
+
+/* Three columns of numbers, as the reference has them: what the division is,
+   what it does in a fight, and what it costs. They wrap to two on a narrow
+   screen rather than shrinking the type. */
+.panel-stattable {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 6px; margin-bottom: 8px;
+}
+.panel-statcol {
+  background: var(--panel, #23221e);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 3px;
+  padding: 5px 7px 6px;
+}
+.panel-statcol-h {
+  font-size: 11px; color: var(--accent); letter-spacing: 0.06em;
+  padding-bottom: 3px; margin-bottom: 3px;
+  border-bottom: 1px solid #100f0d;
+}
+.panel-statline {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 11px; line-height: 1.6;
+}
+.panel-statline-k { color: var(--ink-dim); }
+/* Numbers large and light, names small and dark -- the rule the reference
+   follows everywhere and the one that makes a dense table readable. */
+.panel-statline-v { color: var(--ink); font-weight: 600; }
+.panel-statline-v.is-short { color: var(--bad, #d8574a); }
+/* What a mark has changed, beside the number it changed. The reference puts a
+   green triangle here and it is the only reason the window is worth opening
+   twice: the second visit is to see what the last decision bought. */
+.panel-delta { font-size: 10px; min-width: 42px; text-align: right; }
+.panel-delta.is-up { color: #7fe07f; }
+.panel-delta.is-down { color: #d8574a; }
+
+/* The Adjusters box. */
+.panel-adjusters {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 5px; margin-bottom: 8px;
+}
+.panel-adjuster {
+  background: var(--panel, #23221e);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 3px;
+  padding: 4px 6px 5px;
+}
+.panel-adjuster-h { font-size: 11px; color: var(--ink); margin-bottom: 2px; }
+.panel-adjuster-nums {
+  display: flex; flex-wrap: wrap; gap: 2px 7px; font-size: 11px;
+}
+/* Each figure stays whole. Without this the row broke between the label and
+   its number and the box read "攻-10% 防 / +0% 速 +0%". */
+.panel-adjuster-n { color: var(--ink-dim); white-space: nowrap; }
+.panel-adjuster-n.is-good { color: #7fe07f; }
+.panel-adjuster-n.is-bad { color: #d8574a; }
+.panel-adjuster-fit { font-size: 10px; color: var(--ink-dim); margin-top: 2px; }
 /* A garrison row the player has picked out of the stack. Splitting one
    formation off a province was impossible from anywhere before this. */
 .panel-row.is-picked {
@@ -760,6 +927,33 @@ button:active { transform: scale(0.96); }
 .panel-row.wide-row.is-blocked { color: #8b8371; }
 .panel-row-tag { font-size: 12px; color: var(--accent); flex: none; }
 .panel-row.wide-row.is-blocked .panel-row-tag { color: var(--ink-dim); }
+/* Declaring war is the one row on the relations sheet that cannot be undone,
+   so it is coloured the way the button that used to carry it was. */
+.panel-row.wide-row.is-danger .panel-row-title { color: #f0a49a; }
+/* A country at war with the player, in the list. The is-hostile plate above
+   cannot be used here: wide-row declares a transparent background at the same
+   specificity and later in the sheet, so it wins and the enemies stopped
+   standing out. A marker down the edge works on a borderless row and does not
+   fight the plate rules at all. */
+.panel-row.wide-row.is-hostile { box-shadow: inset 2px 0 0 #b4544a; }
+.panel-row.wide-row.is-hostile .panel-row-title { color: #f0a49a; }
+/* The country card at the head of the relations sheet: the flag at a size
+   that can actually be recognised, which the 26px list swatch cannot. */
+.panel-nation {
+  display: flex; align-items: flex-start; gap: 10px; padding: 9px 8px;
+  background: linear-gradient(180deg, #35312a 0%, #272420 100%);
+  border: 1px solid #100f0d; box-shadow: var(--bevel); border-radius: 2px;
+}
+.panel-nation-flag {
+  width: 64px; height: 42px; flex: 0 0 auto; object-fit: cover;
+  border: 1px solid #8a7f6a;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.75);
+}
+.panel-nation-body { flex: 1 1 auto; min-width: 0; }
+.panel-nation-name {
+  font-size: 16px; font-weight: 700; letter-spacing: var(--track);
+  overflow-wrap: anywhere;
+}
 
 /* A section heading that opens and closes. Sized as a full-width control,
    because it is one. */
@@ -974,6 +1168,21 @@ button:active { transform: scale(0.96); }
 }
 /* A general with more divisions than he can handle is the one number on this
    panel the player has to notice, so it is the one thing painted in alarm. */
+/* The order of battle. Rows are buttons: tapping one takes that division out
+   of the formation's hands and into the player's, without dissolving the
+   formation around it. */
+.panel-oob { margin-top: 6px; }
+.panel-oob-row {
+  display: flex; align-items: center; width: 100%;
+  min-height: 44px; padding: 5px 8px; margin-bottom: 3px;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid #100f0d; border-left: 2px solid #3a352c; border-radius: 2px;
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.panel-oob-row.is-fighting { border-left-color: #d8574a; }
+/* A division following an order of its own rather than the army's plan. */
+.panel-oob-row.is-detached { border-left-color: var(--accent); }
+
 .panel-army-head.is-over .panel-army-count {
   color: var(--danger); border-color: #4a1f1a; font-weight: 700;
 }

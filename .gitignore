@@ -13,6 +13,8 @@ tests/e2e/__screenshots__/determinism-check.png
 # the way. None of them are part of the project.
 *shot*.mjs
 /.*.mjs
+# and the images they produce
+.*.png
 
 # Throwaway probe scripts. Review agents write these at the repo root so
 # their imports resolve; three of them were swept into a commit by git add -A
@@ -20,3 +22,4 @@ tests/e2e/__screenshots__/determinism-check.png
 .audit-*
 .ad-*
 .*.mjs
+.*.mts

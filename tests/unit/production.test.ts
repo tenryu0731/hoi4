@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addProductionLine, buildingLevel, canQueueBuilding, computeResourceOutput,
-  freeCivilianFactories, queueBuilding, recomputeFactories, setLineFactories,
-  tickEconomyDaily,
+  constructionAllocation, freeCivilianFactories, queueBuilding, recomputeFactories,
+  setLineFactories, tickEconomyDaily,
 } from '../../src/sim/economy/production';
 import {
   BASE_EFFICIENCY, BUILDING_CAP, BUILDING_COST, EQUIPMENT, FACTORY_OUTPUT,
@@ -240,6 +240,62 @@ describe('construction', () => {
     runDays(f, 2);
     expect(buildingLevel(f.state, stateId, 'military_factory')).toBe(before + 1);
     expect(ger.constructionQueue.length).toBe(0);
+  });
+
+  it('spends the budget down the queue and starves what is past the end', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    ger.constructionQueue = [];
+    ger.economy.consumerGoodsRatio = 0;
+    recomputeFactories(f.state, ger.id);
+
+    // Enough projects that the budget cannot reach the last of them: each item
+    // takes up to fifteen factories, so three is past the end for any country
+    // in 1936.
+    // A state's id is its index: the runtime array is sparse and carries no
+    // id field of its own.
+    const states = f.state.states
+      .map((st, id) => ({ st, id }))
+      .filter((x) => x.st && canQueueBuilding(f.state, ger, x.id, 'civilian_factory'))
+      .slice(0, 3);
+    expect(states.length).toBe(3);
+    for (const x of states) queueBuilding(f.state, ger, x.id, 'civilian_factory');
+    expect(ger.constructionQueue.length).toBe(3);
+
+    const allocation = constructionAllocation(f.state, ger);
+    const last = ger.constructionQueue[2];
+    expect(allocation.get(ger.constructionQueue[0].id) ?? 0).toBeGreaterThan(0);
+    expect(allocation.get(last.id) ?? 0).toBe(0);
+
+    // And the tick agrees with the allocation the panel is shown: an item with
+    // no factories makes no progress at all.
+    runDays(f, 20);
+    expect(ger.constructionQueue[0].progress).toBeGreaterThan(0);
+    expect(last.progress).toBe(0);
+  });
+
+  it('moves a starved project to the head of the queue when told to', () => {
+    const f = makeFixture();
+    const ger = f.country('GER');
+    ger.constructionQueue = [];
+    ger.economy.consumerGoodsRatio = 0;
+    recomputeFactories(f.state, ger.id);
+    const states = f.state.states
+      .map((st, id) => ({ st, id }))
+      .filter((x) => x.st && canQueueBuilding(f.state, ger, x.id, 'civilian_factory'))
+      .slice(0, 3);
+    for (const x of states) queueBuilding(f.state, ger, x.id, 'civilian_factory');
+    const last = ger.constructionQueue[2];
+    expect(constructionAllocation(f.state, ger).get(last.id) ?? 0).toBe(0);
+
+    const sim = new Simulation(f.state, f.index);
+    sim.execute({ t: 'reorderConstruction', country: ger.id, item: last.id, toIndex: 0 });
+    expect(ger.constructionQueue[0].id).toBe(last.id);
+    expect(ger.constructionQueue.length).toBe(3);
+    expect(constructionAllocation(f.state, ger).get(last.id) ?? 0).toBeGreaterThan(0);
+
+    runDays(f, 20);
+    expect(last.progress).toBeGreaterThan(0);
   });
 
   it('builds nothing without free civilian factories', () => {

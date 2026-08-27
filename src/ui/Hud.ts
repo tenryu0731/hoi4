@@ -2,7 +2,9 @@ import type { Game } from '../app/Game';
 import type { MapMode } from '../render/palette';
 import { formatDateLong } from '../sim/time/calendar';
 import { RESOURCE_TYPES, type GameEvent, type ResourceType } from '../sim/core/types';
-import { PANELS, formatNumber, frontCandidates, setSheetCloser, type PanelId } from './panels';
+import {
+  PANELS, formatNumber, frontCandidates, openNationId, setSheetCloser, type PanelId,
+} from './panels';
 import { HUD_CSS } from './hud.css';
 import { collectAlerts } from './alerts';
 import { createSheetView } from './sheetView';
@@ -282,6 +284,17 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   const orderHint = el('div', 'hud-order');
   const orderRow = el('div', 'hud-order-row');
   const orderText = el('span', 'hud-order-text', '');
+  // Calling off a march. `stopDivisions` has been in the command bus since it
+  // was written and nothing had ever sent it: an order, once given, could not
+  // be taken back -- the only way to stop a division was to order it somewhere
+  // else. It appears only while something is actually moving, so the bar stays
+  // as narrow as it can.
+  const orderStop = el('button', 'hud-order-btn', UI.orderStop);
+  orderStop.setAttribute('aria-label', UI.orderStopLabel);
+  orderStop.addEventListener('click', () => {
+    game.issue({ t: 'stopDivisions', divisions: [...game.selection.divisions] });
+    syncOrder();
+  });
   const orderAssign = el('button', 'hud-order-btn', UI.orderAssign);
   orderAssign.setAttribute('aria-label', UI.orderAssignLabel);
   const orderFront = el('button', 'hud-order-btn', UI.orderDrawFront);
@@ -299,7 +312,7 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // lower as the game runs. Measured: a tap aimed at a counter at y=266
   // landed on the second row's 軍へ編成 button and opened its menu, while
   // elementFromPoint checked a moment earlier had said CANVAS.
-  orderRow.append(orderText, orderAssign, orderFront, orderCancel);
+  orderRow.append(orderText, orderStop, orderAssign, orderFront, orderCancel);
   const orderMenu = el('div', 'hud-order-menu');
   orderHint.append(orderRow, orderMenu);
 
@@ -415,6 +428,13 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
     if (!on) { closeOrderMenu(); return; }
     setText(orderText, UI.orderHint(live));
     orderFront.classList.toggle('is-dim', selectionArmy() === null);
+
+    let marching = 0;
+    for (const id of game.selection.divisions) {
+      const d = game.state.divisions[id];
+      if (d && !d.dead && d.path.length > 0) marching++;
+    }
+    orderStop.style.display = marching > 0 ? '' : 'none';
 
     // An open chip row covers the map. Anything that changes what is selected
     // means the player has gone back to the ground, so it stops standing over
@@ -598,6 +618,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
       setText(sheetTitle, panelTitle(panel.id));
       panel.build(game, sheetBody);
       panel.refresh?.(game, sheetBody);
+      // A new panel starts at its own top. The body is one scrolling element
+      // reused by every panel, so opening the relations sheet from a country
+      // three screens down the diplomacy list used to land halfway through the
+      // action list, with the flag and the name above the fold.
+      sheetBody.scrollTop = 0;
       sheet.classList.add('is-open');
     }
     for (const b of navButtons) b.classList.toggle('is-active', b.dataset.panel === openPanel);
@@ -610,8 +635,11 @@ export function mountHud(game: Game, root: HTMLElement): () => void {
   // designer from the army list, the province sheet from a tap on the map.
   game.openPanel = (id) => togglePanel(id as PanelId | null);
 
-  /** The province panel is titled with the place it is showing. */
+  /** Two panels are titled with the thing they are showing. */
   function panelTitle(id: PanelId): string {
+    if (id === 'nation') {
+      return UI.relationsWith(country(game.state.countries[openNationId()].tag));
+    }
     if (id !== 'province') return PANELS[id].title;
     const sel = game.selection.province;
     return sel === null ? PANELS.province.title : game.index.get(sel).name;

@@ -88,6 +88,16 @@ export interface BattalionDef {
   maxSpeedKmh: number;
 }
 
+/**
+ * How big a division may be.
+ *
+ * Lived in Simulation.ts, with a second copy in the designer panel that had to
+ * be kept in step by hand. They belong beside the battalion table they are
+ * limits on.
+ */
+export const MAX_BATTALIONS = 24;
+export const MAX_SUPPORTS = 4;
+
 export const BATTALIONS: Record<BattalionType, BattalionDef> = {
   infantry: {
     id: 'infantry', name: 'Infantry', equipment: { infantry_equipment: 100 },

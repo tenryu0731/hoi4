@@ -4,8 +4,8 @@ import { Simulation } from '../../src/sim/Simulation';
 import { TimeEngine } from '../../src/sim/time/TimeEngine';
 import {
   OPEN_MARKET_SHARE, RESOURCE_PER_FACTORY, availableFrom, availableToAI, canTradeWith,
-  closeTrade, exportShare, factoriesCommitted, factoriesEarned, openTrade, tradeFlow,
-  tradesOf,
+  closeTrade, exportShare, factoriesCommitted, factoriesEarned, maxPurchase, openTrade,
+  tickTradeDaily, tradeFlow, tradesOf,
 } from '../../src/sim/economy/trade';
 import { declareWar, joinFaction } from '../../src/sim/diplomacy/diplomacy';
 import { tickEconomyDaily } from '../../src/sim/economy/production';
@@ -35,12 +35,17 @@ describe('the world market', () => {
     const civBefore = ger.economy.civilianFactories;
     const romBefore = rom.economy.civilianFactories;
 
-    expect(availableFrom(f.state, { index: f.index }, rom.id, 'oil'))
-      .toBeGreaterThanOrEqual(RESOURCE_PER_FACTORY);
-    expect(openTrade(f.state, { index: f.index }, ger.id, rom.id, 'oil', 3)).toBe(true);
+    const ctx = { index: f.index };
+    const pool = availableFrom(f.state, ctx, rom.id, 'oil');
+    expect(pool).toBeGreaterThan(0);
+    expect(openTrade(f.state, ctx, ger.id, rom.id, 'oil', 3)).toBe(true);
 
-    expect(tradeFlow(f.state, ger.id).imports.oil).toBe(3 * RESOURCE_PER_FACTORY);
-    expect(tradeFlow(f.state, rom.id).exports.oil).toBe(3 * RESOURCE_PER_FACTORY);
+    // A factory buys the rate or the seller's remainder, whichever is smaller.
+    // Romania is a small producer, so three factories take everything it has
+    // on the market rather than three times the rate.
+    const shipped = Math.min(3 * RESOURCE_PER_FACTORY, pool);
+    expect(tradeFlow(f.state, ctx, ger.id).imports.oil).toBeCloseTo(shipped, 5);
+    expect(tradeFlow(f.state, ctx, rom.id).exports.oil).toBeCloseTo(shipped, 5);
     expect(factoriesCommitted(f.state, ger.id)).toBe(3);
     expect(factoriesEarned(f.state, rom.id)).toBe(3);
 
@@ -60,9 +65,12 @@ describe('the world market', () => {
     tickEconomyDaily(f.state, ctx);
     expect(ger.economy.resources.oil.produced).toBe(0);
 
+    const pool = availableFrom(f.state, ctx, rom.id, 'oil');
     openTrade(f.state, ctx, ger.id, rom.id, 'oil', 4);
     tickEconomyDaily(f.state, ctx);
-    expect(ger.economy.resources.oil.produced).toBe(4 * RESOURCE_PER_FACTORY);
+    expect(ger.economy.resources.oil.produced)
+      .toBeCloseTo(Math.min(4 * RESOURCE_PER_FACTORY, pool), 5);
+    expect(ger.economy.resources.oil.produced).toBeGreaterThan(0);
   });
 
   it('will not sell more than the trade law puts on the market', () => {
@@ -74,13 +82,68 @@ describe('the world market', () => {
     const rom = f.country('ROM');
     const pool = availableFrom(f.state, ctx, rom.id, 'oil');
     // Buying the lot leaves nothing behind, and the next buyer is told so.
-    const all = Math.floor(pool / RESOURCE_PER_FACTORY);
+    // Rounded up, because the last factory takes the remainder rather than
+    // leaving it stranded -- which is the whole reason the rate can be 8.
+    const all = Math.ceil(pool / RESOURCE_PER_FACTORY);
     openTrade(f.state, ctx, f.country('GER').id, rom.id, 'oil', all);
-    expect(availableFrom(f.state, ctx, rom.id, 'oil')).toBeLessThan(RESOURCE_PER_FACTORY);
+    expect(availableFrom(f.state, ctx, rom.id, 'oil')).toBe(0);
     expect(openTrade(f.state, ctx, f.country('ITA').id, rom.id, 'oil', 1)).toBe(false);
+
+    // However many factories are pointed at it, a mine ships what it digs up.
+    expect(tradeFlow(f.state, ctx, rom.id).exports.oil).toBeCloseTo(pool, 5);
+
     // And the share is the trade law's, not the whole of production.
     expect(exportShare(rom)).toBeGreaterThan(0);
     expect(exportShare(rom)).toBeLessThan(1);
+  });
+
+  it('lets one factory take a remainder too small for a full load', () => {
+    const f = rig();
+    const ctx = { index: f.index };
+    tickEconomyDaily(f.state, ctx);
+    const rom = f.country('ROM');
+    const pool = availableFrom(f.state, ctx, rom.id, 'oil');
+    // A seller with less than one factory-load left. This is the case the old
+    // rate existed to avoid: at 8 units a factory and a floor, the world's
+    // tungsten -- six producers offering 1.3, 3.6, 1.2, 1.2, 0.8 and 2.4 --
+    // was untradeable in its entirety.
+    const nearlyAll = Math.floor(pool / RESOURCE_PER_FACTORY);
+    if (nearlyAll > 0) {
+      openTrade(f.state, ctx, f.country('GER').id, rom.id, 'oil', nearlyAll);
+    }
+    const left = availableFrom(f.state, ctx, rom.id, 'oil');
+    expect(left).toBeGreaterThan(0);
+    expect(left).toBeLessThan(RESOURCE_PER_FACTORY);
+
+    expect(maxPurchase(f.state, ctx, f.country('ITA').id, rom.id, 'oil')).toBeGreaterThan(0);
+    expect(openTrade(f.state, ctx, f.country('ITA').id, rom.id, 'oil', 1)).toBe(true);
+    expect(tradeFlow(f.state, ctx, f.country('ITA').id).imports.oil).toBeCloseTo(left, 5);
+  });
+
+  it('hands back a factory a shrunken deal is no longer using', () => {
+    const f = rig();
+    const ctx = { index: f.index };
+    tickEconomyDaily(f.state, ctx);
+    const ger = f.country('GER');
+    const rom = f.country('ROM');
+    const pool = availableFrom(f.state, ctx, rom.id, 'oil');
+    const bought = Math.ceil(pool / RESOURCE_PER_FACTORY);
+    expect(openTrade(f.state, ctx, ger.id, rom.id, 'oil', bought)).toBe(true);
+
+    // Romania loses most of its wells. The contract is not broken -- it simply
+    // ships less -- but the factories it no longer needs go back to Germany
+    // rather than sitting on the market buying nothing.
+    for (const st of f.state.states) {
+      if (st && st.controller === rom.id) st.controller = f.country('SOV').id;
+    }
+    const free = ger.economy.freeCivilianFactories;
+    // What a country has on the market is cached for the day it was computed,
+    // so the loss is not visible until the calendar moves.
+    f.state.clock.totalDays += 1;
+    tickTradeDaily(f.state, ctx);
+    const deal = f.state.trades!.find((d) => d.buyer === ger.id && d.seller === rom.id);
+    expect(deal?.factories ?? 0).toBeLessThan(bought);
+    expect(ger.economy.freeCivilianFactories).toBeGreaterThan(free);
   });
 
   it('keeps part of every producer open to a buyer who arrives late', () => {

@@ -8,8 +8,10 @@ import {
 } from './weather';
 import { TERRAIN } from '../core/data';
 import { jitter } from '../core/rng';
+import { TERRAIN_TYPES } from '../core/types';
 import type {
-  Combat, CountryId, Division, DivisionTemplate, GameState, ProvinceId,
+  Combat, CountryId, Division, DivisionTemplate, EquipmentType, GameState, ProvinceId,
+  TerrainType,
 } from '../core/types';
 import type { ProvinceIndex } from '../map/ProvinceIndex';
 
@@ -131,6 +133,51 @@ export function equipmentRatio(state: GameState, d: Division): number {
 }
 
 /** Combined multiplier from equipment, supply and experience. */
+/**
+ * What the army is still short of, by equipment type.
+ *
+ * The production panel prints a stockpile, which answers "how much is in the
+ * depot" and not the question a player is actually asking -- whether the
+ * divisions in the field are equipped. A stockpile of 3,000 rifles reads
+ * comfortable next to an army 12,000 short.
+ *
+ * Cached for a day, the way tradableOutput is: it walks every live division
+ * and its template bill, the panel asks once a frame, and nothing it depends
+ * on moves faster than the daily reinforcement pass.
+ */
+const DEMAND_CACHE = new WeakMap<GameState, {
+  day: number;
+  byCountry: Map<CountryId, Partial<Record<EquipmentType, number>>>;
+}>();
+
+export function equipmentShortfall(
+  state: GameState, owner: CountryId,
+): Partial<Record<EquipmentType, number>> {
+  let cache = DEMAND_CACHE.get(state);
+  if (!cache || cache.day !== state.clock.totalDays) {
+    cache = { day: state.clock.totalDays, byCountry: new Map() };
+    DEMAND_CACHE.set(state, cache);
+  }
+  const hit = cache.byCountry.get(owner);
+  if (hit) return hit;
+
+  const out: Partial<Record<EquipmentType, number>> = {};
+  for (const d of state.divisions) {
+    if (d.dead || d.owner !== owner) continue;
+    const base = state.countries[owner].templates.find((t) => t.id === d.templateId);
+    if (!base) continue;
+    const tpl = effectiveTemplate(state, owner, base);
+    for (const key of Object.keys(tpl.equipmentNeed) as EquipmentType[]) {
+      const need = tpl.equipmentNeed[key] ?? 0;
+      const held = d.equipment[key] ?? 0;
+      if (held >= need) continue;
+      out[key] = (out[key] ?? 0) + (need - held);
+    }
+  }
+  cache.byCountry.set(owner, out);
+  return out;
+}
+
 export function effectiveness(state: GameState, d: Division): number {
   const eq = equipmentRatio(state, d);
   // Supply never zeroes a unit's output outright; a starving formation still
@@ -223,6 +270,66 @@ function mountainShare(tpl: DivisionTemplate): number {
 
 /** What full mountain training is worth where the ground is against you. */
 const MOUNTAINEER_BONUS = 0.25;
+
+/**
+ * What this template is worth on each kind of ground, as multipliers.
+ *
+ * Every number here is read out of the same places the battle reads them --
+ * TERRAIN for the ground, mountainShare and MOUNTAINEER_BONUS for the troops
+ * -- because a panel that computes its own version of a modifier is a panel
+ * that will eventually disagree with the fight.
+ *
+ * ATTACKER_PENALTY is deliberately not folded in. It is the cost of being the
+ * side going forward and it applies on every kind of ground, so including it
+ * made plains -- the terrain that modifies nothing -- read as a 10% penalty,
+ * which is a true number answering a question nobody asked of this box.
+ *
+ * This is the reference screenshot's Adjusters box. The mechanics were all
+ * there and none of them were on screen: a player could field mountaineers
+ * for twelve years without ever being told the map has 74 mountain provinces
+ * and that their training is worth 25% on every one of them.
+ */
+export interface TerrainProfile {
+  terrain: TerrainType;
+  /** Multiplier on this division's fire when it is the attacker. */
+  attack: number;
+  /** Multiplier on its defence when it is holding. */
+  defence: number;
+  /** Multiplier on its march speed. */
+  speed: number;
+  /** Combat width the ground allows, which is how much of it can be brought. */
+  width: number;
+}
+
+export function terrainProfile(tpl: DivisionTemplate): TerrainProfile[] {
+  const share = mountainShare(tpl);
+  return TERRAIN_TYPES.map((id) => {
+    const def = TERRAIN[id];
+    // The same test the battle makes: mountain training pays on the high
+    // ground and on the hills, and nowhere else.
+    const rough = id === 'mountain' || id === 'hills';
+    const trained = rough ? MOUNTAINEER_BONUS * share : 0;
+    return {
+      terrain: id,
+      attack: def.attackMod * (1 + trained),
+      defence: def.defenceMod * (1 + trained),
+      speed: def.speed,
+      width: def.combatWidth,
+    };
+  });
+}
+
+/**
+ * How many of this division fit into a battle on each kind of ground.
+ *
+ * Combat width is the mechanic that decides whether a big division is worth
+ * building, and it was invisible: the designer printed the width and never
+ * said what it was a fraction of.
+ */
+export function divisionsPerBattle(tpl: DivisionTemplate, combatWidth: number): number {
+  if (tpl.width <= 0) return 0;
+  return Math.floor(combatWidth / tpl.width);
+}
 
 /** True when this formation marches: the infantry a foot general knows. */
 function isFootborne(tpl: DivisionTemplate): boolean {

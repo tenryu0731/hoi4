@@ -234,6 +234,117 @@ function unitSvg(body: string): string {
   );
 }
 
+/**
+ * An equipment silhouette.
+ *
+ * Non-zero winding, not even-odd like `solid`. These are built by piling
+ * simple shapes on top of each other -- a hull, a turret, a gun -- and under
+ * even-odd every overlap would punch a hole through the very place the parts
+ * join. Nothing here needs an interior cutout; what they need is to survive
+ * being 28px wide in a production row, which is what the reference draws
+ * beside every line and what this project had nowhere at all.
+ */
+function silhouette(body: string): string {
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" ` +
+    `width="${S}" height="${S}" fill="currentColor" fill-rule="nonzero">` +
+    body +
+    `</svg>`
+  );
+}
+
+/**
+ * One per equipment type, keyed by the type the simulation uses.
+ *
+ * Drawn side-on, which is how the reference draws them and how a rifle, a
+ * truck and a tank are told apart at a glance. The two aircraft are the
+ * exception: an aeroplane from the side is a smear, so they are plan views.
+ */
+export const EQUIPMENT_ICONS: Record<string, string> = {
+  // Rifle, drawn corner to corner. Laid out horizontally it occupied the
+  // middle third of its box and nothing else, so in a 44px plate it was a
+  // thin smear with air above and below it; on the diagonal the same shape
+  // fills the square and the length of a rifle is what you see first.
+  // Butt, receiver, barrel, magazine, in that order along the axis.
+  infantry_equipment: silhouette(
+    '<path d="M6 28.5 13.1 22.9 9.1 17.9 2 23.5z"/>' +
+    '<path d="M11.6 22.8 21.1 15.3 18.3 11.9 8.9 19.3z"/>' +
+    '<path d="M19.6 15.1 29 7.7 27.6 5.9 18.2 13.3z"/>' +
+    '<path d="M16.9 18.6 19.4 21.7 16.9 23.7 14.4 20.6z"/>',
+  ),
+  // A crate, drawn as slats with a lid. A plain filled rectangle is a
+  // rectangle; the gaps between the boards are what make it a crate.
+  support_equipment: silhouette(
+    '<path d="M2.4 8h27.2v3.6H2.4z"/>' +
+    '<path d="M4 11.6h6v14.4H4z"/>' +
+    '<path d="M13 11.6h6v14.4h-6z"/>' +
+    '<path d="M22 11.6h6v14.4h-6z"/>' +
+    // A band across the boards. Without it the three slats read as a numeral.
+    '<path d="M2.4 16.6h27.2v3.2H2.4z"/>',
+  ),
+  // Field gun: a raised barrel, the breech under it, one road wheel and the
+  // trail running back. The first attempt gave it a six-radius wheel and a
+  // barrel lying almost flat, and the parts merged into a blob with a stick
+  // through it. What makes a howitzer legible at this size is the angle of
+  // the barrel against the horizontal of the trail.
+  artillery: silhouette(
+    '<path d="M12.8 18.4 29.6 9 28 6 11.2 15.4z"/>' +
+    '<path d="M8.6 13.4h5.6v6.6H8.6z"/>' +
+    '<circle cx="10.4" cy="22.6" r="4.8"/>' +
+    '<path d="M10.6 21.6 2.2 26.4l1.5 2.6 8.4-4.8z"/>',
+  ),
+  // Truck: box body, cab with a sloped bonnet, two wheels.
+  motorized: silhouette(
+    '<path d="M2 11.6h16v10.6H2z"/>' +
+    '<path d="M18 15h5.6l4.6 4.6v2.6H18z"/>' +
+    '<circle cx="8" cy="24.4" r="3.4"/>' +
+    '<circle cx="23.2" cy="24.4" r="3.4"/>',
+  ),
+  // Light tank: shallow hull, small turret, four road wheels.
+  light_armor: silhouette(
+    '<path d="M3 16.8h26v6.2H3z"/>' +
+    '<path d="M11 11.8h9v5h-9z"/>' +
+    '<path d="M19.6 13.4h9.8v1.9h-9.8z"/>' +
+    '<circle cx="7.2" cy="24" r="2.6"/>' +
+    '<circle cx="13.4" cy="24" r="2.6"/>' +
+    '<circle cx="19.6" cy="24" r="2.6"/>' +
+    '<circle cx="25.8" cy="24" r="2.6"/>',
+  ),
+  // Medium tank: sloped glacis, taller turret, a longer gun. It has to read as
+  // the bigger of the two next to the light tank in a list, not merely as a
+  // different tank.
+  medium_armor: silhouette(
+    '<path d="M2 15.6h28v7.4H2z"/>' +
+    '<path d="M2 15.6 8 11.4h16l6 4.2z"/>' +
+    '<path d="M11.6 6.6h9.4v5.2h-9.4z"/>' +
+    '<path d="M20.6 8h9.6v2h-9.6z"/>' +
+    '<circle cx="6" cy="24" r="2.9"/>' +
+    '<circle cx="12" cy="24" r="2.9"/>' +
+    '<circle cx="18" cy="24" r="2.9"/>' +
+    '<circle cx="24" cy="24" r="2.9"/>',
+  ),
+  // Fighter, from above: straight wing, narrow fuselage.
+  fighter: silhouette(
+    '<path d="M14.4 2.4h3.2l1.4 24h-6z"/>' +
+    '<path d="M2 13.6h28v4.2H2z"/>' +
+    '<path d="M8.4 24h15.2v3.2H8.4z"/>',
+  ),
+  // Close support, from above: a cranked wing, which is the shape that tells
+  // it apart from the fighter at this size.
+  cas: silhouette(
+    '<path d="M14.2 2.4h3.6l1.4 24h-6.4z"/>' +
+    '<path d="M2 12.4 11.4 15.6h9.2L30 12.4v4.4l-9.4 3.2h-9.2L2 16.8z"/>' +
+    '<path d="M8.8 24h14.4v3.2H8.8z"/>',
+  ),
+  // Cargo ship: raked hull, deck house, funnel, mast.
+  convoy: silhouette(
+    '<path d="M2 18.8h28l-4 7.4H6z"/>' +
+    '<path d="M11.6 11.6h7.4v7.4h-7.4z"/>' +
+    '<path d="M13.6 7.4h3.2v4.4h-3.2z"/>' +
+    '<path d="M22 9.6h1.8v9.4H22z"/>',
+  ),
+};
+
 /** Standard APP-6 style symbols, drawn inside the unit frame. */
 export const UNIT_ICONS: Record<string, string> = {
   infantry: unitSvg('<path d="M6 6 42 26M42 6 6 26"/>'),
@@ -250,4 +361,4 @@ export const UNIT_ICONS: Record<string, string> = {
   naval: unitSvg('<path d="M10 20c3 4 8 6 14 6s11-2 14-6"/><path d="M24 26V8"/>'),
 };
 
-export const ALL_ICONS = { ...RESOURCE_ICONS, ...UI_ICONS };
+export const ALL_ICONS = { ...RESOURCE_ICONS, ...UI_ICONS, ...EQUIPMENT_ICONS };

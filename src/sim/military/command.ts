@@ -239,6 +239,9 @@ export function assignDivisions(
     const old = armyById(state, div.armyId);
     if (old) old.divisions = old.divisions.filter((x) => x !== divId);
     div.armyId = army ? army.id : null;
+    // Changing formation is a fresh start: whatever the division was doing on
+    // its own it now does under its new general's plan.
+    div.detached = false;
     if (army && !army.divisions.includes(divId)) army.divisions.push(divId);
   }
 }
@@ -321,7 +324,9 @@ export function tickCommanderExperienceDaily(state: GameState): void {
 }
 
 /** Army names as they read on a Japanese map: 第一軍, 第二軍, and so on. */
-const ORDINAL = ['第一', '第二', '第三', '第四', '第五', '第六', '第七', '第八', '第九', '第十'];
+export const ARMY_ORDINALS = [
+  '第一', '第二', '第三', '第四', '第五', '第六', '第七', '第八', '第九', '第十',
+];
 export const ARMY_SUFFIX = '軍';
 export const ARMY_GROUP_NAME = '軍集団';
 
@@ -329,7 +334,7 @@ export const ARMY_GROUP_NAME = '軍集団';
 export function nextArmyName(state: GameState, owner: CountryId): string {
   const taken = new Set(armiesOf(state, owner).map((a) => a.name));
   for (let i = 0; i < 40; i++) {
-    const name = `${ORDINAL[i] ?? String(i + 1)}${ARMY_SUFFIX}`;
+    const name = `${ARMY_ORDINALS[i] ?? String(i + 1)}${ARMY_SUFFIX}`;
     if (!taken.has(name)) return name;
   }
   return `${armiesOf(state, owner).length + 1}${ARMY_SUFFIX}`;

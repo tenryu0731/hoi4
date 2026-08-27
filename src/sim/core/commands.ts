@@ -1,6 +1,6 @@
 import type {
   ArmyId, ArmyOrder, BattalionType, BuildingType, CommanderId, CountryId, DivisionId,
-  EquipmentType, ProvinceId, ResourceType, StateId, SupportType, TechId,
+  EquipmentType, ProvinceId, ResourceType, StateId, SupportType, TechId, VariantModule,
 } from './types';
 import type { LawKind } from '../politics/politics';
 
@@ -25,6 +25,15 @@ export type Command =
   | { t: 'removeProductionLine'; country: CountryId; line: number }
   | { t: 'setLineFactories'; country: CountryId; line: number; factories: number }
   | { t: 'setLinePriority'; country: CountryId; line: number; priority: 0 | 1 | 2 | 3 }
+  /**
+   * Raises or lowers one module of one equipment type's mark. Stepping up
+   * costs army experience, which is only earned in combat; stepping down is
+   * free and refunds nothing.
+   */
+  | {
+      t: 'upgradeVariant'; country: CountryId; equipment: EquipmentType;
+      module: VariantModule; step: 1 | -1;
+    }
   | { t: 'queueConstruction'; country: CountryId; kind: BuildingType; state: StateId }
   | { t: 'cancelConstruction'; country: CountryId; item: number }
   | { t: 'reorderConstruction'; country: CountryId; item: number; toIndex: number }
@@ -33,7 +42,14 @@ export type Command =
   | { t: 'recruitDivision'; country: CountryId; template: number; province: ProvinceId }
   | { t: 'moveDivisions'; divisions: DivisionId[]; target: ProvinceId }
   | { t: 'stopDivisions'; divisions: DivisionId[] }
-  | { t: 'setDivisionOrder'; divisions: DivisionId[]; order: 'defend' | 'attack'; target?: ProvinceId }
+  /*
+   * There was a setDivisionOrder here, and it is gone: nothing in the game
+   * ever sent it, and both of its branches were something else wearing a
+   * different name. 'defend' did exactly what stopDivisions does, and
+   * 'attack' did exactly what moveDivisions does -- so it was a third way to
+   * spell two commands that already existed, and the one of the three that no
+   * button reached.
+   */
   // --- chain of command -----------------------------------------------------
   /**
    * Raises a new army, or an army group when `isArmyGroup` is set. An army
@@ -72,7 +88,10 @@ export type Command =
    * working abandons its progress, as it does in the real game.
    */
   | { t: 'startResearch'; country: CountryId; slot: number; tech: TechId }
-  | { t: 'cancelResearch'; country: CountryId; slot: number }
+  // `cancelResearch` used to sit here and nothing ever sent it. Emptying a
+  // slot is strictly worse than putting something else in it -- and
+  // `startResearch` already replaces a working slot outright -- so the only
+  // thing it could do for a player was waste a slot they had paid for.
 
   // --- national focus -------------------------------------------------------
   /** Cannot be changed once started; cancelling throws the progress away. */

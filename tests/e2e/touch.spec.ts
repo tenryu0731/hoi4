@@ -178,7 +178,20 @@ test.describe('touch input', () => {
           (p) => p.ownerTag === 'GER'
             && g.state.provinces[p.id].divisions.some((d) => g.state.divisions[d].owner === me),
         )!;
-        const target = g.index.provinces.find((p) => p.ownerTag === 'POL')!;
+        // The far end of our own ground, not the neighbour's. An army may not
+        // cross a border it has no right to cross, so a drag into Poland is
+        // now correctly refused -- and this test is about the gesture. Taken
+        // from the same land-connected piece of Germany, because East Prussia
+        // is German and cannot be marched to across the Polish Corridor.
+        const home = [...g.index.reachable(
+          ger.id, (id) => g.state.provinces[id].controller === me, { includeSea: false },
+        )];
+        let target = g.index.get(ger.id);
+        let far = 0;
+        for (const id of home) {
+          const d = g.index.distance(ger.id, id);
+          if (d > far) { far = d; target = g.index.get(id); }
+        }
         g.renderer.camera.centerOn(
           (ger.centerX + target.centerX) / 2,
           (ger.centerY + target.centerY) / 2,
@@ -377,7 +390,17 @@ test.describe('touch input', () => {
         (p) => p.ownerTag === 'GER'
           && g.state.provinces[p.id].divisions.some((d) => g.state.divisions[d].owner === me),
       )!;
-      const target = g.index.provinces.find((p) => p.ownerTag === 'POL')!;
+      // Our own ground: a drag into a neutral Poland is refused now, and this
+      // test is about an order surviving a pause.
+      const home = [...g.index.reachable(
+        ger.id, (id) => g.state.provinces[id].controller === me, { includeSea: false },
+      )];
+      let target = g.index.get(ger.id);
+      let far = 0;
+      for (const id of home) {
+        const d = g.index.distance(ger.id, id);
+        if (d > far) { far = d; target = g.index.get(id); }
+      }
       g.renderer.camera.centerOn(
         (ger.centerX + target.centerX) / 2,
         (ger.centerY + target.centerY) / 2,
@@ -702,6 +725,87 @@ test.describe('touch input', () => {
     expect(after.y).toBeGreaterThan(before.y + 100);
   });
 
+  test('a march can be called off', async ({ page }) => {
+    await bootGame(page);
+    // Set explicitly rather than by pressing pause: static mode has already
+    // stopped the clock, so pressing it would start the game and the division
+    // would arrive before the assertion -- at which point the control
+    // correctly disappears, because it only exists while something is moving.
+    await page.evaluate(() => window.__game!.setSpeed(0));
+
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const div = s.divisions.find((d) => d.owner === me && !d.dead)!;
+      const to = g.index.get(div.provinceId).neighbors
+        .find((n) => s.provinces[n] !== undefined)!;
+      g.selectDivisions([div.id], { centre: false });
+      g.issue({ t: 'moveDivisions', divisions: [div.id], target: to });
+      return { division: div.id, path: s.divisions[div.id].path.length };
+    });
+    // The premise: it really is marching.
+    expect(setup.path).toBeGreaterThan(0);
+
+    // The control only exists while something is moving, which is the whole
+    // reason it is worth having.
+    const stop = page.getByRole('button', { name: '移動を中止する' });
+    await expect(stop).toBeVisible();
+    await stop.click();
+
+    const after = await page.evaluate((id) => {
+      const d = window.__game!.state.divisions[id];
+      return { path: d.path.length, kind: d.order?.kind ?? null };
+    }, setup.division);
+    expect(after.path).toBe(0);
+    expect(after.kind).not.toBe('move');
+    await expect(stop).toBeHidden();
+  });
+
+  test('an army can be placed under an army group', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    // The scenario already puts the majors' armies under a group, so start by
+    // taking this one out again -- otherwise the test proves nothing about
+    // the control, which is what the first version of it did.
+    const ready = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const armies = (g.state.armies ?? []).filter((a) => a.owner === me);
+      const army = armies.find((a) => !a.isArmyGroup)!;
+      g.issue({ t: 'setArmyParent', country: me, army: army.id, group: null });
+      return {
+        army: army.id,
+        parent: army.parent,
+        groups: armies.filter((a) => a.isArmyGroup).length,
+      };
+    });
+    expect(ready.groups).toBeGreaterThan(0);
+    expect(ready.parent).toBeNull();
+
+    await page.evaluate(() => window.__game!.openPanel!('command'));
+    const head = page.locator('.panel-army-head').first();
+    await expect(head).toBeVisible();
+    // The chips live inside the expanded card.
+    await head.click();
+    const chip = page.locator('.panel-chip', { hasText: '軍集団へ' }).first();
+    await expect(chip).toBeVisible();
+    await chip.click();
+
+    const placed = await page.evaluate((id) => {
+      const g = window.__game!;
+      const armies = g.state.armies ?? [];
+      const army = armies.find((a) => a.id === id)!;
+      const group = armies.find((a) => a.id === army.parent);
+      return { parent: army.parent, listed: group?.children.includes(id) ?? false };
+    }, ready.army);
+    // Both ends of the link: a parent pointer with no matching child entry is
+    // what makes a hierarchy quietly wrong.
+    expect(placed.parent).not.toBeNull();
+    expect(placed.listed).toBe(true);
+  });
+
   test('the order bar raises an army from a selection and gives it a front', async ({ page }) => {
     await bootGame(page);
 
@@ -748,4 +852,283 @@ test.describe('touch input', () => {
     expect(plan.kind).toBe('front');
     expect(plan.front).toBeGreaterThan(0);
   });
+
+  test('a minor can be courted into the faction from the diplomacy panel', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    // Political power accrues over months, and the point of this test is the
+    // sequence of actions, not the wait. Everything else -- the opinion, the
+    // thresholds, the spending -- runs for real.
+    const start = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.countries[s.meta.playerCountry];
+      me.economy.politicalPower = 400;
+      const hun = s.countries.find((c) => c.tag === 'HUN')!;
+      return { me: me.id, hun: hun.id, faction: me.factionId };
+    });
+    expect(start.faction).not.toBeNull();
+
+    await page.evaluate(() => window.__game!.openPanel!('diplomacy'));
+    const row = page.locator('.panel-row[data-country]', { hasText: 'ハンガリー' }).first();
+    await expect(row).toBeVisible();
+    await row.click();
+
+    // The sheet is titled with the country whose relations it is showing.
+    await expect(page.locator('.hud-sheet-title')).toHaveText('ハンガリーとの関係');
+
+    // Nobody joins a bloc on day one: the invitation names the number it is
+    // waiting on rather than being a dead grey control.
+    const invite = page.locator('.panel-row.wide-row', { hasText: '陣営に招待' }).first();
+    await expect(invite).toBeDisabled();
+    await expect(invite.locator('.panel-row-tag')).toContainText('好感度');
+
+    const opinion = (): Promise<number> => page.evaluate((ids) => {
+      const c = window.__game!.state.countries[ids.hun];
+      return Math.round(c.diplomacy.opinion[ids.me] ?? 0);
+    }, start);
+    const before = await opinion();
+
+    // The advertised path, taken entirely through the panel.
+    await page.locator('.panel-row.wide-row', { hasText: '独立保障' }).first().click();
+    for (let i = 0; i < 4; i++) {
+      const improve = page.locator('.panel-row.wide-row', { hasText: '関係改善' }).first();
+      await expect(improve).toBeEnabled();
+      await improve.click();
+    }
+    expect(await opinion()).toBeGreaterThan(before);
+
+    await expect(invite).toBeEnabled();
+    await invite.click();
+
+    const after = await page.evaluate((ids) => {
+      const s = window.__game!.state;
+      const me = s.countries[ids.me];
+      return {
+        faction: s.countries[ids.hun].factionId,
+        mine: me.factionId,
+        listed: me.factionId !== null
+          ? s.factions[me.factionId].members.includes(ids.hun)
+          : false,
+        power: Math.round(me.economy.politicalPower),
+      };
+    }, start);
+    expect(after.faction).toBe(after.mine);
+    expect(after.listed).toBe(true);
+    // Every action was paid for: a guarantee, four rounds of diplomacy and the
+    // invitation itself.
+    expect(after.power).toBeLessThan(400 - 25 - 4 * 10);
+  });
+
+
+  test('a starved project can be pulled to the head of the build queue', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    // Three projects is past the end of any 1936 budget: each takes up to
+    // fifteen factories and the third gets none.
+    const queued = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.countries[s.meta.playerCountry];
+      me.constructionQueue.length = 0;
+      for (let id = 0; id < s.states.length && me.constructionQueue.length < 3; id++) {
+        const st = s.states[id];
+        if (!st || st.controller !== me.id) continue;
+        g.issue({
+          t: 'queueConstruction', country: me.id, kind: 'civilian_factory', state: id,
+        });
+      }
+      return me.constructionQueue.map((x) => x.id);
+    });
+    expect(queued.length).toBe(3);
+
+    await page.evaluate(() => window.__game!.openPanel!('construction'));
+    const rows = page.locator('[data-role="queue"] .panel-row[data-item]');
+    await expect(rows).toHaveCount(3);
+
+    // The panel says which of them the factories have actually reached, which
+    // is the reason to move one.
+    await expect(rows.nth(0)).not.toHaveClass(/is-idle/);
+    await expect(rows.last()).toHaveClass(/is-idle/);
+    await expect(rows.last().locator('.panel-row-sub')).toContainText('順番待ち');
+
+    // The head of the queue has nowhere to go, so its control is off.
+    await expect(rows.nth(0).getByRole('button', { name: /優先する$/ })).toBeDisabled();
+
+    // Two presses take the last project to the front.
+    await rows.last().getByRole('button', { name: /優先する$/ }).click();
+    await page.locator(`[data-role="queue"] [data-item="${queued[2]}"]`)
+      .getByRole('button', { name: /優先する$/ }).click();
+
+    const after = await page.evaluate(() => {
+      const me = window.__game!.state.countries[window.__game!.state.meta.playerCountry];
+      return me.constructionQueue.map((x) => x.id);
+    });
+    expect(after).toEqual([queued[2], queued[0], queued[1]]);
+
+    // And the list now draws in the order the factories will work down it.
+    const drawn = await rows.evaluateAll(
+      (nodes) => nodes.map((n) => Number((n as HTMLElement).dataset.item)),
+    );
+    expect(drawn).toEqual(after);
+    await expect(rows.nth(0)).not.toHaveClass(/is-idle/);
+  });
+
+
+  test('an army can be given a name of its own', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    const army = await page.evaluate(() => {
+      const g = window.__game!;
+      const me = g.state.meta.playerCountry;
+      const a = (g.state.armies ?? []).find((x) => x.owner === me && !x.isArmyGroup)!;
+      return { id: a.id, name: a.name };
+    });
+
+    await page.evaluate(() => window.__game!.openPanel!('command'));
+    const card = page.locator(`.panel-focus[data-army="${army.id}"]`);
+    await expect(card).toBeVisible();
+    // The field lives inside the expanded card.
+    await card.locator('.panel-army-head').click();
+
+    const field = card.locator('.panel-input');
+    await expect(field).toHaveValue(army.name);
+    await field.fill('南方軍集団');
+    await card.getByRole('button', { name: '名称変更' }).click();
+
+    const after = await page.evaluate((id) => {
+      const a = (window.__game!.state.armies ?? []).find((x) => x.id === id)!;
+      return a.name;
+    }, army.id);
+    expect(after).toBe('南方軍集団');
+    expect(after).not.toBe(army.name);
+    // And the card is relabelled, not just the state.
+    await expect(card.locator('.panel-focus-name').first()).toContainText('南方軍集団');
+  });
+
+
+  test('a division sent by hand says so, and can be put back under the plan', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+
+    const setup = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const army = (s.armies ?? []).find((a) => a.owner === me && !a.isArmyGroup)!;
+      // A plan for it to be following in the first place. Which enemy does
+      // not matter here -- what matters is that the army has standing orders,
+      // which is what makes leaving them mean something.
+      const enemy = s.countries.find((c) => c.id !== me && c.major)!;
+      g.issue({
+        t: 'setArmyOrder', country: me, army: army.id, order: { kind: 'front', against: enemy.id },
+      });
+      const div = s.divisions.find(
+        (d) => army.divisions.includes(d.id) && !d.dead && d.combatId === null,
+      )!;
+      const to = g.index.get(div.provinceId).neighbors
+        .find((n) => s.provinces[n] !== undefined)!;
+      g.issue({ t: 'moveDivisions', divisions: [div.id], target: to });
+      return { army: army.id, division: div.id, detached: div.detached === true };
+    });
+    // The order is what detaches it; the panel only reports what happened.
+    expect(setup.detached).toBe(true);
+
+    await page.evaluate(() => window.__game!.openPanel!('command'));
+    const card = page.locator(`.panel-focus[data-army="${setup.army}"]`);
+    await card.locator('.panel-army-head').click();
+
+    const row = card.locator('.panel-oob-row.is-detached');
+    await expect(row.first()).toBeVisible();
+    await expect(row.first()).toContainText('独立行動');
+
+    const rejoin = card.locator('.panel-chip', { hasText: '計画に復帰' });
+    await expect(rejoin).toBeVisible();
+    await rejoin.click();
+
+    const after = await page.evaluate((id) => {
+      const d = window.__game!.state.divisions[id];
+      return d.detached === true;
+    }, setup.division);
+    expect(after).toBe(false);
+    await expect(card.locator('.panel-oob-row.is-detached')).toHaveCount(0);
+    await expect(rejoin).toBeHidden();
+  });
+
+  test('a committed factory brings home what the seller can actually ship', async ({ page }) => {
+    await bootGame(page);
+    await page.addStyleTag({ content: '.hud-sheet { transition: none !important; }' });
+    await page.evaluate(() => window.__game!.openPanel!('trade'));
+
+    // Each resource is a section, and only the ones the country is short of
+    // open on their own -- on day one, before the economy has ticked, that is
+    // none of them. Open them all and shop.
+    const sections = page.locator('[data-role="trade-body"] .panel-section');
+    const count = await sections.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      const head = sections.nth(i);
+      const cls = (await head.getAttribute('class')) ?? '';
+      if (!cls.includes('is-open')) await head.click();
+    }
+
+    // The first seller anywhere in the panel that will actually sell.
+    const plus = page.locator('.panel-row-controls button:not([disabled])', {
+      hasText: '+',
+    }).first();
+    await expect(plus).toBeVisible();
+
+    const before = await page.evaluate(() => (window.__game!.state.trades ?? []).length);
+    await plus.click();
+
+    const after = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const deals = (s.trades ?? []).filter((d) => d.buyer === me);
+      return { count: (s.trades ?? []).length, factories: deals[0]?.factories ?? 0 };
+    });
+    expect(after.count).toBe(before + 1);
+    expect(after.factories).toBe(1);
+
+    // And the row says what that factory is bringing in, not just what it cost.
+    const row = page.locator('.panel-row', { hasText: '／日を輸入中' }).first();
+    await expect(row).toBeVisible();
+  });
+
+
+  test('a division cannot be sent into a country we are not at war with', async ({ page }) => {
+    await bootGame(page);
+
+    const result = await page.evaluate(() => {
+      const g = window.__game!;
+      const s = g.state;
+      const me = s.meta.playerCountry;
+      const div = s.divisions.find((d) => d.owner === me && !d.dead)!;
+      const neutral = g.index.provinces.find(
+        (p) => p.ownerTag === 'POL' && s.provinces[p.id].controller !== me,
+      )!;
+      const atWar = s.countries[me].atWarWith
+        .includes(s.provinces[neutral.id].controller);
+      g.selectDivisions([div.id], { centre: false });
+      g.issue({ t: 'moveDivisions', divisions: [div.id], target: neutral.id });
+      return {
+        atWar,
+        path: s.divisions[div.id].path.length,
+        where: s.divisions[div.id].provinceId,
+        started: div.provinceId,
+      };
+    });
+
+    // The premise: Poland is a neutral, not an enemy.
+    expect(result.atWar).toBe(false);
+    // And the order goes nowhere. 「平時に非同盟国の領土に師団を置けるのは
+    // おかしい」 -- nothing used to stop it.
+    expect(result.path).toBe(0);
+    expect(result.where).toBe(result.started);
+  });
+
 });
