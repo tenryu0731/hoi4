@@ -25,7 +25,7 @@ test.describe('touch input', () => {
 
   test('one-finger drag pans the camera in the drag direction', async ({ page }) => {
     await bootGame(page);
-    await setCamera(page, 0, 0, 0.2);
+    await setCamera(page, 15, 50, 0.2);
     const before = await cameraState(page);
     const c = await canvasCentre(page);
 
@@ -41,7 +41,7 @@ test.describe('touch input', () => {
 
   test('pinch out zooms in', async ({ page }) => {
     await bootGame(page);
-    await setCamera(page, 0, 0, 0.15);
+    await setCamera(page, 15, 50, 0.15);
     const c = await openMapPoint(page);
     const before = await cameraState(page);
     await pinch(page, c, 40, 150);
@@ -51,7 +51,7 @@ test.describe('touch input', () => {
 
   test('pinch in zooms out', async ({ page }) => {
     await bootGame(page);
-    await setCamera(page, 0, 0, 0.45);
+    await setCamera(page, 15, 50, 0.45);
     const c = await openMapPoint(page);
     const before = await cameraState(page);
     await pinch(page, c, 150, 40);
@@ -61,7 +61,7 @@ test.describe('touch input', () => {
 
   test('pinch keeps the anchored world point under the fingers', async ({ page }) => {
     await bootGame(page);
-    await setCamera(page, 0, 0, 0.25);
+    await setCamera(page, 15, 50, 0.25);
     const c = await openMapPoint(page);
 
     const read = () => page.evaluate((pt) => {
@@ -86,7 +86,7 @@ test.describe('touch input', () => {
       const cam = window.__game!.renderer.camera;
       return { min: cam.minZoom, max: cam.maxZoom };
     });
-    await setCamera(page, 0, 0, limits.max * 0.9);
+    await setCamera(page, 15, 50, limits.max * 0.9);
     const c = await openMapPoint(page);
     await pinch(page, c, 10, 160, 16);
     const after = await cameraState(page);
@@ -136,7 +136,7 @@ test.describe('touch input', () => {
 
   test('a drag does not register as a tap', async ({ page }) => {
     await bootGame(page);
-    await setCamera(page, 0, 0, 0.2);
+    await setCamera(page, 15, 50, 0.2);
     const c = await canvasCentre(page);
     await swipe(page, { x: c.x, y: c.y }, { x: c.x - 150, y: c.y });
     const selected = await page.evaluate(() => window.__game!.selection.province);
@@ -731,7 +731,7 @@ test.describe('touch input', () => {
 
   test('an unarmed drag still pans, however long the finger rests first', async ({ page }) => {
     await bootGame(page);
-    await setCamera(page, 0, 0, 0.2);
+    await setCamera(page, 15, 50, 0.2);
     const before = await cameraState(page);
     const c = await canvasCentre(page);
 

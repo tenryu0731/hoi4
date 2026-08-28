@@ -106,7 +106,7 @@ test.describe('performance', () => {
 
   test('keeps the scene graph small enough for a mobile GPU', async ({ page }) => {
     await bootGame(page);
-    await setCamera(page, -300, -200, 0.16);
+    await setCamera(page, 10.7, 51.8, 0.16);
 
     const scene = await page.evaluate(() => {
       const g = window.__game!;
