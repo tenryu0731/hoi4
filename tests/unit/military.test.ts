@@ -1114,6 +1114,33 @@ describe('sealift', () => {
     expect(orderMove(f.state, ctxOf(f), d, overseas.id)).toBe(false);
     expect(d.path).toEqual([]);
   });
+
+  it('keeps the AI from shipping its peacetime garrisons across the world', () => {
+    // 「アイコンじゃなくて画像みたいに船みたいな謎のものが移動してる」. Two faults met
+    // here. The peacetime spreader walked the border list and the division
+    // list in step, so a division in Algiers could draw a border province in
+    // the Syrian desert; and inland provinces were flagged coastal, so the
+    // route out of Nürnberg was by ship. On the seventh of January 1936, with
+    // nobody at war anywhere, twenty-four divisions were at sea and the player
+    // saw the convoys crossing the Ionian.
+    const f = makeFixture({ seed: 7 });
+    const sim = new Simulation(f.state, f.index);
+    const time = new TimeEngine(f.state.clock.totalHours);
+    time.on((c) => sim.tick(c));
+
+    const afloat: string[] = [];
+    for (let day = 0; day < 30; day++) {
+      time.step(24);
+      if (f.state.wars.some((w) => !w.ended)) break;
+      for (const d of f.state.divisions) {
+        if (d.dead || d.path.length === 0) continue;
+        if (!isVoyage(f.index, d.provinceId, d.path[0])) continue;
+        afloat.push(`${f.state.countries[d.owner].tag} `
+          + `${f.index.get(d.provinceId).name} -> ${f.index.get(d.path[0]).name}`);
+      }
+    }
+    expect(afloat, `at sea in peacetime: ${afloat.slice(0, 6).join(', ')}`).toHaveLength(0);
+  });
 });
 
 /**
@@ -1147,8 +1174,8 @@ describe('supply throughput', () => {
 describe('harbours and transfers by sea', () => {
   it('gives every coastal country somewhere to put a man on a ship', () => {
     // 「強襲上陸とは別に港を経由して移動できるように」 only means anything if
-    // there are harbours to go via. Measured on this map: 450 coastal
-    // provinces, 215 of which carry a single victory point and 133 five or
+    // there are harbours to go via. Measured on this map: 816 coastal
+    // provinces, 571 of which carry a single victory point and 235 three or
     // more. The gap is the map saying "there is a town here", so the
     // threshold reads the data rather than picking a number -- but Bulgaria
     // and Lithuania have a coastline and no coastal town, and both of them
@@ -1157,6 +1184,10 @@ describe('harbours and transfers by sea', () => {
     const harbours = ports(f.index);
     expect(harbours.size).toBeGreaterThan(60);
     expect(harbours.size).toBeLessThan(f.index.provinces.length / 8);
+    // A harbour is on the coast, and most of the coast is not a harbour.
+    expect(harbours.size).toBeLessThan(
+      f.index.provinces.filter((p) => p.coastal).length / 2,
+    );
     for (const id of harbours) expect(f.index.get(id).coastal).toBe(true);
 
     const coastal = new Map<string, number>();

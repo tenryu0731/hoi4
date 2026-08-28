@@ -729,22 +729,92 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
   }
 }
 
-/** Peacetime posture: one division per border province, rest at the capital. */
+/**
+ * Harbours an island power mans when it has no land border to stand on.
+ *
+ * One post would be the capital and the whole army would stack on it; this is
+ * a coastline, held thinly, which is what an island actually garrisons.
+ */
+const ISLAND_POSTS = 6;
+
+/**
+ * Peacetime posture: each landmass is covered by the divisions standing on it.
+ *
+ * 「アイコンじゃなくて画像みたいに船みたいな謎のものが移動してる」. The version this
+ * replaces walked the border list and the division list in step -- division i
+ * to border province i % n -- with no notion that the two might be on
+ * different continents. France controls Algeria, Morocco, Lebanon and Syria,
+ * so the list it drew from ran from Dunkerque to the Iraqi frontier, and a
+ * division in Agadir could draw a border province in the Syrian desert. The
+ * move order answered the only way it can: by ship. Measured on the seventh of
+ * January 1936, at peace, with nobody at war anywhere on the board, twenty-four
+ * divisions were at sea -- fifteen of them French, one of them ordered from
+ * Agadir to Al Hasakah, 4,898km -- and their convoy marks were what the player
+ * saw drifting across the Ionian.
+ *
+ * A garrison is drawn from the ground it garrisons. Divisions cover the border
+ * of their own landmass and nothing else; a colony is held by its own troops,
+ * and moving men between continents in peacetime is a decision, not a default.
+ */
 function garrisonBorders(
   state: GameState, ctx: AIContext, c: Country, mine: Division[],
 ): void {
-  const borders: ProvinceId[] = [];
+  // Own ground, split into pieces that can walk to one another.
+  const island = new Map<ProvinceId, number>();
+  let islands = 0;
   for (let i = 0; i < state.provinces.length; i++) {
-    if (state.provinces[i].controller !== c.id) continue;
-    const geo = ctx.index.get(i);
-    if (geo.neighbors.some((n) => state.provinces[n].controller !== c.id)) borders.push(i);
+    if (state.provinces[i].controller !== c.id || island.has(i)) continue;
+    const id = islands++;
+    island.set(i, id);
+    const stack = [i];
+    while (stack.length > 0) {
+      const cur = stack.pop() as ProvinceId;
+      for (const nb of ctx.index.get(cur).neighbors) {
+        if (island.has(nb) || state.provinces[nb].controller !== c.id) continue;
+        island.set(nb, id);
+        stack.push(nb);
+      }
+    }
   }
-  if (borders.length === 0) return;
-  mine.forEach((d, i) => {
-    if (d.path.length > 0) return;
-    const target = borders[i % borders.length];
+  if (islands === 0) return;
+
+  // Where each piece wants men: its own frontier. A piece with no land
+  // frontier is an island, and an island is defended at its harbours -- put
+  // the men on the coast that is worth landing at rather than stacking the
+  // whole army on the capital, which is what one fallback province would do.
+  const posts: ProvinceId[][] = Array.from({ length: islands }, () => []);
+  const shores: ProvinceId[][] = Array.from({ length: islands }, () => []);
+  for (const [id, piece] of island) {
+    if (ctx.index.get(id).neighbors.some((n) => state.provinces[n].controller !== c.id)) {
+      posts[piece].push(id);
+    }
+    shores[piece].push(id);
+  }
+  const worth = (a: ProvinceId, b: ProvinceId): number =>
+    state.provinces[b].vp - state.provinces[a].vp || a - b;
+  for (let i = 0; i < islands; i++) {
+    posts[i].sort(worth);
+    if (posts[i].length > 0) continue;
+    const coast = shores[i].filter((id) => ctx.index.get(id).coastal).sort(worth);
+    posts[i] = (coast.length > 0 ? coast : shores[i].slice().sort(worth))
+      .slice(0, ISLAND_POSTS);
+  }
+
+  const spread = new Map<number, number>();
+  for (const d of mine) {
+    if (d.path.length > 0) continue;
+    const piece = island.get(d.provinceId);
+    // Standing on somebody else's ground -- transit rights, a garrison left
+    // behind by a border that moved. Not something the peacetime spreader has
+    // any business rerouting.
+    if (piece === undefined) continue;
+    const list = posts[piece];
+    if (list.length === 0) continue;
+    const n = spread.get(piece) ?? 0;
+    spread.set(piece, n + 1);
+    const target = list[n % list.length];
     if (d.provinceId !== target) orderMove(state, ctx, d, target);
-  });
+  }
 }
 
 // ---------------------------------------------------------------------------

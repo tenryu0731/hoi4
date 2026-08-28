@@ -375,6 +375,8 @@ export async function buildMap(): Promise<MapDataJson> {
   // test missed it, so the only British province on the strait could neither
   // take a convoy nor feed one, and Britain sailed into 1936 with a pocket.
   for (const p of provinces) if (p.seaNeighbors.length > 0) p.coastal = true;
+  console.log(`  coastal ${provinces.filter((p) => p.coastal).length}/${provinces.length}`
+    + `, sea links ${provinces.reduce((n, p) => n + p.seaNeighbors.length, 0) / 2}`);
 
   const lakeRings: number[][] = [];
   for (const f of lakes.features) {
@@ -539,6 +541,58 @@ function pointInRingFast(x: number, y: number, ring: Ring): boolean {
 }
 
 /**
+ * How wide a gap has to be before the land raster can be trusted about it.
+ *
+ * The raster's cell is 3km and the samples nearest each shore are thrown away,
+ * so under this width there is nothing left to measure and the question has to
+ * be put to the province rings instead.
+ */
+const MASK_FLOOR_KM = 25;
+
+/** Province bounding boxes bucketed on a coarse grid, for point lookup. */
+class ProvinceGrid {
+  private constructor(
+    private minX: number,
+    private minY: number,
+    private cell: number,
+    private w: number,
+    private h: number,
+    private cells: number[][],
+  ) {}
+
+  static build(boxes: readonly (readonly [number, number, number, number])[]): ProvinceGrid {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [a, b, c, d] of boxes) {
+      if (a < minX) minX = a;
+      if (b < minY) minY = b;
+      if (c > maxX) maxX = c;
+      if (d > maxY) maxY = d;
+    }
+    const cell = 120;
+    const w = Math.max(1, Math.ceil((maxX - minX) / cell) + 1);
+    const h = Math.max(1, Math.ceil((maxY - minY) / cell) + 1);
+    const cells: number[][] = Array.from({ length: w * h }, () => []);
+    boxes.forEach(([a, b, c, d], i) => {
+      const c0 = Math.max(0, Math.floor((a - minX) / cell));
+      const c1 = Math.min(w - 1, Math.floor((c - minX) / cell));
+      const r0 = Math.max(0, Math.floor((b - minY) / cell));
+      const r1 = Math.min(h - 1, Math.floor((d - minY) / cell));
+      for (let r = r0; r <= r1; r++) for (let q = c0; q <= c1; q++) cells[r * w + q].push(i);
+    });
+    return new ProvinceGrid(minX, minY, cell, w, h, cells);
+  }
+
+  at(x: number, y: number): readonly number[] {
+    const q = Math.floor((x - this.minX) / this.cell);
+    const r = Math.floor((y - this.minY) / this.cell);
+    if (q < 0 || r < 0 || q >= this.w || r >= this.h) return EMPTY_BUCKET;
+    return this.cells[r * this.w + q];
+  }
+}
+
+const EMPTY_BUCKET: readonly number[] = [];
+
+/**
  * Links provinces separated by a short sea crossing. Without this the British
  * Isles, Sicily and Scandinavia are unreachable and no scenario can conclude.
  *
@@ -562,6 +616,8 @@ function addSeaNeighbors(provinces: ProvinceGeoJson[], landGeom: Ring[]): void {
     return [minX, minY, maxX, maxY] as const;
   });
 
+  const grid = ProvinceGrid.build(boxes);
+
   let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
   for (const [a, b, c, d] of boxes) {
     if (a < gMinX) gMinX = a;
@@ -571,9 +627,39 @@ function addSeaNeighbors(provinces: ProvinceGeoJson[], landGeom: Ring[]): void {
   }
   const mask = LandMask.build(landGeom, [gMinX - 200, gMinY - 200, gMaxX + 200, gMaxY + 200], 3);
 
+  /**
+   * Whether a point is inside some province other than these two.
+   *
+   * Land is tiled by provinces and the sea is not, so this answers "is this
+   * ground?" exactly, which the raster cannot do at close range.
+   */
+  const onOtherGround = (x: number, y: number, a: number, b: number): boolean => {
+    for (const k of grid.at(x, y)) {
+      if (k === a || k === b) continue;
+      const [minX, minY, maxX, maxY] = boxes[k];
+      if (x < minX || x > maxX || y < minY || y > maxY) continue;
+      for (const r of rings[k]) if (pointInRingFast(x, y, r)) return true;
+    }
+    return false;
+  };
+
   /** True when the straight line between two coasts stays over water. */
-  const overWater = (pa: Pt, pb: Pt, dist: number): boolean => {
-    if (dist <= 25) return true;   // a genuine narrow strait, e.g. the Oresund
+  const overWater = (pa: Pt, pb: Pt, dist: number, a: number, b: number): boolean => {
+    if (dist <= MASK_FLOOR_KM) {
+      // Below the raster's resolution every sample falls in a shoreline cell,
+      // so the old rule simply believed the gap -- and 「船みたいな謎のもの」
+      // followed. Nürnberg came out with three sea neighbours (Coburg, Hof and
+      // Regensburg, all of them four hundred kilometres from salt water),
+      // 4,000 of 4,222 provinces were flagged coastal, and the AI shipped
+      // garrisons across Bavaria. Ask the provinces instead: anything inside a
+      // third one is dry ground, and no strait runs through it.
+      for (const t of [0.35, 0.5, 0.65]) {
+        if (onOtherGround(pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t, a, b)) {
+          return false;
+        }
+      }
+      return true;
+    }
     const samples = 24;
     let landHits = 0;
     let checked = 0;
@@ -589,7 +675,12 @@ function addSeaNeighbors(provinces: ProvinceGeoJson[], landGeom: Ring[]): void {
 
   const sets = provinces.map(() => new Set<number>());
   for (let a = 0; a < provinces.length; a++) {
+    // A strait has a coast at both ends. Without this the crossing is decided
+    // by distance alone, and two inland provinces that pass within a few
+    // kilometres of each other around a third become a ferry route.
+    if (!provinces[a].coastal) continue;
     for (let b = a + 1; b < provinces.length; b++) {
+      if (!provinces[b].coastal) continue;
       if (provinces[a].neighbors.includes(b)) continue;
       const [aminX, aminY, amaxX, amaxY] = boxes[a];
       const [bminX, bminY, bmaxX, bmaxY] = boxes[b];
@@ -606,7 +697,7 @@ function addSeaNeighbors(provinces: ProvinceGeoJson[], landGeom: Ring[]): void {
           if (r.dist < best) { best = r.dist; bestPa = r.pa; bestPb = r.pb; }
         }
       }
-      if (best <= STRAIT_KM && overWater(bestPa, bestPb, best)) {
+      if (best <= STRAIT_KM && overWater(bestPa, bestPb, best, a, b)) {
         sets[a].add(b);
         sets[b].add(a);
       }

@@ -168,6 +168,35 @@ describe('map data integrity', () => {
       expect([...(nb.get(a) ?? [])], `${a}-${b} must not be a land border`).not.toContain(b);
     }
   });
+
+  it('puts a coast at both ends of every sea crossing', () => {
+    for (const p of data.provinces) {
+      if (p.seaNeighbors.length === 0) continue;
+      expect(p.coastal, `${p.name} has a sea link but no coast`).toBe(true);
+      for (const nb of p.seaNeighbors) {
+        expect(data.provinces[nb].coastal,
+          `${p.name} sails to ${data.provinces[nb].name}, which has no coast`).toBe(true);
+      }
+    }
+  });
+
+  it('leaves the interior of the continent dry', () => {
+    // The gap between two coasts used to be believed whenever it measured
+    // under the land raster's resolution, so a T-junction between three inland
+    // provinces read as a strait: Nürnberg came out with sea neighbours in
+    // Coburg, Hof and Regensburg, four thousand of four thousand two hundred
+    // provinces were flagged coastal, and the AI shipped garrisons across
+    // Bavaria. A coast is a minority of a continent.
+    const coastal = data.provinces.filter((p) => p.coastal).length;
+    expect(coastal).toBeLessThan(data.provinces.length * 0.4);
+
+    // Named for how far each is from salt water, not for anything about them.
+    for (const name of ['Nürnberg', 'Paris', 'München', 'Praha', 'Madrid', 'Minsk']) {
+      const p = data.provinces.find((q) => q.name === name);
+      if (!p) continue;
+      expect(p.coastal, `${name} is inland`).toBe(false);
+    }
+  });
 });
 
 describe('ProvinceIndex', () => {

@@ -65,6 +65,43 @@ const PLAN_LABEL_PX = 12;
 const PLAN_FONT_PX = 24;
 
 /**
+ * How finely a passage is divided when deciding which hulls sail together.
+ *
+ * Too fine and a corps that embarked over three days smears into a queue of
+ * single-ship marks; too coarse and a convoy halfway across snaps back onto
+ * one that has only just cast off. Eight is roughly a convoy a day on the
+ * Mediterranean crossings the AI actually makes.
+ */
+const CONVOY_BUCKETS = 8;
+
+/** A convoy under way: where it is, which way it is pointing, and how big. */
+interface Lane {
+  x: number;
+  y: number;
+  /** Unit heading, so the hull can be drawn bow-first. */
+  ux: number;
+  uy: number;
+  n: number;
+  owner: CountryId;
+}
+
+/** A hull seen from above -- blunt stern, pointed bow -- laid along a heading. */
+function hull(
+  g: Graphics,
+  at: (lane: Lane, along: number, across: number, r: number) => { x: number; y: number },
+  lane: Lane,
+  r: number,
+): void {
+  const p = [
+    at(lane, -1, -0.42, r), at(lane, 0.45, -0.42, r), at(lane, 1, 0, r),
+    at(lane, 0.45, 0.42, r), at(lane, -1, 0.42, r),
+  ];
+  g.moveTo(p[0].x, p[0].y);
+  for (let i = 1; i < p.length; i++) g.lineTo(p[i].x, p[i].y);
+  g.closePath();
+}
+
+/**
  * Which of the map's two tiers an outline belongs to. A province is where a
  * division stands; a state is what gets built in.
  */
@@ -1078,9 +1115,11 @@ export class MapRenderer {
     const zoom = Math.max(0.02, this.camera.zoom);
     const u = 1 / zoom;
 
-    // One mark per crossing, not per division: twelve divisions in one convoy
-    // are one convoy.
-    const lanes = new Map<string, { x: number; y: number; n: number; owner: CountryId }>();
+    // One mark per convoy, not per division: twelve divisions crossing together
+    // are one convoy. Bucketed coarsely along the passage as well as by lane,
+    // so a column that left on successive days reads as the two or three
+    // convoys it is rather than as a dozen separate hulls a pixel apart.
+    const lanes = new Map<string, Lane>();
     for (const d of state.divisions) {
       if (d.dead || d.path.length === 0) continue;
       const to = d.path[0];
@@ -1088,44 +1127,74 @@ export class MapRenderer {
       const a = this.index.provinces[d.provinceId];
       const b = this.index.provinces[to];
       if (!a || !b) continue;
-      // Rounded, so the whole convoy shares one mark instead of smearing into
-      // a line of hulls a pixel apart.
-      const t = Math.round(Math.min(1, Math.max(0, d.moveProgress)) * 24) / 24;
-      const key = `${d.provinceId}:${to}:${t}`;
+      const t = Math.round(Math.min(1, Math.max(0, d.moveProgress)) * CONVOY_BUCKETS)
+        / CONVOY_BUCKETS;
+      const key = `${d.provinceId}:${to}:${t}:${d.owner}`;
       const lane = lanes.get(key);
       if (lane) { lane.n++; continue; }
+      const dx = b.centerX - a.centerX;
+      const dy = b.centerY - a.centerY;
       const at = this.afloat(
-        a.centerX + (b.centerX - a.centerX) * t,
-        a.centerY + (b.centerY - a.centerY) * t,
-        b.centerY - a.centerY, -(b.centerX - a.centerX),
+        a.centerX + dx * t, a.centerY + dy * t, dy, -dx,
       );
-      lanes.set(key, { x: at.x, y: at.y, n: 1, owner: d.owner });
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      lanes.set(key, { x: at.x, y: at.y, ux: dx / len, uy: dy / len, n: 1, owner: d.owner });
     }
     if (lanes.size === 0) return;
 
+    // Bow-first. The hull used to be drawn pointing east whatever course it
+    // was on, so a convoy steaming south read as a shape lying across its own
+    // wake rather than as a ship: 「船みたいな謎のもの」. A mark that does not
+    // face where it is going is not a ship, it is a smudge.
+    const at = (lane: Lane, along: number, across: number, r: number) => ({
+      x: lane.x + lane.ux * along * r - lane.uy * across * r,
+      y: lane.y + lane.uy * along * r + lane.ux * across * r,
+    });
+    const size = (lane: Lane) => Math.min(9 * u, 26) * (lane.n > 3 ? 1.15 : 1);
+
     for (const lane of lanes.values()) {
-      const r = Math.min(9 * u, 26);
+      const r = size(lane);
       // A wake: two short strokes trailing the hull, which is what says the
       // thing is under way rather than anchored.
-      g.moveTo(lane.x - r * 2.2, lane.y - r * 0.5);
-      g.lineTo(lane.x - r * 0.7, lane.y - r * 0.5);
-      g.moveTo(lane.x - r * 1.7, lane.y + r * 0.5);
-      g.lineTo(lane.x - r * 0.6, lane.y + r * 0.5);
+      for (const side of [-0.5, 0.5]) {
+        const tail = at(lane, side === -0.5 ? -2.2 : -1.7, side, r);
+        const head = at(lane, -0.7, side, r);
+        g.moveTo(tail.x, tail.y);
+        g.lineTo(head.x, head.y);
+      }
     }
     g.stroke({ color: 0xd8ecf4, width: 1.6 * u, alpha: 0.5, cap: 'round' });
 
+    // A dark shadow under the hull, so the mark separates from the sea at any
+    // zoom instead of dissolving into it.
+    for (const lane of lanes.values()) hull(g, at, lane, size(lane) * 1.28);
+    g.fill({ color: 0x07100f, alpha: 0.55 });
+
+    for (const lane of lanes.values()) hull(g, at, lane, size(lane));
+    // The owner's colour, as on its counters. Filling this in the sea's own
+    // shade -- which is what it used to be -- left nothing but the outline,
+    // and an outline drifting across the Mediterranean belongs to nobody.
+    g.fill({ color: 0x24313a, alpha: 0.95 });
+
     for (const lane of lanes.values()) {
-      const r = Math.min(9 * u, 26);
-      // A hull, seen from above: a blunt stern and a pointed bow.
-      g.moveTo(lane.x - r, lane.y - r * 0.42);
-      g.lineTo(lane.x + r * 0.45, lane.y - r * 0.42);
-      g.lineTo(lane.x + r, lane.y);
-      g.lineTo(lane.x + r * 0.45, lane.y + r * 0.42);
-      g.lineTo(lane.x - r, lane.y + r * 0.42);
+      const r = size(lane);
+      // A deck stripe in the owner's colour: the identity, on a hull small
+      // enough that filling the whole thing would read as a coloured blob.
+      const tint = rgbToHex(state.countries[lane.owner].color);
+      const c1 = at(lane, -0.62, -0.3, r);
+      const c2 = at(lane, 0.34, -0.3, r);
+      const c3 = at(lane, 0.34, 0.3, r);
+      const c4 = at(lane, -0.62, 0.3, r);
+      g.moveTo(c1.x, c1.y);
+      g.lineTo(c2.x, c2.y);
+      g.lineTo(c3.x, c3.y);
+      g.lineTo(c4.x, c4.y);
       g.closePath();
+      g.fill({ color: tint, alpha: 0.95 });
     }
-    g.fill({ color: 0x1d2a30, alpha: 0.92 });
-    g.stroke({ color: 0xd8ecf4, width: 1.2 * u, alpha: 0.85, join: 'round' });
+
+    for (const lane of lanes.values()) hull(g, at, lane, size(lane));
+    g.stroke({ color: 0xe6f2f8, width: 1.3 * u, alpha: 0.95, join: 'round' });
   }
 
   /**
