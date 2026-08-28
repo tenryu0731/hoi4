@@ -169,7 +169,6 @@ export class MapRenderer {
   private coarseTint: number[] = [];
   private coarseDirty = new Set<number>();
   private fillLayerIndex = 0;
-  private lakeLayer = new Graphics();
   private riverLayer = new Graphics();
   private borderLayer = new Graphics();
   private grain!: TilingSprite;
@@ -289,7 +288,6 @@ export class MapRenderer {
     this.world.addChild(this.coarseLayer);
     this.coarseLayer.visible = false;
 
-    this.world.addChild(this.lakeLayer);
     this.world.addChild(this.riverLayer);
 
     this.world.addChild(this.borderLayer);
