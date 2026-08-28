@@ -232,10 +232,9 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
   // is a blunt instrument, but it separates Normandy from Algeria and Kent from
   // Egypt, which is the distinction that matters.
   const HOME_RADIUS_KM = 1600;
-  const capitalOf = new Map<string, { x: number; y: number }>();
+  const capitalOf = new Map<string, number>();
   for (const c of countries) {
-    const cap = index.provinces[c.capital];
-    if (cap) capitalOf.set(c.tag, { x: cap.centerX, y: cap.centerY });
+    if (index.provinces[c.capital]) capitalOf.set(c.tag, c.capital);
   }
 
   const provinces: ProvinceState[] = index.provinces.map((p) => {
@@ -248,8 +247,12 @@ export function createScenario(index: ProvinceIndex, opts: ScenarioOptions = {})
       fortLevel: 0,
       divisions: [],
       lastChangeHour: 0,
-      core: home === undefined
-        || Math.hypot(p.centerX - home.x, p.centerY - home.y) <= HOME_RADIUS_KM,
+      // Real kilometres. The map is drawn in a cylindrical frame where a
+      // degree of longitude is worth less the further north it is, so a radius
+      // measured on the page would reach further into the Sahara than into
+      // Karelia -- and what is and is not a nation's core territory is a fact
+      // about the world, not about the drawing.
+      core: home === undefined || index.distance(home, p.id) <= HOME_RADIUS_KM,
     };
   });
 

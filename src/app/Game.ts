@@ -26,6 +26,9 @@ import { UI } from '../ui/strings';
 export type PlanTool = 'front' | 'offensive' | 'garrison' | 'spearhead' | 'invade' | null;
 
 /** Tools drawn with a stroke rather than a tap. */
+/** How far from the capital the opening view reaches, in kilometres. */
+const OPENING_VIEW_KM = 1400;
+
 const PAINTED = new Set<PlanTool>(['front', 'offensive', 'garrison']);
 
 /** Tools that take a single objective from a tap. */
@@ -210,8 +213,10 @@ export class Game {
     let maxX = capital.bbox[2], maxY = capital.bbox[3];
     for (const p of home) {
       // Only count territory near the capital, so overseas holdings do not drag
-      // the opening view out into the Atlantic.
-      if (Math.hypot(p.centerX - capital.centerX, p.centerY - capital.centerY) > 1400) continue;
+      // the opening view out into the Atlantic. In kilometres on the sphere:
+      // the render frame is cylindrical, and a radius measured in it would let
+      // in more of North Africa than of Norway.
+      if (this.index.distance(me.capital, p.id) > OPENING_VIEW_KM) continue;
       minX = Math.min(minX, p.bbox[0]);
       minY = Math.min(minY, p.bbox[1]);
       maxX = Math.max(maxX, p.bbox[2]);

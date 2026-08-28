@@ -320,17 +320,21 @@ export function computeSupply(
     // Cost per world unit, cheaper where the railways are good.
     const rate = (1 / SUPPLY_RANGE) * (1 - ((infra - 1) / 4) * INFRA_BONUS);
 
-    for (const nb of geo.neighbors) {
+    // Edge lengths come off the index rather than being measured again: the
+    // graph is fixed, and this loop walks every friendly edge in the country.
+    for (let i = 0; i < geo.neighbors.length; i++) {
+      const nb = geo.neighbors[i];
       if (!friendly(nb)) continue;
-      const candidate = here - rate * index.distance(cur, nb);
+      const candidate = here - rate * geo.neighborKm[i];
       if (candidate > levels[nb] + 1e-6) {
         levels[nb] = candidate;
         push(nb);
       }
     }
-    for (const nb of geo.seaNeighbors) {
+    for (let i = 0; i < geo.seaNeighbors.length; i++) {
+      const nb = geo.seaNeighbors[i];
       if (!friendly(nb)) continue;
-      const candidate = here - rate * index.distance(cur, nb) * SEA_STEP_MULTIPLIER;
+      const candidate = here - rate * geo.seaNeighborKm[i] * SEA_STEP_MULTIPLIER;
       if (candidate > levels[nb] + 1e-6) {
         levels[nb] = candidate;
         push(nb);

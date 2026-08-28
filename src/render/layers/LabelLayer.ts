@@ -273,9 +273,9 @@ export class LabelLayer {
 
     // Capital cities give the display name and a better anchor than a colonial
     // centroid, which for France sits in the Mediterranean.
-    const capitals = new Map<string, { name: string; x: number; y: number }>();
+    const capitals = new Map<string, { name: string; province: number }>();
     for (const c of this.index.data.cities) {
-      if (c.capitalOf) capitals.set(c.capitalOf, { name: c.name, x: c.x, y: c.y });
+      if (c.capitalOf) capitals.set(c.capitalOf, { name: c.name, province: c.province });
     }
 
     const out: { name: string; x: number; y: number; area: number; width: number; height: number }[] = [];
@@ -285,11 +285,12 @@ export class LabelLayer {
       // Only home territory decides where the name goes. Averaging in the
       // colonies puts "United Kingdom" over Egypt and "France" in the Bay of
       // Biscay, because that really is where the centre of those empires lies.
-      const home = cap
-        ? acc.members.filter((id) => {
-          const p = this.index.get(id);
-          return Math.hypot(p.centerX - cap.x, p.centerY - cap.y) <= HOME_RADIUS_KM;
-        })
+      // Real kilometres from the capital, not units on the page: the map is
+      // drawn cylindrically, so a radius measured on it reaches much further
+      // east-west in the Sahara than in Lapland, and Italy's name ended up
+      // written across Libya.
+      const home = cap && cap.province >= 0
+        ? acc.members.filter((id) => this.index.distance(cap.province, id) <= HOME_RADIUS_KM)
         : acc.members;
       const pool = home.length > 0 ? home : acc.members;
 
