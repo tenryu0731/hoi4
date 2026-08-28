@@ -289,9 +289,22 @@ test.describe('touch input', () => {
       const g = window.__game!;
       const s = g.state;
       const me = s.meta.playerCountry;
-      const from = g.index.provinces.find(
+      // Every province of ours with a division on it, not just the first.
+      // Whether a given one has a neighbour the finger can reach depends on
+      // where the counters happen to fall and how much map is left between
+      // the top bar and the sheet; on a map of four thousand provinces the
+      // first candidate is not reliably one of them, and pinning the test to
+      // it made a map change look like an input bug.
+      const candidates = g.index.provinces.filter(
         (q) => s.provinces[q.id].divisions.some((d) => s.divisions[d].owner === me),
-      )!;
+      );
+      for (const from of candidates) {
+        const framed = frame(from);
+        if (framed) return framed;
+      }
+      throw new Error('no province with a reachable neighbour');
+
+      function frame(from: (typeof candidates)[number]) {
       g.renderer.camera.centerOn(from.centerX, from.centerY);
       g.renderer.camera.zoom = 1.6;
       g.tickFrame(16);
@@ -318,16 +331,24 @@ test.describe('touch input', () => {
 
       const box = g.renderer.canvas.getBoundingClientRect();
       const boxes = g.renderer.units.hitBoxes;
-      const own = boxes.find((b) => b.province === from.id)!;
-      // A neighbour far enough from every counter that the tap is unambiguous.
+      const own = boxes.find((b) => b.province === from.id);
+      // A neighbour far enough from every counter that the tap is unambiguous
+      // -- and on open canvas. Counters were the only thing checked, so a
+      // destination could sit under the map-mode strip: the assertion below
+      // then reported "hud-mode is-active" covering it, which is true and is
+      // the test's own fault rather than the HUD's.
       const clear = (n: number) => {
         const q = g.index.get(n);
         const sx = g.renderer.camera.worldToScreenX(q.centerX);
         const sy = g.renderer.camera.worldToScreenY(q.centerY);
+        if (document.elementFromPoint(box.left + sx, box.top + sy) !== g.renderer.canvas) {
+          return false;
+        }
         return boxes.every((b) => Math.abs(sx - b.x) > b.w / 2 + 16
           || Math.abs(sy - b.y) > b.h / 2 + 16);
       };
-      const to = g.index.get(from.id).neighbors.find((n) => s.provinces[n] && clear(n))!;
+      const to = g.index.get(from.id).neighbors.find((n) => s.provinces[n] && clear(n));
+      if (to === undefined || !own) return null;
       const t = g.index.get(to);
       // Put the map back the way the player would find it: nothing selected.
       g.selectProvince(null);
@@ -341,6 +362,7 @@ test.describe('touch input', () => {
           y: Math.round(box.top + g.renderer.camera.worldToScreenY(t.centerY)),
         },
       };
+      }
     });
 
     await tapAt(page, setup.counter.x, setup.counter.y);
@@ -1234,12 +1256,35 @@ test.describe('touch input', () => {
       c.velocityX = 0;
       c.velocityY = 0;
       for (let i = 0; i < 60; i++) g.tickFrame(16.667);
-      return {
-        army: army.id,
-        points: border.map((q) => ({
-          x: c.worldToScreenX(q.centerX), y: c.worldToScreenY(q.centerY),
-        })).filter((q) => q.x > 20 && q.x < 392 && q.y > 200 && q.y < 700),
-      };
+      // Ordered into a path, not left in province-id order. A player draws a
+      // front by running one finger along it; province ids are the order the
+      // map was traced in, so following them sends the pointer back and forth
+      // across the screen -- measured at 360px, then 144, then 271 -- and the
+      // stroke that produces is not a line anybody drew. Nearest-neighbour
+      // from the northernmost post, which is how the frontier actually runs.
+      // Only ground the finger can actually reach. A hard-coded window used
+      // to stand in for this and let a point through at x=360, which is under
+      // the map-mode strip: the stroke began on a button, the canvas never saw
+      // the pointer, and the draft stayed empty. Ask the document instead.
+      const box = g.renderer.canvas.getBoundingClientRect();
+      const on = border.map((q) => ({
+        x: c.worldToScreenX(q.centerX) + box.left,
+        y: c.worldToScreenY(q.centerY) + box.top,
+      })).filter((q) => document.elementFromPoint(q.x, q.y) === g.renderer.canvas);
+      const path: { x: number; y: number }[] = [];
+      const pool = [...on].sort((a, b) => a.y - b.y);
+      let cur = pool.shift();
+      while (cur) {
+        path.push(cur);
+        let best = -1;
+        let bestD = Infinity;
+        pool.forEach((q, i) => {
+          const d = (q.x - cur!.x) ** 2 + (q.y - cur!.y) ** 2;
+          if (d < bestD) { bestD = d; best = i; }
+        });
+        cur = best < 0 ? undefined : pool.splice(best, 1)[0];
+      }
+      return { army: army.id, points: path };
     });
     expect(setup.points.length).toBeGreaterThanOrEqual(2);
 
