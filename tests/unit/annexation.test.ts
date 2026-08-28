@@ -74,11 +74,16 @@ describe('the focuses that moved borders', () => {
     expect(f.country('GER').atWarWith, 'and without a war').toEqual([]);
   });
 
-  it('takes the border districts, not the country, for the Sudetenland', () => {
+  it('takes the Sudetenland, not Prague, at Munich', () => {
     const f = rig();
-    // In tree order, and the order matters: only two Czechoslovak states touch
-    // Germany in 1936, and the demand can only reach as far as the border it
-    // is made across. Austria is what makes the third one German-facing.
+    // 「ズデーテン地方は割譲できるようにステートだよ」. The region is a state of
+    // its own precisely so this can happen to it: it is the only Czechoslovak
+    // state on the German border, and it is the one the focus names.
+    const named = (tag: string): string[] => f.index.data.states
+      .filter((_, i) => f.state.states[i].owner === f.country(tag).id)
+      .map((st) => st.name);
+    expect(named('CZE'), 'the Sudetenland is a state').toContain('Sudetenland');
+
     take(f, 'GER', 'GER_anschluss');
     const before = owned(f, 'CZE');
     const beforeStates = states(f, 'CZE');
@@ -87,11 +92,13 @@ describe('the focuses that moved borders', () => {
 
     take(f, 'GER', 'GER_sudetenland');
 
+    expect(named('GER'), 'and Germany now holds it').toContain('Sudetenland');
+    expect(named('CZE'), 'while Prague stays Czechoslovak').toContain('Prague');
     expect(owned(f, 'CZE'), 'Czechoslovakia survives Munich').toBeGreaterThan(0);
     expect(owned(f, 'CZE'), 'and loses ground to it').toBeLessThan(before);
     expect(f.country('CZE').capitulated).toBe(false);
-    expect(states(f, 'GER')).toBe(germanStates + 3);
-    expect(states(f, 'CZE')).toBe(beforeStates - 3);
+    expect(states(f, 'GER')).toBe(germanStates + 1);
+    expect(states(f, 'CZE')).toBe(beforeStates - 1);
     expect(f.country('GER').atWarWith).toEqual([]);
   });
 

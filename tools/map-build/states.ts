@@ -224,6 +224,13 @@ export interface GroupInput {
   topo: Topology;
 }
 
+/** How many of a ring's points are not repeats of another, to the metre. */
+const distinct = (ring: Ring): number => {
+  const seen = new Set<string>();
+  for (const p of ring) seen.add(`${Math.round(p[0] * 1000)},${Math.round(p[1] * 1000)}`);
+  return seen.size;
+};
+
 const centroidOf = (rings: Ring[]): Pt => {
   let bx = 0;
   let by = 0;
@@ -260,6 +267,7 @@ export function groupIntoStates(input: GroupInput): StateGroup[] {
     area: number;
     centre: Pt;
     alive: boolean;
+    settled: boolean;
   }
   const nodes = new Map<string, Node>();
   for (const u of units) {
@@ -268,7 +276,7 @@ export function groupIntoStates(input: GroupInput): StateGroup[] {
     const area = rings.reduce((s, r) => s + ringArea(r), 0);
     nodes.set(u.key, {
       key: u.key, tag: u.tag, name: u.name, members: [u.key],
-      area, centre: centroidOf(rings), alive: true,
+      area, centre: centroidOf(rings), alive: true, settled: false,
     });
   }
 
@@ -315,7 +323,7 @@ export function groupIntoStates(input: GroupInput): StateGroup[] {
   for (;;) {
     let worst: Node | null = null;
     for (const n of nodes.values()) {
-      if (!n.alive || n.area >= floorFor(n)) continue;
+      if (!n.alive || n.settled || n.area >= floorFor(n)) continue;
       if (worst === null || n.area < worst.area) worst = n;
     }
     if (worst === null) break;
@@ -332,7 +340,10 @@ export function groupIntoStates(input: GroupInput): StateGroup[] {
     }
     if (into === null) {
       // Nothing to join — Malta on its own is a state, and that is correct.
-      worst.area = Math.max(worst.area, floorFor(worst));
+      // Marked settled rather than given a fictitious area: inflating it to
+      // the floor to stop the loop also became the state's reported size, and
+      // Gibraltar went out as eight and a half thousand square kilometres.
+      worst.settled = true;
       continue;
     }
 
@@ -363,7 +374,11 @@ export function groupIntoStates(input: GroupInput): StateGroup[] {
         const arc = ref.reversed ? topo.arcs[ref.arc].slice().reverse() : topo.arcs[ref.arc];
         for (let i = pts.length === 0 ? 0 : 1; i < arc.length; i++) pts.push(arc[i]);
       }
-      if (pts.length >= 3) rings.push(pts);
+      // Simplification can flatten a unit smaller than its own threshold into a
+      // line: Gibraltar's six square kilometres came back as four points, two
+      // of them the same point, and a cell with no inside has nowhere to put
+      // its own centre.
+      if (pts.length >= 3 && distinct(pts) >= 3 && ringArea(pts) >= 1) rings.push(pts);
     }
     const members = n.members
       .slice()
@@ -378,8 +393,10 @@ export function groupIntoStates(input: GroupInput): StateGroup[] {
       centre: n.centre,
     });
   }
-  groups.sort((a, b) => a.tag.localeCompare(b.tag) || b.area - a.area);
-  return groups;
+  // A unit whose every ring collapsed has nothing left to be a state with.
+  const solid = groups.filter((g) => g.rings.length > 0 && g.area >= 1);
+  solid.sort((a, b) => a.tag.localeCompare(b.tag) || b.area - a.area);
+  return solid;
 }
 
 const areaOf = (rings: Ring[] | undefined): number =>

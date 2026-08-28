@@ -1,7 +1,7 @@
 {
   "generated": "tools/asset-gen/build.ts",
   "counts": {
-    "flags": 30,
+    "flags": 32,
     "resourceIcons": 6,
     "uiIcons": 29,
     "equipmentIcons": 9,
@@ -9,8 +9,8 @@
     "portraitFallbacks": 8,
     "portraits": 100
   },
-  "totalBytes": 159118,
-  "totalGzipBytes": 146029,
+  "totalBytes": 159912,
+  "totalGzipBytes": 146486,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -118,6 +118,11 @@
       "gzipBytes": 245
     },
     {
+      "path": "assets/flags/PER.svg",
+      "bytes": 432,
+      "gzipBytes": 229
+    },
+    {
       "path": "assets/flags/POL.svg",
       "bytes": 374,
       "gzipBytes": 214
@@ -131,6 +136,11 @@
       "path": "assets/flags/ROM.svg",
       "bytes": 432,
       "gzipBytes": 225
+    },
+    {
+      "path": "assets/flags/SAU.svg",
+      "bytes": 362,
+      "gzipBytes": 228
     },
     {
       "path": "assets/flags/SOV.svg",

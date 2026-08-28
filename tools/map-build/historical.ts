@@ -171,3 +171,91 @@ export const CITY_NAMES_1936: Readonly<Record<string, string>> = {
   'Rijeka|HRV': 'Fiume',
   'Rodos|GRC': 'Rodi',
 };
+
+/**
+ * A region that has to exist as a state of its own because history hands it
+ * over on its own.
+ *
+ * 「ズデーテン地方は割譲できるようにステートだよ」. The reference has the
+ * Sudetenland as a separate state for exactly this reason, and the screenshot
+ * it was read off cannot show it: at nine hundred and fifty pixels for the
+ * whole of Europe, Bohemia is twenty pixels across and its German rim is two,
+ * so the extraction merged it into Prague. Left merged, Munich would have
+ * ceded the Czech capital in 1938 -- the cession takes the border states by
+ * weight, and undivided Bohemia is the heaviest thing on that border.
+ *
+ * The rim is grown inward from the frontier until it reaches the area the
+ * region actually had, rather than being drawn as a shape: the German-settled
+ * districts were a belt along the border, and that is a rule rather than an
+ * outline.
+ */
+export interface Carve {
+  /** Whose ground it is in January 1936. */
+  from: string;
+  name: string;
+  /** Grown inward from a frontier with any of these. */
+  frontierWith: string[];
+  /** How much to take, in square kilometres. */
+  areaKm: number;
+  /** Confined to this window, so a different border of the same country is
+   * not swept in with it. */
+  window: Window;
+}
+
+export const CARVE_1936: readonly Carve[] = [
+  {
+    // The German-speaking rim of Bohemia, Moravia and Czech Silesia: a
+    // horseshoe from Eger round to Troppau, which is what the Munich agreement
+    // moved. The window stops at the Moravian gate so that Slovakia's own
+    // frontier is left alone.
+    //
+    // Munich took about 29,000 km2 and this takes 39,000, because the first
+    // ring is taken whole and the Czech frontier with Germany and Austria is
+    // long enough that one ring of provinces already overruns the figure. The
+    // alternative is a rim with a gap in it, and a rim with a gap does not
+    // separate Prague from the German border -- which is the whole reason the
+    // region needs to be a state.
+    from: 'CZE',
+    name: 'Sudetenland',
+    frontierWith: ['GER', 'AUS'],
+    areaKm: 28_000,
+    window: { minLon: 11.8, maxLon: 19.0, minLat: 48.4, maxLat: 51.2 },
+  },
+];
+
+/**
+ * How many states each country's ground inside this map is cut into.
+ *
+ * The reference reads Hearts of Iron's state map by colour, and colour is a
+ * poor witness at the edges: it splits Iceland into six and Latvia into seven
+ * while reading Germany about right. States came out even-handed in the Reich
+ * and shredded everywhere else -- 「ドイツ以外が細すぎる」 -- because a country
+ * whose states happen to be drawn in similar colours reads as one region and a
+ * country whose single state is cut by a firth or a shading band reads as
+ * several. Counting is the one thing the raster cannot do for us, so it is
+ * done here.
+ *
+ * These are the counts the real game uses for the ground each country holds
+ * inside this map's bounds, colonies included -- Britain's number covers Egypt
+ * and Iraq as well as the British Isles, France's the Maghreb and the Levant,
+ * and the Soviet Union's stops at the eastern edge rather than the Pacific.
+ *
+ * The budget counts states that can reach a compatriot overland. An island
+ * with no land neighbour of its own nation -- Malta, Gibraltar, the Canaries,
+ * Crete, Gotland -- is a state on top of the budget rather than inside it,
+ * because the alternative is folding it into a mainland it cannot be walked
+ * to. The real game keeps those separate for the same reason.
+ *
+ * A country over its budget has its smallest states folded into the neighbour
+ * they share the most border with, until it fits. One under its budget is left
+ * exactly as it is: a coarse border that exists is better than a fine one
+ * invented to hit a number.
+ */
+export const STATE_BUDGET_1936: Readonly<Record<string, number>> = {
+  SOV: 80, ENG: 26, FRA: 31, ITA: 24, SPR: 20, GER: 22, POL: 15, TUR: 14,
+  YUG: 10, ROM: 10, GRE: 8, FIN: 7, NOR: 6, POR: 6, PER: 6, SWE: 5, DEN: 5,
+  // Czechoslovakia's six is before Munich: the Sudetenland is carved out of
+  // the Bohemian rim afterwards, which makes seven on the finished map.
+  CZE: 6, AUS: 4, HUN: 4, BUL: 4, IRE: 3, SAU: 3, EST: 2, LAT: 2, LIT: 2,
+  SWI: 2, HOL: 2, BEL: 2, ALB: 1, ICE: 1, LUX: 1,
+};

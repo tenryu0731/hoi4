@@ -23,3 +23,11 @@ tests/e2e/__screenshots__/determinism-check.png
 .ad-*
 .*.mjs
 .*.mts
+
+# Scratch space for the reference-map derivation: the screenshots it reads, the
+# rasters it caches, and the comparison images it draws. The derivation script
+# itself lives in tools/map-build/reference/derive.
+.ref/
+__pycache__/
+*.pyc
+tools/map-build/reference/derive/land.npy

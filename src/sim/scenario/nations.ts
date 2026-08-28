@@ -49,7 +49,10 @@ export const NATIONS: NationDef[] = [
     ideology: 'fascist', major: true, startingDivisions: 24,
   },
   {
-    tag: 'SOV', name: 'Soviet Union', members: ['RUS', 'UKR', 'BLR'],
+    tag: 'SOV', name: 'Soviet Union',
+    // The Transcaucasian and Kazakh republics are Soviet in 1936, and Baku is
+    // where most of the oil below actually came out of the ground.
+    members: ['RUS', 'UKR', 'BLR', 'AZE', 'GEO', 'ARM', 'KAZ'],
     color: [0xc4, 0x44, 0x3a], capital: 'Moscow', capitalLonLat: [37.62, 55.75],
     terrain: 'plains', population: 168.0,
     civilianFactories: 40, militaryFactories: 22, dockyards: 6, infrastructure: 3,
@@ -63,7 +66,10 @@ export const NATIONS: NationDef[] = [
   },
   {
     tag: 'ENG', name: 'United Kingdom',
-    members: ['GBR', 'IMN', 'JEY', 'GGY', 'MLT', 'CYP', 'EGY', 'ISR', 'PSE', 'JOR', 'IRQ'],
+    members: [
+      'GBR', 'IMN', 'JEY', 'GGY', 'MLT', 'CYP', 'CYN', 'ESB', 'WSB', 'GIB',
+      'EGY', 'ISR', 'PSE', 'PSX', 'JOR', 'IRQ', 'KWT',
+    ],
     color: [0xb0, 0x65, 0x5a], capital: 'London', capitalLonLat: [-0.13, 51.51],
     terrain: 'plains', population: 47.0,
     civilianFactories: 34, militaryFactories: 12, dockyards: 20, infrastructure: 5,
@@ -167,7 +173,7 @@ export const NATIONS: NationDef[] = [
     ideology: 'neutral', major: false, startingDivisions: 7,
   },
   {
-    tag: 'SPR', name: 'Spain', members: ['ESP', 'AND'],
+    tag: 'SPR', name: 'Spain', members: ['ESP', 'AND', 'SAH'],
     color: [0xe4, 0xc6, 0x55], capital: 'Madrid', capitalLonLat: [-3.7, 40.42],
     terrain: 'hills', population: 25.0,
     civilianFactories: 10, militaryFactories: 4, dockyards: 4, infrastructure: 3,
@@ -215,7 +221,7 @@ export const NATIONS: NationDef[] = [
     ideology: 'democratic', major: false, startingDivisions: 1,
   },
   {
-    tag: 'DEN', name: 'Denmark', members: ['DNK', 'FRO'],
+    tag: 'DEN', name: 'Denmark', members: ['DNK', 'FRO', 'GRL'],
     color: [0xe4, 0x80, 0x90], capital: 'Copenhagen', capitalLonLat: [12.57, 55.68],
     terrain: 'plains', population: 3.8,
     civilianFactories: 4, militaryFactories: 1, dockyards: 2, infrastructure: 5,
@@ -286,9 +292,28 @@ export const NATIONS: NationDef[] = [
     resources: {},
     ideology: 'democratic', major: false, startingDivisions: 1,
   },
+  {
+    tag: 'PER', name: 'Persia', members: ['IRN'],
+    color: [0x6f, 0xa8, 0x7c], capital: 'Tehran', capitalLonLat: [51.42, 35.69],
+    terrain: 'mountain', population: 15.0,
+    civilianFactories: 5, militaryFactories: 2, dockyards: 1, infrastructure: 2,
+    // Masjed Soleyman and the Anglo-Persian fields, which is why Britain cared.
+    resources: { oil: 34, steel: 4, chromium: 2 },
+    ideology: 'neutral', major: false, startingDivisions: 8,
+  },
+  {
+    tag: 'SAU', name: 'Saudi Arabia', members: ['SAU'],
+    // Riyadh sits south of the map window, so the kingdom is seated at Tabuk,
+    // the largest town of the northern provinces the window does reach.
+    color: [0x8c, 0xa5, 0x6a], capital: 'Tabuk', capitalLonLat: [36.57, 28.38],
+    terrain: 'desert', population: 3.2,
+    civilianFactories: 2, militaryFactories: 1, dockyards: 0, infrastructure: 1,
+    // The Dammam strike is 1938; in January 1936 there is nothing to pump yet.
+    resources: {},
+    ideology: 'neutral', major: false, startingDivisions: 4,
+  },
 ];
 
-/** Fast lookup from Natural Earth admin-0 code to 1936 nation tag. */
 export const MEMBER_TO_TAG = new Map<string, string>();
 for (const n of NATIONS) for (const m of n.members) MEMBER_TO_TAG.set(m, n.tag);
 

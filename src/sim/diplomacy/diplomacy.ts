@@ -832,7 +832,7 @@ export function focusDemandAnnexation(
  */
 export function focusDemandCession(
   state: GameState, ctx: DiplomacyContext,
-  demander: CountryId, target: CountryId, count: number,
+  demander: CountryId, target: CountryId, count: number, region?: string,
 ): number {
   if (!canDemand(state, demander, target)) return 0;
   // Ceding a strip is a smaller ask than surrendering the state, so it clears
@@ -859,6 +859,14 @@ export function focusDemandCession(
     touching.push({ id: i, weight: geo.manpower + st.civilianFactories * 400 });
   }
   touching.sort((a, b) => b.weight - a.weight || a.id - b.id);
+
+  // A named demand takes the ground it named, if that ground is on the border
+  // to take it across. Munich asked for the Sudetenland; without the name the
+  // sort would have handed over whichever border state was heaviest, and on a
+  // map where Bohemia is one state that is Prague.
+  const named = region === undefined ? -1
+    : touching.findIndex((t) => ctx.index.data.states[t.id].name === region);
+  if (named > 0) touching.unshift(...touching.splice(named, 1));
 
   const taken = touching.slice(0, Math.max(0, count));
   if (taken.length === 0) return 0;

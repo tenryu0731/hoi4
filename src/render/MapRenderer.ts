@@ -46,6 +46,20 @@ export interface MapRendererOptions {
 /** Zoom thresholds at which line weights and label sets change. */
 const LOD_STEPS = [0.045, 0.075, 0.13, 0.24, 0.45, 0.9];
 
+/**
+ * Below this zoom the province fills are drawn grouped by colour instead of one
+ * by one.
+ *
+ * The picture is identical either way -- the groups carry the same colours the
+ * individual fills do -- so the threshold is set by cost alone. Above it the
+ * viewport holds few enough provinces that culling does the job; below it the
+ * whole map is on screen and one Graphics per province is 4,942 of them where
+ * thirty will do.
+ */
+const COARSE_FILL_ZOOM = 0.34;
+/** Colour groups rebuilt per frame, so a capture never costs a whole frame. */
+const COARSE_REBUILD_PER_FRAME = 2;
+
 /** On-screen height of a front-line tag, and the size its atlas was built at. */
 const PLAN_LABEL_PX = 12;
 const PLAN_FONT_PX = 24;
@@ -99,6 +113,22 @@ export class MapRenderer {
   private neutralLand = new Graphics();
   private fillLayer = new Container();
   private provinceFills: Graphics[] = [];
+  /**
+   * The same fills again, one Graphics per colour instead of one per province.
+   *
+   * At strategic zoom a province is a few pixels across and every one of them
+   * still costs a transform and a batch check each frame: at 4,942 provinces
+   * that is 4,942 nodes to see thirty countries. Grouping by colour draws the
+   * identical picture out of about thirty. The per-province layer takes back
+   * over as soon as the zoom is close enough for the difference to be visible,
+   * where culling keeps the count down instead.
+   */
+  private coarseLayer = new Container();
+  private coarseByTint = new Map<number, Graphics>();
+  private coarseMembers = new Map<number, Set<number>>();
+  private coarseTint: number[] = [];
+  private coarseDirty = new Set<number>();
+  private fillLayerIndex = 0;
   private lakeLayer = new Graphics();
   private riverLayer = new Graphics();
   private borderLayer = new Graphics();
@@ -214,7 +244,10 @@ export class MapRenderer {
     this.buildNeutralLand();
 
     this.world.addChild(this.fillLayer);
+    this.fillLayerIndex = this.world.getChildIndex(this.fillLayer);
     this.buildProvinceFills();
+    this.world.addChild(this.coarseLayer);
+    this.coarseLayer.visible = false;
 
     this.world.addChild(this.lakeLayer);
     this.world.addChild(this.riverLayer);
@@ -295,6 +328,63 @@ export class MapRenderer {
       this.provinceFills.push(g);
     }
     this.lastTintKey = new Array(this.provinceFills.length).fill('');
+    this.coarseTint = new Array(this.provinceFills.length).fill(PALETTE.landBase);
+    this.coarseMembers.set(
+      PALETTE.landBase,
+      new Set(this.provinceFills.map((_, i) => i)),
+    );
+    this.coarseDirty.add(PALETTE.landBase);
+  }
+
+  /**
+   * Rebuilds the colour groups whose membership changed.
+   *
+   * Only the groups: a province changing hands moves it out of one colour and
+   * into another, so two groups are redrawn and the other thirty are left
+   * alone. Redrawing all of them on every capture would put a hitch into every
+   * game day of a war.
+   */
+  private rebuildCoarse(limit = Infinity): void {
+    let budget = limit;
+    for (const tint of [...this.coarseDirty]) {
+      if (budget-- <= 0) break;
+      this.coarseDirty.delete(tint);
+      const members = this.coarseMembers.get(tint);
+      let g = this.coarseByTint.get(tint);
+      if (!members || members.size === 0) {
+        if (g) { g.clear(); g.visible = false; }
+        continue;
+      }
+      if (!g) {
+        g = new Graphics();
+        this.coarseByTint.set(tint, g);
+        this.coarseLayer.addChild(g);
+      }
+      g.clear();
+      g.visible = true;
+      for (const id of members) {
+        for (const ring of this.index.provinces[id].rings) this.traceFloatRing(g, ring);
+      }
+      g.fill({
+        texture: this.reliefTexture,
+        color: 0xffffff,
+        textureSpace: 'global',
+        matrix: new Matrix().scale(1.6, 1.6),
+      });
+      g.tint = tint;
+    }
+  }
+
+  private moveToTint(id: ProvinceId, tint: number): void {
+    const was = this.coarseTint[id];
+    if (was === tint) return;
+    this.coarseMembers.get(was)?.delete(id);
+    let set = this.coarseMembers.get(tint);
+    if (!set) { set = new Set(); this.coarseMembers.set(tint, set); }
+    set.add(id);
+    this.coarseTint[id] = tint;
+    this.coarseDirty.add(was);
+    this.coarseDirty.add(tint);
   }
 
   private buildWater(): void {
@@ -435,17 +525,27 @@ export class MapRenderer {
       // measurably present and visually absent -- 3424 world units of them
       // inside Germany alone, and the screenshot showed three lines.
       for (const line of internal.province) this.tracePolyline(g, line);
-      g.stroke({ color: 0x14110c, width: px(0.9), alpha: 0.26, join: 'round' });
+      g.stroke({ color: 0x14110c, width: px(0.8), alpha: 0.22, join: 'round' });
     }
     if (step >= 1) {
-      // No halo. A halo needs a line long enough to sit under, and a state
-      // boundary here is a chain of two-vertex edges: what the light stroke
-      // produced was a lozenge per edge, and the map read as scale armour
-      // rather than as a map. Weight alone separates the tiers -- 1.1px of
-      // hairline against 2.0px of seam against 2.8px of frontier -- which is
-      // what the printed atlases this is imitating do as well.
-      for (const line of this.index.data.borders.province) this.tracePolyline(g, line);
-      g.stroke({ color: 0x14110c, width: px(1.5), alpha: 0.5, join: 'round', cap: 'butt' });
+      // 「プロヴィンスとステートの境目を強調して」. The two tiers have to be
+      // told apart at a glance, and at 0.9 against 1.5 pixels they were not:
+      // side by side that is a fifth of a pixel of difference once the LOD
+      // scaling has been applied. So the seam gets a light halo under it as
+      // well as nearly three times the weight -- the same engraving the
+      // frontier gets, at half the strength, which puts the three tiers a
+      // clear step apart: hairline, seam, frontier.
+      //
+      // The halo works now because a state boundary is a real polyline again.
+      // It could not before: states were groups of provinces and their edges
+      // were recovered per-edge from midpoints, so the light stroke drew a
+      // lozenge around every two-vertex run and the map read as scale armour.
+      // The boundaries now come straight out of the topology as whole arcs.
+      const seams = this.index.data.borders.province;
+      for (const line of seams) this.tracePolyline(g, line);
+      g.stroke({ color: 0xf0e6cf, width: px(3.4), alpha: 0.16, join: 'round', cap: 'round' });
+      for (const line of seams) this.tracePolyline(g, line);
+      g.stroke({ color: 0x14110c, width: px(2.1), alpha: 0.72, join: 'round', cap: 'round' });
     }
 
     for (const line of this.index.data.borders.coast) this.tracePolyline(g, line);
@@ -533,7 +633,9 @@ export class MapRenderer {
       const key = this.tintKeyFor(i, state);
       if (key === this.lastTintKey[i]) continue;
       this.lastTintKey[i] = key;
-      this.provinceFills[i].tint = this.tintFor(i, state);
+      const tint = this.tintFor(i, state);
+      this.provinceFills[i].tint = tint;
+      this.moveToTint(i, tint);
     }
   }
 
@@ -652,7 +754,28 @@ export class MapRenderer {
       this.rebuildForLod(step);
     }
 
-    this.cullProvinces(cam);
+    const coarse = cam.zoom < COARSE_FILL_ZOOM;
+    if (coarse !== this.coarseLayer.visible) {
+      this.coarseLayer.visible = coarse;
+      // Detached rather than hidden. A hidden container still holds its
+      // children, and anything walking the tree -- Pixi's own bookkeeping, the
+      // perf harness -- still pays for all 4,942 of them.
+      if (coarse) {
+        this.rebuildCoarse();
+        if (this.fillLayer.parent) this.fillLayer.removeFromParent();
+      } else if (!this.fillLayer.parent) {
+        this.world.addChildAt(this.fillLayer, this.fillLayerIndex);
+      }
+    }
+    if (coarse) {
+      // A few groups a frame: a province changing hands dirties two of them and
+      // a group can be a whole country, so redrawing every dirty group the
+      // moment it is marked would put the war's own progress into the frame
+      // budget. One frame of a stale shade is not visible; a dropped frame is.
+      if (this.coarseDirty.size > 0) this.rebuildCoarse(COARSE_REBUILD_PER_FRAME);
+    } else {
+      this.cullProvinces(cam);
+    }
 
     this.world.scale.set(cam.zoom);
     this.world.position.set(

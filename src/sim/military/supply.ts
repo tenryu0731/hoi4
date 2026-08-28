@@ -265,25 +265,52 @@ export function computeSupply(
 
   const friendly = friendlyController(state, country);
 
-  const queue: ProvinceId[] = [];
+  // A max-heap keyed on the level a province has been reached with. What this
+  // replaces scanned the whole frontier for its best entry on every step,
+  // which is quadratic in the frontier and only looked cheap while a country
+  // was a few dozen provinces: at province counts matching the reference map
+  // the Soviet Union's daily supply pass alone cost 4.7ms of a 16ms budget.
+  const heap: ProvinceId[] = [];
+  const push = (id: ProvinceId): void => {
+    heap.push(id);
+    let i = heap.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (levels[heap[parent]] >= levels[heap[i]]) break;
+      const t = heap[parent]; heap[parent] = heap[i]; heap[i] = t;
+      i = parent;
+    }
+  };
+  const pop = (): ProvinceId => {
+    const top = heap[0];
+    const last = heap.pop()!;
+    if (heap.length > 0) {
+      heap[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1;
+        const r = l + 1;
+        let best = i;
+        if (l < heap.length && levels[heap[l]] > levels[heap[best]]) best = l;
+        if (r < heap.length && levels[heap[r]] > levels[heap[best]]) best = r;
+        if (best === i) break;
+        const t = heap[best]; heap[best] = heap[i]; heap[i] = t;
+        i = best;
+      }
+    }
+    return top;
+  };
+
   for (const src of sources) {
     if (!friendly(src.province)) continue;
     if (src.strength > levels[src.province]) {
       levels[src.province] = src.strength;
-      queue.push(src.province);
+      push(src.province);
     }
   }
 
-  let head = 0;
-  while (head < queue.length) {
-    let bestIdx = head;
-    for (let i = head + 1; i < queue.length; i++) {
-      if (levels[queue[i]] > levels[queue[bestIdx]]) bestIdx = i;
-    }
-    const cur = queue[bestIdx];
-    queue[bestIdx] = queue[head];
-    queue[head] = cur;
-    head++;
+  while (heap.length > 0) {
+    const cur = pop();
 
     const here = levels[cur];
     if (here <= 0.02) continue;
@@ -298,7 +325,7 @@ export function computeSupply(
       const candidate = here - rate * index.distance(cur, nb);
       if (candidate > levels[nb] + 1e-6) {
         levels[nb] = candidate;
-        queue.push(nb);
+        push(nb);
       }
     }
     for (const nb of geo.seaNeighbors) {
@@ -306,7 +333,7 @@ export function computeSupply(
       const candidate = here - rate * index.distance(cur, nb) * SEA_STEP_MULTIPLIER;
       if (candidate > levels[nb] + 1e-6) {
         levels[nb] = candidate;
-        queue.push(nb);
+        push(nb);
       }
     }
   }

@@ -25,6 +25,8 @@ interface RunResult {
   monthsChecked: number;
   wallMs: number;
   maxDivisions: number;
+  /** One entry per calendar year: was anyone fighting, and did ground move. */
+  yearly: { atWar: boolean; moved: number }[];
   provinceName: (id: number) => string;
 }
 
@@ -50,6 +52,11 @@ function runScenario(opts: {
   const invariantErrors: string[] = [];
   let monthsChecked = 0;
   let maxDivisions = 0;
+  /** Per calendar year: whether anyone was at war, and whether ground moved. */
+  const yearly: { atWar: boolean; moved: number }[] = [];
+  const owner0 = f.state.provinces.map((p) => p.controller);
+  let lastMoved = 0;
+  let lastYear = f.state.clock.year;
 
   time.on((ctx) => {
     sim.tick(ctx);
@@ -57,6 +64,15 @@ function runScenario(opts: {
     monthsChecked++;
     const live = f.state.divisions.filter((d) => !d.dead).length;
     if (live > maxDivisions) maxDivisions = live;
+    if (ctx.clock.year !== lastYear) {
+      const moved = f.state.provinces.filter((p, i) => p.controller !== owner0[i]).length;
+      yearly.push({
+        atWar: f.state.countries.some((c) => !c.capitulated && c.atWarWith.length > 0),
+        moved: moved - lastMoved,
+      });
+      lastMoved = moved;
+      lastYear = ctx.clock.year;
+    }
     if (opts.checkInvariantsMonthly !== false && invariantErrors.length === 0) {
       const errs = checkInvariants(f.state, f.index.count);
       if (errs.length) {
@@ -77,6 +93,7 @@ function runScenario(opts: {
     monthsChecked,
     wallMs: Date.now() - t0,
     maxDivisions,
+    yearly,
     provinceName: (id: number) => f.index.get(id).name,
   };
 }
@@ -189,6 +206,24 @@ describe('full scenario', () => {
     // must hold across twelve simulated years.
     expect(r.maxDivisions).toBeLessThan(3000);
   });
+
+  it('does not let a war freeze in place for years', () => {
+    // Measured before this was fixed: the AI compared one division's strength
+    // against the whole stack defending a province, so a province held by two
+    // was refused by every attacker in the army in turn. From 1941 the front
+    // simply stopped -- 1,156 provinces had changed hands and then nothing did
+    // for four straight years while three countries stayed formally at war.
+    const r = runScenario({ seed: 20250101, playerTag: 'GER', checkInvariantsMonthly: false });
+    let run = 0;
+    let worst = 0;
+    for (const y of r.yearly) {
+      run = y.atWar && y.moved === 0 ? run + 1 : 0;
+      if (run > worst) worst = run;
+    }
+    const shape = r.yearly.map((y) => (y.atWar ? y.moved : -1)).join(',');
+    // A quiet year in a live war is a lull. Three in a row is a deadlock.
+    expect(worst, `years at war with no ground moving: ${shape}`).toBeLessThan(3);
+  }, 240_000);
 
   it('simulates a full campaign fast enough to be practical', () => {
     const r = runScenario({ seed: 3, playerTag: 'ENG', checkInvariantsMonthly: false });

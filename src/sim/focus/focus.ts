@@ -450,7 +450,7 @@ function applyEffect(
     case 'cede':
       pressDemand(
         state, c, e.target,
-        (t) => focusDemandCession(state, ctx, c.id, t, e.states) > 0,
+        (t) => focusDemandCession(state, ctx, c.id, t, e.states, e.region) > 0,
       );
       return;
     case 'guarantee':

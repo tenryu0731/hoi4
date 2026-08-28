@@ -55,6 +55,10 @@ export const FLAGS: Record<string, FlagSpec> = {
   LIT: { kind: 'horizontal', bands: ['#fdb913', '#006a44', '#c1272d'] },
   IRE: { kind: 'vertical', bands: ['#169b62', '#f4f4f4', '#ff883e'] },
   ICE: { kind: 'nordic', field: '#02529c', cross: '#dc1e35', outline: '#f4f4f4' },
+  // The Pahlavi tricolour; the lion and sun that sat on the white band is not
+  // drawn, the same way the party banner is left off the German one.
+  PER: { kind: 'horizontal', bands: ['#239f40', '#f4f4f4', '#da0000'] },
+  SAU: { kind: 'plain', field: '#006c35', emblem: '#f4f4f4' },
 };
 
 const W = 60;

@@ -137,14 +137,18 @@ test.describe('performance', () => {
     // how loaded the container is -- inside the 33.3ms floor either way, with
     // room to roughly double. 2,000 is that headroom spent.
     //
-    // It was 1,400 while the map had 323 provinces. One Graphics per province
-    // is the structure, so subdividing moved this and nothing else -- and it
-    // has moved twice: 1,266 provinces built 4,000-odd nodes, and the
-    // administrative map's 1,717 build 5,100, of which 1,601 are visible. The
-    // per-frame cost above is what actually matters and it barely felt it:
-    // p50 2.1ms against a 16.6ms frame, p99 14.4ms against a 33.3ms floor.
+    // The two numbers have come apart, and the visible one is the one that
+    // costs. At 4,351 provinces the tree holds 6,615 nodes -- one Graphics and
+    // one label per province, plus states, cities and counters -- but only 471
+    // of them are visible at this zoom, because below 0.34 the fills are drawn
+    // grouped by colour out of about thirty Graphics and the per-province layer
+    // is detached from the scene entirely.
+    //
+    // 1,717 provinces without that grouping put 1,601 nodes on screen and cost
+    // p50 2.1ms / p99 14.4ms per frame; 4,351 with it put 471 on screen and
+    // cost p50 2.2ms / p99 11.4ms. Two and a half times the map for less work.
     expect(scene.visible).toBeLessThan(2000);
-    expect(scene.nodes).toBeLessThan(6000);
+    expect(scene.nodes).toBeLessThan(8000);
   });
 
   test('recolouring the whole map is cheap', async ({ page }) => {

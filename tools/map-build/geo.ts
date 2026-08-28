@@ -121,6 +121,33 @@ export function signedArea(ring: Ring): number {
   return a / 2;
 }
 
+/**
+ * Splits long lon/lat segments so that projecting them follows the curve.
+ *
+ * Clipping against the world box leaves edges that run dead straight in
+ * lon/lat -- a parallel of latitude, most of the time -- and a parallel is an
+ * arc in a conic projection, not a chord. The coastline layer is one ring for
+ * all of Africa and Eurasia, so its southern edge ran seventy-eight degrees in
+ * a single segment and the chord cut a two-hundred-kilometre bite out of the
+ * Sahara: land the provinces covered and the silhouette beneath them did not.
+ * Coastlines are dense enough already that only those box edges are split.
+ */
+export function densify(ring: Ring, maxStep = 0.5): Ring {
+  const out: Ring = [];
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    out.push(a);
+    const span = Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]));
+    const steps = Math.ceil(span / maxStep);
+    for (let k = 1; k < steps; k++) {
+      const t = k / steps;
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    }
+  }
+  return out;
+}
+
 export function ringArea(ring: Ring): number {
   return Math.abs(signedArea(ring));
 }

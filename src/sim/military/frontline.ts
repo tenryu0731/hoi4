@@ -93,14 +93,26 @@ export function assignToFront(
   if (front.length === 0) return;
   const divisions = army.divisions
     .map((id) => state.divisions.find((d) => d.id === id))
-    .filter((d): d is NonNullable<typeof d> =>
-      !!d && !d.dead && d.combatId === null && !d.detached);
+    .filter((d): d is NonNullable<typeof d> => !!d && !d.dead);
   if (divisions.length === 0) return;
 
   const posts = new Set(front);
   const held = new Map<ProvinceId, number>();
   const loose: Division[] = [];
   for (const div of divisions) {
+    // A division pinned in a battle, or detached under orders of its own,
+    // cannot be sent anywhere -- but standing on a post it holds that post,
+    // and more firmly than one merely walking to it. Counting only the
+    // divisions it could still move made a post whose garrison was fighting on
+    // it read as a hole, and the line answered by marching a division out of
+    // Silesia, across the Polish Corridor, into East Prussia.
+    const fixed = div.combatId !== null || div.detached;
+    if (fixed) {
+      if (posts.has(div.provinceId)) {
+        held.set(div.provinceId, (held.get(div.provinceId) ?? 0) + 1);
+      }
+      continue;
+    }
     // Already on a post, or already walking to one: leave it alone. This is
     // the whole of the fix. What this replaces sorted every division against
     // every post from scratch every day, so a division that arrived yesterday
