@@ -125,9 +125,10 @@ export function referenceProvinceCount(): number {
  * is actually inside it so a horseshoe-shaped province does not seed into its
  * own bay. These are the seeds our own cells grow from, which is what makes
  * our provinces sit where the real game's do without copying a single line of
- * its geometry.
+ * its geometry. Each carries the state the reference puts it in, so the cell
+ * grown from it can be grouped without guessing.
  */
-export function referenceProvinceSeeds(): { lon: number; lat: number; cell: number }[] {
+export function referenceProvinceSeeds(): { lon: number; lat: number; cell: number; state: number }[] {
   const r = load();
   const sumX = new Float64Array(r.provinceCount + 1);
   const sumY = new Float64Array(r.provinceCount + 1);
@@ -139,7 +140,7 @@ export function referenceProvinceSeeds(): { lon: number; lat: number; cell: numb
       sumX[c] += col; sumY[c] += row; n[c]++;
     }
   }
-  const out: { lon: number; lat: number; cell: number }[] = [];
+  const out: { lon: number; lat: number; cell: number; state: number }[] = [];
   for (let c = 1; c <= r.provinceCount; c++) {
     if (n[c] === 0) continue;
     let col = Math.round(sumX[c] / n[c]);
@@ -155,7 +156,15 @@ export function referenceProvinceSeeds(): { lon: number; lat: number; cell: numb
         }
       }
     }
-    out.push({ lon: r.lon0 + col * r.lonStep, lat: latOfRow(r, row), cell: c });
+    // The state the reference itself puts this province in. Carried with the
+    // seed rather than looked up again later from our own cell's shape: our
+    // cell is a Voronoi region clipped to a different coastline, so asking
+    // where *it* lies is a vote that can go the wrong way on a border. This
+    // cannot -- it is the reference answering about its own province.
+    out.push({
+      lon: r.lon0 + col * r.lonStep, lat: latOfRow(r, row), cell: c,
+      state: r.states[row * r.w + col],
+    });
   }
   return out;
 }

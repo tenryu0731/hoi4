@@ -146,17 +146,17 @@ export const UI_ICONS: Record<string, string> = {
    * ore shipped back.
    */
   trade: solid(
-    // Hull, with a raked bow and a flat transom.
-    '<path d="M3.2 20.4h25.6l-3.4 6.6a2 2 0 0 1-1.8 1.1H8.4a2 2 0 0 1-1.8-1.1z"/>' +
-    // Deck line and superstructure aft.
-    '<path d="M4.6 17.6h22.8v2.2H4.6z"/>' +
-    '<path d="M20.4 10.4h5.4v6.6h-5.4z"/>' +
-    // Funnel.
-    '<path d="M22.2 6.2h2.6v3.6h-2.6z"/>' +
-    // Two containers forward, with a gap between them so they read as cargo
-    // rather than as one block.
-    '<path d="M6.2 12.8h5.6v4.2H6.2z"/>' +
-    '<path d="M13 12.8h5.6v4.2H13z"/>',
+    // Six shapes with 1.4-unit gaps drew a ship at full size and a lump at
+    // the 13px this is actually used at: the deck line, the containers and the
+    // funnel all closed up into the hull. Three shapes with gaps twice as wide
+    // survive the shrink, which is the only size that matters.
+    //
+    // Hull: a raked bow, a flat transom, and a deck that overhangs both.
+    '<path d="M2.4 18.6h27.2l-4.2 8.2a2.4 2.4 0 0 1-2.1 1.3H8.7a2.4 2.4 0 0 1-2.1-1.3z"/>' +
+    // The island aft, funnel included as one mass rather than two thin ones.
+    '<path d="M19.4 7.2h7.2v9.6h-7.2z"/>' +
+    // One deck cargo block forward, wide enough to still be a rectangle.
+    '<path d="M5.4 11.4h11.2v5.4H5.4z"/>',
   ),
   manpower: solid(
     '<circle cx="16" cy="9.6" r="5.1"/>' +

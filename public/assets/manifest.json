@@ -9,8 +9,8 @@
     "portraitFallbacks": 8,
     "portraits": 100
   },
-  "totalBytes": 159912,
-  "totalGzipBytes": 146486,
+  "totalBytes": 159818,
+  "totalGzipBytes": 146457,
   "assets": [
     {
       "path": "assets/flags/ALB.svg",
@@ -369,8 +369,8 @@
     },
     {
       "path": "assets/icons/ui-trade.svg",
-      "bytes": 377,
-      "gzipBytes": 240
+      "bytes": 283,
+      "gzipBytes": 211
     },
     {
       "path": "assets/icons/ui-victory_point.svg",

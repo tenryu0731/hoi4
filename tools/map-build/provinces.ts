@@ -142,6 +142,8 @@ interface Seed {
   /** City population in thousands; 0 for a filler point. */
   pop: number;
   cityName: string | null;
+  /** The state the reference puts this seed's province in; 0 off its window. */
+  refState?: number;
 }
 
 /** Inverse of the Lambert projection, needed to classify generated seeds. */
@@ -189,7 +191,7 @@ function pointInRings(x: number, y: number, rings: Ring[]): boolean {
   return winding % 2 === 1;
 }
 
-interface RefSeed { x: number; y: number; lon: number; lat: number; cell: number; }
+interface RefSeed { x: number; y: number; lon: number; lat: number; cell: number; state: number; }
 
 /** The real game's provinces, projected once and bucketed for lookup. */
 let refSeeds: { all: RefSeed[]; grid: Map<number, RefSeed[]> } | null = null;
@@ -201,7 +203,7 @@ function refSeedIndex(proj: LccParams): { all: RefSeed[]; grid: Map<number, RefS
   const grid = new Map<number, RefSeed[]>();
   for (const s of referenceProvinceSeeds()) {
     const [x, y] = projectLcc(s.lon, s.lat, proj);
-    const seed: RefSeed = { x, y, lon: s.lon, lat: s.lat, cell: s.cell };
+    const seed: RefSeed = { x, y, lon: s.lon, lat: s.lat, cell: s.cell, state: s.state };
     all.push(seed);
     const k = Math.floor(y / REF_BUCKET) * 100_000 + Math.floor(x / REF_BUCKET);
     const list = grid.get(k);
@@ -237,7 +239,7 @@ function referenceSeedsIn(
     for (let gx = Math.floor(minX / REF_BUCKET); gx <= Math.floor(maxX / REF_BUCKET); gx++) {
       for (const s of grid.get(gy * 100_000 + gx) ?? []) {
         if (!pointInRings(s.x, s.y, rings)) continue;
-        out.push({ x: s.x, y: s.y, lon: s.lon, lat: s.lat, pop: 0, cityName: null });
+        out.push({ x: s.x, y: s.y, lon: s.lon, lat: s.lat, pop: 0, cityName: null, refState: s.state });
       }
     }
   }
@@ -790,6 +792,15 @@ const MIN_STATE_KM = 2_400;
  * instead of a coin toss.
  */
 function referenceStateOf(p: RawProvince, proj: LccParams): number {
+  // The seed came from one of the reference's own provinces, and the reference
+  // already says which state that province is in. Taking its word is exact
+  // where a vote is not: our cell is a Voronoi region clipped to a different
+  // coastline, so sampling *its* shape puts a cell straddling a state border
+  // on whichever side happened to win nine points. Measured, the vote left
+  // only 61% of our state borders within two pixels of one of theirs against
+  // 78% for the province borders it could not disagree with.
+  if (p.seed.refState) return p.seed.refState;
+
   const votes = new Map<number, number>();
   const outer = p.rings[0];
   const put = (x: number, y: number): void => {
