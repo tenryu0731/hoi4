@@ -20,42 +20,70 @@ import type { CountryId, GameState, ProvinceId } from '../core/types';
  * Victory points a coastal province needs to have a harbour.
  *
  * vp is how the map says "there is a town here", so the threshold reads the
- * data rather than picking a number. Measured on the administrative map: of
- * 450 coastal provinces, 215 carry a single victory point, 214 carry three or
- * more, and 133 carry five or more. Three was the gap when provinces were
- * whole regions; once they were cut down to real size, half the coast cleared
- * it and a harbour stopped meaning anything. Five is where a coastal cell has
- * a town rather than a hamlet, and 133 harbours against 1704 provinces is
- * close to the reference's own density.
+ * data rather than picking a number. It is a sum over the towns inside a
+ * province, which means it moves with how finely the map is cut: when the
+ * cells were whole regions three was the gap, at 1704 cells five gave 133
+ * harbours, and once the states were cut to the real game's granularity --
+ * 2169 cells, a province being a town and its hinterland -- five let a
+ * seventh of the whole map put a man on a ship. Of 1872 coastal cells, 637
+ * carry three or more, 290 carry five, and 136 carry seven. Seven is where a
+ * coastal cell has a town rather than a hamlet, and 136 harbours is the same
+ * count the threshold was set to give when it was last measured.
  */
-const PORT_VP = 5;
+const PORT_VP = 7;
 
 const cache = new WeakMap<ProvinceIndex, Set<ProvinceId>>();
 
 /**
  * Every harbour on the map.
  *
- * Coastal towns, plus a fallback: a country with a coastline and no town on it
- * still gets its best coastal province. Without that, Bulgaria and Lithuania --
- * both of which had a port and only one -- would be unable to put a man on a
- * ship anywhere in their own country. Keyed on the 1936 owner because this is
- * geography: harbours do not appear and disappear as the front moves, they
- * change hands.
+ * Coastal towns, plus a quay for every piece of a country the sea cuts off.
+ *
+ * The threshold alone is not enough, and not only for Bulgaria and Lithuania
+ * -- each of which had one port and would otherwise have none. East Prussia is
+ * the case that matters: Konigsberg is one of the Baltic's great harbours and
+ * still only the fifth town of the Reich, so a rule that ranks towns against
+ * the whole map leaves the province Germany can reach by no other means with
+ * nowhere to land. Ground nobody can sail to is ground nobody can reinforce or
+ * evacuate, and a garrison walks into it once and never comes out.
+ *
+ * So each run of a country's own ground is walked separately, and any run with
+ * a coast and no town big enough is given its best coastal province. Keyed on
+ * the 1936 owner because this is geography: harbours do not appear and
+ * disappear as the front moves, they change hands.
  */
 export function ports(index: ProvinceIndex): ReadonlySet<ProvinceId> {
   const hit = cache.get(index);
   if (hit) return hit;
 
   const out = new Set<ProvinceId>();
-  const best = new Map<string, ProvinceId>();
-  for (const p of index.provinces) {
-    if (!p.coastal) continue;
-    if (p.vp >= PORT_VP) { out.add(p.id); continue; }
-    const held = best.get(p.ownerTag);
-    if (held === undefined || p.vp > index.get(held).vp) best.set(p.ownerTag, p.id);
-  }
-  for (const [tag, id] of best) {
-    if (![...out].some((q) => index.get(q).ownerTag === tag)) out.add(id);
+  for (const p of index.provinces) if (p.coastal && p.vp >= PORT_VP) out.add(p.id);
+
+  const seen = new Set<ProvinceId>();
+  for (const start of index.provinces) {
+    if (seen.has(start.id)) continue;
+    const tag = start.ownerTag;
+    const run: ProvinceId[] = [];
+    const stack = [start.id];
+    seen.add(start.id);
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      run.push(cur);
+      for (const nb of index.get(cur).neighbors) {
+        if (seen.has(nb) || index.get(nb).ownerTag !== tag) continue;
+        seen.add(nb);
+        stack.push(nb);
+      }
+    }
+    if (run.some((id) => out.has(id))) continue;
+    let best: ProvinceId | null = null;
+    for (const id of run) {
+      const p = index.get(id);
+      if (!p.coastal) continue;
+      // By id after the town, so the same map always names the same quay.
+      if (best === null || p.vp > index.get(best).vp) best = id;
+    }
+    if (best !== null) out.add(best);
   }
   cache.set(index, out);
   return out;

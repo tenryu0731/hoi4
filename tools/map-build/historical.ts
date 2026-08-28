@@ -222,3 +222,40 @@ export const CARVE_1936: readonly Carve[] = [
     window: { minLon: 11.8, maxLon: 19.0, minLat: 48.4, maxLat: 51.2 },
   },
 ];
+
+/**
+ * How many states each country's ground inside this map is cut into.
+ *
+ * The reference reads Hearts of Iron's state map by colour, and colour is a
+ * poor witness at the edges: it splits Iceland into six and Latvia into seven
+ * while reading Germany about right. States came out even-handed in the Reich
+ * and shredded everywhere else -- 「ドイツ以外が細すぎる」 -- because a country
+ * whose states happen to be drawn in similar colours reads as one region and a
+ * country whose single state is cut by a firth or a shading band reads as
+ * several. Counting is the one thing the raster cannot do for us, so it is
+ * done here.
+ *
+ * These are the counts the real game uses for the ground each country holds
+ * inside this map's bounds, colonies included -- Britain's number covers Egypt
+ * and Iraq as well as the British Isles, France's the Maghreb and the Levant,
+ * and the Soviet Union's stops at the eastern edge rather than the Pacific.
+ *
+ * The budget counts states that can reach a compatriot overland. An island
+ * with no land neighbour of its own nation -- Malta, Gibraltar, the Canaries,
+ * Crete, Gotland -- is a state on top of the budget rather than inside it,
+ * because the alternative is folding it into a mainland it cannot be walked
+ * to. The real game keeps those separate for the same reason.
+ *
+ * A country over its budget has its smallest states folded into the neighbour
+ * they share the most border with, until it fits. One under its budget is left
+ * exactly as it is: a coarse border that exists is better than a fine one
+ * invented to hit a number.
+ */
+export const STATE_BUDGET_1936: Readonly<Record<string, number>> = {
+  SOV: 80, ENG: 26, FRA: 31, ITA: 24, SPR: 20, GER: 22, POL: 15, TUR: 14,
+  YUG: 10, ROM: 10, GRE: 8, FIN: 7, NOR: 6, POR: 6, PER: 6, SWE: 5, DEN: 5,
+  // Czechoslovakia's six is before Munich: the Sudetenland is carved out of
+  // the Bohemian rim afterwards, which makes seven on the finished map.
+  CZE: 6, AUS: 4, HUN: 4, BUL: 4, IRE: 3, SAU: 3, EST: 2, LAT: 2, LIT: 2,
+  SWI: 2, HOL: 2, BEL: 2, ALB: 1, ICE: 1, LUX: 1,
+};

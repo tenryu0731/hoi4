@@ -9,7 +9,7 @@ import type { CityJson, ProvinceGeoJson, StateGeoJson } from '../../src/sim/map/
 import type { TerrainType } from '../../src/sim/core/types';
 import { NATION_BY_TAG, NATIONS } from '../../src/sim/scenario/nations';
 import type { StateGroup } from './states';
-import { CARVE_1936, type Carve } from './historical';
+import { CARVE_1936, STATE_BUDGET_1936, type Carve } from './historical';
 import { referenceKmPerProvince, referenceStateAt } from './reference';
 import type { BuiltProvinces } from './build';
 
@@ -49,7 +49,15 @@ const COLONIAL_AREA_PER_PROVINCE = 15_000;
  * entirely on its borders.
  */
 const MIN_PROVINCES_PER_STATE = 2;
-const MAX_PROVINCES_PER_STATE = 64;
+/**
+ * And no administrative block is cut into more than a dozen. Open a state in
+ * the real game and it lists a handful of provinces however much ground it
+ * covers -- Norrland is enormous and still reads as a page, not a country.
+ * The cutting happens before the cells are regrouped into states, so a state
+ * that ends up spanning several blocks can hold more; what this stops is one
+ * block of desert turning into a state's worth of cells on its own.
+ */
+const MAX_PROVINCES_PER_STATE = 12;
 /**
  * What fraction of the cells asked for actually survive to the map -- rounding
  * down, the sliver floor and the per-state ceiling each shave one here and
@@ -57,6 +65,23 @@ const MAX_PROVINCES_PER_STATE = 64;
  * region of Europe inside a few percent of the count the real game uses.
  */
 const REFERENCE_YIELD = 0.93;
+/**
+ * The smallest patch of unclaimed ground worth handing back. Below this it is
+ * a rasterising artefact along a coast, not a hole anyone can see.
+ */
+const MIN_LEFTOVER_AREA = 40;
+/**
+ * The smallest ring worth drawing beyond a province's own body -- an outlying
+ * islet, or a hole around one. Below this it is grit from a boolean op.
+ */
+const MIN_FRAGMENT_AREA = 8;
+/**
+ * How much of a town's own share of a state one province covers. Below one
+ * because a province is a town plus its hinterland and the hinterland between
+ * two towns has to go somewhere; measured to leave settled Europe untouched
+ * while pulling Norrland and the Sahara back to the size the real game uses.
+ */
+const SETTLEMENT_REACH = 0.55;
 /** Cells smaller than this are merged away rather than shipped as slivers. */
 const MIN_PROVINCE_AREA = 260;
 
@@ -164,7 +189,7 @@ function unprojectLcc(x: number, y: number, p: LccParams): [number, number] {
 function centreOf(rings: Ring[], precision = 3): Pt {
   const sorted = [...rings].sort((a, b) => ringArea(b) - ringArea(a));
   const outer = sorted[0];
-  const holes = sorted.slice(1).filter((r) => pointInRing(r[0][0], r[0][1], outer));
+  const holes = sorted.slice(1).filter((r) => ringInsideRing(r, outer));
   return poleOfInaccessibility([outer, ...holes], precision);
 }
 
@@ -269,6 +294,30 @@ interface RawProvince {
 }
 
 /**
+ * Is `inner` nested inside `outer`? Sampled across the whole ring rather than
+ * tested at its first vertex: where a state was cut out of a larger admin unit
+ * (the Karelian isthmus, Venezia Giulia) the two lobes meet along the cut, so
+ * a lone vertex sitting on that shared edge can decide a whole lobe is a hole
+ * and erase it. A majority of vertices and edge midpoints cannot be fooled by
+ * a boundary they only touch.
+ */
+function ringInsideRing(inner: Ring, outer: Ring): boolean {
+  const step = Math.max(1, Math.floor(inner.length / 24));
+  let inside = 0;
+  let tested = 0;
+  for (let k = 0; k < inner.length; k += step) {
+    const a = inner[k];
+    const b = inner[(k + 1) % inner.length];
+    const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    for (const [x, y] of [a, mid]) {
+      tested++;
+      if (pointInRing(x, y, outer)) inside++;
+    }
+  }
+  return tested > 0 && inside * 2 > tested;
+}
+
+/**
  * Groups a unit's rings into a proper MultiPolygon.
  *
  * A nation's rings are a flat list: mainland, islands, and enclave holes all
@@ -294,7 +343,7 @@ function toMultiPolygon(rings: Ring[]): MultiRing[] {
       if (i === j) continue;
       const areaJ = ringArea(rings[j]);
       if (areaJ <= ringArea(rings[i])) continue;
-      if (!pointInRing(rings[i][0][0], rings[i][0][1], rings[j])) continue;
+      if (!ringInsideRing(rings[i], rings[j])) continue;
       depth++;
       if (areaJ < smallestArea) { smallestArea = areaJ; smallestContainer = j; }
     }
@@ -318,30 +367,125 @@ function toMultiPolygon(rings: Ring[]): MultiRing[] {
   return polygons;
 }
 
-function clipCellToUnit(cell: Pt[], unit: MultiRing[]): Ring[] {
-  if (cell.length < 3) return [];
-  try {
-    const result = polygonClipping.intersection(
-      [cell.map((p) => [p[0], p[1]] as [number, number])] as never,
-      unit as never,
-    );
-    const out: Ring[] = [];
-    for (const poly of result) {
-      for (const ring of poly) {
-        const r: Ring = ring.map((p) => [p[0], p[1]] as Pt);
-        // polygon-clipping repeats the first point at the end.
-        if (r.length > 1) {
-          const f = r[0];
-          const l = r[r.length - 1];
-          if (Math.abs(f[0] - l[0]) < 1e-9 && Math.abs(f[1] - l[1]) < 1e-9) r.pop();
-        }
-        if (r.length >= 3) out.push(r);
+/** polygon-clipping's nested output, flattened back to the rings we carry. */
+function ringsOf(result: MultiRing[]): Ring[] {
+  const out: Ring[] = [];
+  for (const poly of result) {
+    for (const ring of poly) {
+      const r: Ring = ring.map((q) => [q[0], q[1]] as Pt);
+      // polygon-clipping repeats the first point at the end.
+      if (r.length > 1) {
+        const f = r[0];
+        const l = r[r.length - 1];
+        if (Math.abs(f[0] - l[0]) < 1e-9 && Math.abs(f[1] - l[1]) < 1e-9) r.pop();
       }
+      if (r.length >= 3) out.push(r);
+    }
+  }
+  return out;
+}
+
+/**
+ * Grids, in kilometres, to snap a boolean op's input to when it refuses the
+ * geometry as it stands. polygon-clipping is exact in principle and fragile in
+ * practice: a ring that all but touches itself makes it abandon an output ring
+ * and throw. Snapping turns "all but touches" into "touches", which it handles
+ * -- and a metre of slack on a province border is invisible, where a missing
+ * province is the beige hole players report.
+ */
+const SNAP_GRIDS = [0, 1e-3, 1e-2, 0.1] as const;
+
+function snapMulti(polys: MultiRing[], grid: number): MultiRing[] {
+  if (grid <= 0) return polys;
+  return polys.map((poly) => poly.map((ring) => {
+    const out: number[][] = [];
+    for (const q of ring) {
+      const p = [Math.round(q[0] / grid) * grid, Math.round(q[1] / grid) * grid];
+      const last = out[out.length - 1];
+      if (last && last[0] === p[0] && last[1] === p[1]) continue;
+      out.push(p);
     }
     return out;
-  } catch {
-    // Degenerate geometry: drop the cell rather than abort the whole build.
-    return [];
+  }));
+}
+
+function clipCellToUnit(cell: Pt[], unit: MultiRing[]): Ring[] {
+  if (cell.length < 3) return [];
+  const cellPoly: MultiRing[] = [[cell.map((q) => [q[0], q[1]])]];
+  for (const grid of SNAP_GRIDS) {
+    try {
+      return ringsOf(polygonClipping.intersection(
+        snapMulti(cellPoly, grid) as never, snapMulti(unit, grid) as never,
+      ) as MultiRing[]);
+    } catch {
+      // Too tight for this grid; try a coarser one.
+    }
+  }
+  // Every grid refused it. `reclaimLeftover` gives the ground back, so a cell
+  // lost here costs a border, never a hole.
+  return [];
+}
+
+/** Net area of one polygon-clipping polygon: its outer ring less its holes. */
+function polyArea(poly: number[][][]): number {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const ring = poly[i].map((q) => [q[0], q[1]] as Pt);
+    a += i === 0 ? ringArea(ring) : -ringArea(ring);
+  }
+  return a;
+}
+
+/**
+ * Ground inside a state that no province claimed, handed to the nearest one.
+ *
+ * A Voronoi cell can go missing for reasons that have nothing to do with
+ * geography -- two seeds landing on the same point, a boolean op refusing a
+ * ring that touches itself, a lobe misread as a hole -- and the result is
+ * always the same: a gap in the state that renders as unowned land, which is
+ * exactly the artefact players report. Rather than chase each cause, the state
+ * is asked at the end what nobody took, and the remainder is merged into the
+ * province next to it. Whatever goes wrong upstream, the map stays whole.
+ */
+function reclaimLeftover(unit: MultiRing[], members: RawProvince[]): void {
+  if (members.length === 0) return;
+  const claimed = members.map((p) => toMultiPolygon(p.rings));
+  let leftover: MultiRing[] = [];
+  for (const grid of SNAP_GRIDS) {
+    try {
+      leftover = polygonClipping.difference(
+        snapMulti(unit, grid) as never,
+        ...(claimed.map((c) => snapMulti(c, grid)) as never[]),
+      ) as MultiRing[];
+      break;
+    } catch {
+      // Too tight for this grid; try a coarser one.
+    }
+  }
+  for (const poly of leftover) {
+    if (polyArea(poly) < MIN_LEFTOVER_AREA) continue;
+    const rings = ringsOf([poly]);
+    if (rings.length === 0) continue;
+    const at = centreOf(rings);
+    let host = members[0];
+    let best = Infinity;
+    for (const p of members) {
+      const d = Math.hypot(p.centre[0] - at[0], p.centre[1] - at[1]);
+      if (d < best) { best = d; host = p; }
+    }
+    let merged: Ring[];
+    try {
+      merged = ringsOf(polygonClipping.union(
+        toMultiPolygon(host.rings) as never, [poly] as never,
+      ) as MultiRing[]);
+    } catch {
+      merged = [...host.rings, ...rings];
+    }
+    if (merged.length === 0) continue;
+    merged.sort((a, b) => ringArea(b) - ringArea(a));
+    host.rings = merged;
+    host.area = toMultiPolygon(merged).reduce((sum, q) => sum + polyArea(q), 0);
+    host.centre = centreOf(merged);
   }
 }
 
@@ -359,6 +503,16 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
     const area = group.area;
     const centre = centreOf(group.rings, 8);
     const [centreLon, centreLat] = unprojectLcc(centre[0], centre[1], projection);
+
+    const unitMulti = toMultiPolygon(group.rings);
+    // Seed only on landmasses big enough to hold a province. Otherwise
+    // farthest-point sampling puts seeds on the outermost skerry -- the point
+    // furthest from everything else -- and its clipped cell is then discarded
+    // as a sliver, leaving the mainland as a single province.
+    const seedRings = group.rings.filter((r) => ringArea(r) >= MIN_PROVINCE_AREA * 3);
+    const usable = seedRings.length > 0 ? seedRings : group.rings;
+    const mine = cities.filter((c) => pointInRings(c.x, c.y, usable));
+
     // How finely the real game cuts this part of the world, where it says.
     // Measured against it, an area rule alone came out at 0.81 of the
     // reference overall and much further off in places -- 0.59 in Scandinavia,
@@ -366,8 +520,25 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
     // Asking for exactly the reference's number lands about a tenth short:
     // rounding down, the sliver floor, and the ceiling per state all shave a
     // cell here and there. The shortfall is measured, so it is corrected for.
-    const density = (referenceKmPerProvince(centreLon, centreLat)
+    const said = (referenceKmPerProvince(centreLon, centreLat)
       ?? (centreLat < 37 ? COLONIAL_AREA_PER_PROVINCE : AREA_PER_PROVINCE)) * REFERENCE_YIELD;
+    // Empty ground gets coarser cells than the reference asks for.
+    //
+    // The density grid is read off a screenshot, and a screenshot of Lapland is
+    // mostly snow: the segmentation found about as many borders per square
+    // degree there as in Poland, which is false -- the real game cuts Norrland
+    // into a dozen provinces and Poland into sixty. Left alone it gave northern
+    // Sweden seventy provinces in one state and Iceland forty-two, which is
+    // 「プロヴィンスがおかしい」 whatever the reference says.
+    //
+    // Towns are the honest signal, and the one the reference itself follows
+    // wherever it reads correctly: a province is roughly a town and its
+    // hinterland. So the cell can be no smaller than the ground a town has to
+    // itself here. In settled country that floor is far below what the
+    // reference says and changes nothing; in the Sahara and above the Arctic
+    // circle it is what decides.
+    const perTown = area / Math.max(1, mine.length);
+    const density = Math.max(said, perTown * SETTLEMENT_REACH);
     const byDensity = Math.min(
       MAX_PROVINCES_PER_STATE,
       Math.max(MIN_PROVINCES_PER_STATE, Math.round(area / density)),
@@ -378,16 +549,7 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
     const byArea = Math.max(1, Math.floor(area / MIN_PROVINCE_AREA));
     const wanted = Math.min(byDensity, byArea);
 
-    const unitMulti = toMultiPolygon(group.rings);
-    // Seed only on landmasses big enough to hold a province. Otherwise
-    // farthest-point sampling puts seeds on the outermost skerry -- the point
-    // furthest from everything else -- and its clipped cell is then discarded
-    // as a sliver, leaving the mainland as a single province.
-    const seedRings = group.rings.filter((r) => ringArea(r) >= MIN_PROVINCE_AREA * 3);
-    const usable = seedRings.length > 0 ? seedRings : group.rings;
-    const mine = cities.filter((c) => pointInRings(c.x, c.y, usable));
     const seeds = makeSeeds(usable, mine, wanted, projection);
-
     const push = (p: RawProvince): void => {
       membersOfState[stateIdx].push(raw.length);
       raw.push(p);
@@ -460,6 +622,20 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
         stateName: group.name,
       });
     }
+
+    const members = membersOfState[stateIdx].map((i) => raw[i]);
+    reclaimLeftover(unitMulti, members);
+    // Every square kilometre of a state has to end up inside one of its
+    // provinces -- ground no cell claims renders as unowned land. Counting
+    // cells cannot see that: Leningrad's state produced 20 of its 36 and still
+    // lost its entire western lobe, because a geometry fault had classified
+    // that lobe as a hole. Area is what the player sees, so area is the guard.
+    const held = members.reduce((sum, p) => sum + p.area, 0);
+    if (held < area * 0.98) {
+      console.warn(`  note: ${group.name} (${group.tag}) covered ` +
+        `${Math.round(held)} of ${Math.round(area)} km2 in ` +
+        `${members.length} provinces`);
+    }
   });
 
   // --- 2. Name the provinces that have no city of their own ----------------
@@ -470,7 +646,8 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   membersOfState.forEach((list, b) => { for (const i of list) blockOf[i] = b; });
   const touching = adjacencyOf(raw);
   const stateGroups = carveHistoricalStates(
-    regroupByReference(raw, blockOf, touching, projection), raw, touching, projection,
+    applyStateBudget(regroupByReference(raw, blockOf, touching, projection), raw, touching),
+    raw, touching, projection,
   );
 
   const stateOfProvince = new Int32Array(raw.length).fill(-1);
@@ -498,11 +675,18 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   });
 
   const provinces: ProvinceGeoJson[] = raw.map((p, id) => {
-    const ringDepth = p.rings.map((r, i) => {
+    // Everything but the province's own body has to earn its place. A boolean
+    // op that clips a cell along the seam it already touches leaves grit --
+    // rings of a square kilometre and less -- and grit on the map reads as a
+    // grain of rice sitting in the sea. The largest ring is always kept, so a
+    // province this small in the first place (Gibraltar, four square
+    // kilometres) still survives whole.
+    const rings = p.rings.filter((r, i) => i === 0 || ringArea(r) >= MIN_FRAGMENT_AREA);
+    const ringDepth = rings.map((r, i) => {
       let depth = 0;
-      for (let j = 0; j < p.rings.length; j++) {
+      for (let j = 0; j < rings.length; j++) {
         if (i === j) continue;
-        if (ringArea(p.rings[j]) > ringArea(r) && pointInRing(r[0][0], r[0][1], p.rings[j])) depth++;
+        if (ringArea(rings[j]) > ringArea(r) && ringInsideRing(r, rings[j])) depth++;
       }
       return depth % 2;
     });
@@ -514,7 +698,7 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
       terrain: p.terrain,
       vp: 0,
       coastal: false,
-      rings: p.rings.map((r) => flatten(r)),
+      rings: rings.map((r) => flatten(r)),
       ringDepth,
       center: [Math.round(p.centre[0] * 10) / 10, Math.round(p.centre[1] * 10) / 10],
       area: Math.round(p.area),
@@ -527,6 +711,8 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
     const st = states[p.stateId];
     if (st) st.provinces.push(p.id);
   }
+
+  weldProvinceRings(provinces);
 
   // --- 4. Distribute national assets across states -------------------------
   distributeNationalAssets(provinces, states, raw);
@@ -575,6 +761,73 @@ function referenceStateOf(p: RawProvince, proj: LccParams): number {
   let bestN = 0;
   for (const [cell, n] of votes) if (n > bestN || (n === bestN && cell < best)) { best = cell; bestN = n; }
   return best;
+}
+
+/**
+ * Folds a country's states together until it has no more than its budget.
+ *
+ * The smallest goes first, into whichever same-nation state it shares the most
+ * province border with -- so what disappears is the runt, and where it goes is
+ * the neighbour it already looks like part of. A state with no same-nation
+ * land neighbour at all -- Malta, Gibraltar, the Canaries -- is set aside
+ * rather than flung across water, and sits outside the budget, which is what
+ * `STATE_BUDGET_1936` says its numbers mean.
+ */
+function applyStateBudget(
+  groups: number[][], raw: RawProvince[], touching: number[][],
+): number[][] {
+  const stateOf = new Int32Array(raw.length).fill(-1);
+  groups.forEach((members, i) => { for (const m of members) stateOf[m] = i; });
+  const live = groups.map((m) => [...m]);
+  const areaOf = live.map((m) => m.reduce((s, i) => s + raw[i].area, 0));
+  const tagOf = live.map((m) => (m.length > 0 ? raw[m[0]].tag : ''));
+
+  const byTag = new Map<string, number[]>();
+  live.forEach((m, i) => {
+    if (m.length === 0) return;
+    const list = byTag.get(tagOf[i]);
+    if (list) list.push(i);
+    else byTag.set(tagOf[i], [i]);
+  });
+
+  for (const [tag, indices] of byTag) {
+    const budget = STATE_BUDGET_1936[tag];
+    if (budget === undefined) continue;
+    let mine = indices.filter((i) => live[i].length > 0);
+    const stranded = new Set<number>();
+    while (mine.length - stranded.size > budget) {
+      let runt = -1;
+      for (const i of mine) {
+        if (stranded.has(i)) continue;
+        if (runt < 0 || areaOf[i] < areaOf[runt]) runt = i;
+      }
+      if (runt < 0) break;
+      // Shared border, counted in province pairs: the longest seam wins, so a
+      // sliver joins the state it is already part of the shape of.
+      const seam = new Map<number, number>();
+      for (const m of live[runt]) {
+        for (const nb of touching[m]) {
+          const s = stateOf[nb];
+          if (s < 0 || s === runt || live[s].length === 0) continue;
+          if (raw[nb].tag !== tag) continue;
+          seam.set(s, (seam.get(s) ?? 0) + 1);
+        }
+      }
+      let host = -1;
+      let best = 0;
+      for (const [s, n] of seam) if (n > best || (n === best && s < host)) { best = n; host = s; }
+      if (host < 0) { stranded.add(runt); continue; }
+      for (const m of live[runt]) { live[host].push(m); stateOf[m] = host; }
+      areaOf[host] += areaOf[runt];
+      live[runt] = [];
+      mine = mine.filter((i) => i !== runt);
+    }
+    if (mine.length - stranded.size > budget) {
+      console.warn(`  note: ${tag} stayed at ${mine.length} states, budget ${budget}`);
+    }
+  }
+
+  return live.filter((m) => m.length > 0);
 }
 
 /**
@@ -907,6 +1160,89 @@ function romanish(n: number): string {
  * places was two characters of a two-megabyte file spent on something nobody
  * can see. Dropping them took the baked map from 2.7 MB to 2.0.
  */
+/**
+ * How far a rounded vertex can end up from the straight edge it started on:
+ * half the diagonal of the one-kilometre lattice, plus a hair.
+ */
+const WELD_TOLERANCE = 0.72;
+
+/**
+ * Welds the T-junctions that rounding opens between neighbouring provinces.
+ *
+ * Two cells that share an edge share its endpoints exactly, so rounding moves
+ * both sides the same way and the seam holds. A T-junction does not: where two
+ * provinces meet along a third's straight edge, the meeting point sits *on*
+ * that edge beforehand and up to seven hundred metres off it afterwards,
+ * opening a rice-grain of unowned ground between the three. Every edge is
+ * therefore re-noded against the rounded vertices lying along it -- the bend is
+ * where the three provinces actually meet, and the straight line is the lie.
+ */
+function weldProvinceRings(provinces: ProvinceGeoJson[]): void {
+  const CELL = 8;
+  const cellOf = (x: number, y: number): number =>
+    Math.floor(y / CELL) * 100_000 + Math.floor(x / CELL);
+  const index = new Map<number, number[]>();
+  for (const p of provinces) {
+    for (const r of p.rings) {
+      for (let i = 0; i < r.length; i += 2) {
+        const k = cellOf(r[i], r[i + 1]);
+        let list = index.get(k);
+        if (!list) { list = []; index.set(k, list); }
+        let seen = false;
+        for (let j = 0; j < list.length; j += 2) {
+          if (list[j] === r[i] && list[j + 1] === r[i + 1]) { seen = true; break; }
+        }
+        if (!seen) list.push(r[i], r[i + 1]);
+      }
+    }
+  }
+
+  for (const p of provinces) {
+    p.rings = p.rings.map((r) => {
+      const n = r.length / 2;
+      const out: number[] = [];
+      for (let i = 0; i < n; i++) {
+        const ax = r[i * 2], ay = r[i * 2 + 1];
+        const j = (i + 1) % n;
+        const bx = r[j * 2], by = r[j * 2 + 1];
+        out.push(ax, ay);
+        const dx = bx - ax, dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        if (len2 === 0) continue;
+        const hits: [number, number, number][] = [];
+        const x0 = Math.floor((Math.min(ax, bx) - 1) / CELL);
+        const x1 = Math.floor((Math.max(ax, bx) + 1) / CELL);
+        const y0 = Math.floor((Math.min(ay, by) - 1) / CELL);
+        const y1 = Math.floor((Math.max(ay, by) + 1) / CELL);
+        for (let cy = y0; cy <= y1; cy++) {
+          for (let cx = x0; cx <= x1; cx++) {
+            const list = index.get(cy * 100_000 + cx);
+            if (!list) continue;
+            for (let k = 0; k < list.length; k += 2) {
+              const px = list[k], py = list[k + 1];
+              if ((px === ax && py === ay) || (px === bx && py === by)) continue;
+              const t = ((px - ax) * dx + (py - ay) * dy) / len2;
+              if (t <= 1e-6 || t >= 1 - 1e-6) continue;
+              const ex = ax + t * dx - px, ey = ay + t * dy - py;
+              if (ex * ex + ey * ey > WELD_TOLERANCE * WELD_TOLERANCE) continue;
+              hits.push([t, px, py]);
+            }
+          }
+        }
+        if (hits.length === 0) continue;
+        hits.sort((u, v) => u[0] - v[0]);
+        let lastX = ax, lastY = ay;
+        for (const [, px, py] of hits) {
+          if (px === lastX && py === lastY) continue;
+          out.push(px, py);
+          lastX = px; lastY = py;
+        }
+      }
+      return out;
+    });
+  }
+}
+
 function flatten(ring: Ring, decimals = 0): number[] {
   const f = 10 ** decimals;
   const out = new Array<number>(ring.length * 2);

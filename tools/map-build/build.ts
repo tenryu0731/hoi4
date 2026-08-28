@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises';
 
 import {
   type Bbox, type Pt, type Ring,
-  LandMask, bboxOfRing, clipRing, closestApproach, distToSegment,
+  LandMask, bboxOfRing, clipRing, closestApproach, densify, distToSegment,
   projectLcc, ringArea,
   type LccParams,
 } from './geo';
@@ -156,11 +156,66 @@ function distinctPoints(ring: Ring): number {
   return seen.size;
 }
 
+/**
+ * Asks whether any province stands on a ring, by sampling points that are
+ * certainly inside it -- the midpoints of horizontal spans across it, which
+ * stay interior however concave the coast is.
+ */
+function heldGround(provinces: ProvinceGeoJson[]): (ring: Ring) => boolean {
+  const boxes = provinces.map((p) => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const r of p.rings) {
+      for (let i = 0; i < r.length; i += 2) {
+        if (r[i] < minX) minX = r[i];
+        if (r[i] > maxX) maxX = r[i];
+        if (r[i + 1] < minY) minY = r[i + 1];
+        if (r[i + 1] > maxY) maxY = r[i + 1];
+      }
+    }
+    return [minX, minY, maxX, maxY] as const;
+  });
+  const inFlatRing = (x: number, y: number, r: number[]): boolean => {
+    let hit = false;
+    for (let i = 0, j = r.length - 2; i < r.length; j = i, i += 2) {
+      const yi = r[i + 1], yj = r[j + 1];
+      if ((yi > y) !== (yj > y) && x < ((r[j] - r[i]) * (y - yi)) / (yj - yi) + r[i]) {
+        hit = !hit;
+      }
+    }
+    return hit;
+  };
+  return (ring: Ring): boolean => {
+    const [, minY, , maxY] = bboxOfRing(ring);
+    for (let k = 1; k <= 5; k++) {
+      const y = minY + ((maxY - minY) * k) / 6;
+      const cuts: number[] = [];
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const yi = ring[i][1], yj = ring[j][1];
+        if ((yi > y) !== (yj > y)) {
+          cuts.push(ring[i][0] + ((y - yi) / (yj - yi)) * (ring[j][0] - ring[i][0]));
+        }
+      }
+      cuts.sort((a, b) => a - b);
+      for (let c = 0; c + 1 < cuts.length; c += 2) {
+        const x = (cuts[c] + cuts[c + 1]) / 2;
+        for (let i = 0; i < provinces.length; i++) {
+          const b = boxes[i];
+          if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
+          let winding = 0;
+          for (const r of provinces[i].rings) if (inFlatRing(x, y, r)) winding++;
+          if (winding % 2 === 1) return true;
+        }
+      }
+    }
+    return false;
+  };
+}
+
 /** Clips a lon/lat ring to the map window and projects it. Empty when outside. */
 function prepareRing(coords: number[][]): Ring | null {
   const clipped = clipRing(toRing(coords), BBOX);
   if (clipped.length < 3) return null;
-  return project(clipped);
+  return project(densify(clipped));
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +235,9 @@ export async function buildMap(): Promise<MapDataJson> {
   });
   const units = rawUnits
     .map((u) => {
-      const rings = u.lonLat.map((r) => project(r)).sort((a, b) => ringArea(b) - ringArea(a));
+      const rings = u.lonLat
+        .map((r) => project(densify(r)))
+        .sort((a, b) => ringArea(b) - ringArea(a));
       // Skerries cost more in vertices than they are ever worth in play -- but
       // only the outlying ones. A unit's largest ring is the unit: dropping it
       // by area punched holes in the map wherever a city was its own admin
@@ -289,6 +346,7 @@ export async function buildMap(): Promise<MapDataJson> {
   // --- 7. Background land silhouette (also the oracle for strait testing) ---
   const landRings: number[][] = [];
   const landGeom: Ring[] = [];
+  const held = heldGround(provinces);
   for (const f of land.features) {
     for (const poly of polygonsOf(f)) {
       for (let r = 0; r < poly.length; r++) {
@@ -296,6 +354,12 @@ export async function buildMap(): Promise<MapDataJson> {
         if (!ring) continue;
         if (r === 0 && ringArea(ring) < MIN_ISLAND_AREA * 0.5) continue;
         const simple = simplifyRing(ring, SIMPLIFY_AREA * 1.5);
+        // The silhouette shows ground someone stands on and nothing else.
+        // Natural Earth carries islands smaller than a province is allowed to
+        // be -- a hundred and fifty square kilometres, forty-two of them --
+        // and with no province over them they came out as beige specks in an
+        // empty sea, which is exactly the unowned land players report.
+        if (r === 0 && !held(simple)) continue;
         landGeom.push(simple);
         landRings.push(flatten(simple));
       }

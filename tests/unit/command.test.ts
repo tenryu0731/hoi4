@@ -15,7 +15,7 @@ import { Simulation } from '../../src/sim/Simulation';
 import { TimeEngine } from '../../src/sim/time/TimeEngine';
 import { spawnDivision } from '../../src/sim/scenario/europe1936';
 import { makeFixture, type Fixture } from './helpers/fixture';
-import type { Army, Commander, GameState } from '../../src/sim/core/types';
+import type { Army, Commander, Division, GameState } from '../../src/sim/core/types';
 
 /**
  * Invariant failures about the chain of command only.
@@ -306,10 +306,15 @@ describe('battle plans', () => {
     time.step(24 * 20);
 
     const where = new Map<number, number>();
+    const sentTo = new Map<number, number | null>();
     const at = (id: number) => f.state.divisions.find((d) => d.id === id);
+    const goal = (d: Division): number | null =>
+      (d.order?.kind === 'move' ? d.order.target : null);
     for (const id of army.divisions) {
       const d = at(id);
-      if (d) where.set(id, d.provinceId);
+      if (!d) continue;
+      where.set(id, d.provinceId);
+      sentTo.set(id, goal(d));
     }
     let churn = 0;
     let holes = 0;
@@ -319,17 +324,32 @@ describe('battle plans', () => {
         const d = at(id);
         if (!d || d.dead) continue;
         const was = where.get(id);
-        // Not one that is fighting. A division pinned in a battle keeps
+        // A new order, given while the division stood on the line, sending it
+        // somewhere else.
+        //
+        // Not one that is fighting: a division pinned in a battle keeps
         // whatever order it had when it was drawn in, so it stands on its post
-        // with a stale path behind it -- which is the opposite of being
-        // shuffled, and on a border this fine there is usually one.
+        // with a stale path behind it, which is the opposite of being
+        // shuffled. And not one still walking an order from days ago: a
+        // division crossing a post on its way through is not the line
+        // shuffling anybody, and East Prussia's garrison reaches Pomerania by
+        // walking the length of the Corridor.
+        const target = goal(d);
         if (was !== undefined && d.combatId === null && army.frontProvinces.includes(was)
-          && d.path.length > 0 && d.path[d.path.length - 1] !== was) churn++;
+          && target !== null && target !== was && target !== sentTo.get(id)) churn++;
         where.set(id, d.provinceId);
+        sentTo.set(id, target);
       }
-      holes += army.frontProvinces.filter((p) => !f.state.provinces[p].divisions.some(
-        (x) => f.state.divisions[x]?.owner === ger.id,
-      )).length;
+      // Unmanned and unclaimed. A post with somebody walking to it is not a
+      // gap the line opened: East Prussia is an exclave, its share of the
+      // border needs more divisions than are standing in it, and the ones
+      // making up the difference are days away however the line is drawn.
+      holes += army.frontProvinces.filter((p) =>
+        !f.state.provinces[p].divisions.some((x) => f.state.divisions[x]?.owner === ger.id)
+        && !army.divisions.some((x) => {
+          const d = at(x);
+          return !!d && !d.dead && d.order?.kind === 'move' && d.order.target === p;
+        })).length;
     }
     expect(churn, 'a division standing on the line was sent somewhere else').toBe(0);
     expect(holes, 'a post of the line stood empty').toBe(0);
