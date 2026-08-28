@@ -74,6 +74,9 @@ const PLAN_FONT_PX = 24;
  */
 const CONVOY_BUCKETS = 8;
 
+/** Half-length of a convoy mark, in screen pixels at any zoom. */
+const CONVOY_PX = 10;
+
 /** A convoy under way: where it is, which way it is pointing, and how big. */
 interface Lane {
   x: number;
@@ -1150,7 +1153,12 @@ export class MapRenderer {
       x: lane.x + lane.ux * along * r - lane.uy * across * r,
       y: lane.y + lane.uy * along * r + lane.ux * across * r,
     });
-    const size = (lane: Lane) => Math.min(9 * u, 26) * (lane.n > 3 ? 1.15 : 1);
+    // A fixed size on screen, as the counters are. The ceiling this replaces
+    // was in world units, so it did the opposite of what a ceiling is for:
+    // 26km is 11 screen pixels at the zoom the Baltic fills the phone and half
+    // a pixel at the zoom Europe does, and the convoys disappeared exactly
+    // when the player was looking at the sea they were crossing.
+    const size = (lane: Lane) => CONVOY_PX * u * (lane.n > 3 ? 1.15 : 1);
 
     for (const lane of lanes.values()) {
       const r = size(lane);
