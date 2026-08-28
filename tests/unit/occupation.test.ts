@@ -36,7 +36,14 @@ describe('occupied territory', () => {
 
   it('is put down by a garrison, and needs enough of one', () => {
     const f = makeFixture();
-    const idx = f.state.states.findIndex((s) => f.state.countries[s.owner].tag === 'POL');
+    // A state with room in it. Suppression is per division per province, so on
+    // a two-province state one division genuinely is a garrison and the first
+    // half of this test would be asserting the opposite of the rule.
+    const idx = f.state.states.reduce(
+      (best, s, i, all) => (f.state.countries[s.owner].tag === 'POL'
+        && s.provinces.length > (all[best]?.provinces.length ?? 0) ? i : best),
+      -1,
+    );
     const st = occupy(f, idx, 'GER');
     const ger = f.country('GER');
 

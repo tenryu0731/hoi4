@@ -1,88 +1,107 @@
 # What the reference map is for
 
-Two facts about *Hearts of Iron IV*'s map are worth copying, and neither of them
-is geometry:
+Two things about *Hearts of Iron IV*'s map are worth copying, and neither of
+them is geometry:
 
-- **`hoi4-states.json`** — which of our cells belong together. A raster of cell
-  ids plus the lon/lat fit that places it. The build reads it to group its own
-  cells; it never takes a line from it.
-- **`hoi4-province-density.json`** — how many square kilometres the reference
-  gives one province, on a 1.5° lattice. The build reads it to decide how finely
-  to cut a state.
+- **which of our cells belong to the same state**, and
+- **where its provinces actually sit**.
 
-Both are weaker witnesses than their names suggest, and the build corrects for
-both — see **What the raster actually segments** below.
+`hoi4-cells.json` holds both: a raster of state-cell ids, a raster of
+province-cell ids, and the lon/lat fit that places them. The build reads it to
+group its own cells and to decide where to seed them. It never takes a line
+from it.
 
 Every border the game draws comes from **Natural Earth** (public domain), at
 10 m resolution, with the 1936 owners applied by `historical.ts`.
 
-## Why not trace the map instead
+## The export it is derived from
 
-Because tracing it would make the map worse. The screenshots are around a
-thousand pixels across for the whole of Europe, so one pixel is about eleven
-kilometres and a province is four to six pixels. Traced, every coastline would
-come back as an eleven-kilometre staircase. Natural Earth's coastline is two
-orders of magnitude finer, and the reference is not needed for it — only for
-the two things above, which are counts and groupings rather than shapes.
-
-## Regenerating
-
-    python3 tools/map-build/reference/derive/derive.py states.png provinces.png
-
-Needs `numpy`, `scipy` and `pillow`, and two screenshots of the game map — one
-in state mode, one in province mode — which are not in this repository. The
-script georeferences each against Natural Earth's coastline by searching for the
-lon/lat window that maximises the overlap of the land masks, which reaches an
-intersection-over-union of 0.86 for the state map and 0.93 for the province map.
-It prints both, and they are the number to watch: a fit below about 0.85 means
-the screenshot is cropped differently than the search expects and the tables it
-produces will be off by a state's width.
-
-## How closely the result follows it
-
-Measured after a build, against the same screenshots:
+A [mapchart.net](https://www.mapchart.net/hearts-of-iron-iv.html) Hearts of
+Iron IV export, in **primary colours**:
 
 | | |
 |---|---|
-| our state borders within one pixel of a reference cell edge | **49%** |
-| within three pixels | **75%** |
-| states | 344, against 415 cells in the reference's window and 246 thick-bordered regions |
-| provinces | 2169, a median of 6 to a state |
+| sea and lakes | pure blue |
+| land | white |
+| province borders | green |
+| state borders | black |
 
-The first two numbers were 75% and 81% when the build followed the raster's
-cells exactly, and they went down on purpose. See below.
+The colours are the whole trick. Telling the two tiers apart by the colour of
+the line is exact, where telling them apart by anything else is not — see
+below. The export must also be cropped above the Horn of Africa, or mapchart's
+watermark sits on land and its lettering cuts the cells underneath it into
+confetti.
 
-## What the raster actually segments
+## Regenerating
 
-Not states. `derive.py` finds cells as connected runs of flat colour, and in a
-state-mode screenshot Hearts of Iron draws its *province* borders inside each
-state as thin lines of the same shade. A run of flat colour therefore stops at
-a province border, not a state one, and the raster is a province map wearing a
-state map's name.
+    python3 tools/map-build/reference/derive/derive.py map.png
 
-It is not a clean province map either — the 12-pixel floor and the fitted
-window drop most of them, which is why the count came out at 415 and looked
-like a plausible number of states. What survives is uneven: counted against the
-real game, Germany came out about right while Iceland was split into six,
-Latvia into seven and Lithuania into seven. Cropping the Baltic out of the
-screenshot and counting by hand settles it — twenty-seven cells across three
-countries that have five or six states between them.
+Needs `numpy`, `scipy` and `pillow`, and the export above, which is not in this
+repository.
 
-Two corrections follow from that, both in the build rather than here:
+State borders are drawn *over* the province borders they follow, so a pixel or
+two of green can survive beside the black. That costs nothing here: a state
+border is always also a province border, so black is treated as splitting both
+tiers, and the hairline cells the leftovers would make fall under the minimum
+size.
 
-- `STATE_BUDGET_1936` in `historical.ts` gives each country the number of
-  states the real game gives it, and the smallest are folded into their
-  neighbours until the count fits. This is what the two agreement figures paid
-  for: our borders now follow the real game's *states*, and the raster's edges
-  are mostly province borders, so matching fewer of them is the point.
-- `SETTLEMENT_REACH` in `provinces.ts` puts a floor under the cell size that
-  follows where the towns are. The density lattice reads a screenshot too, and
-  a screenshot of Lapland is mostly snow: it claimed as many borders per square
-  degree above the Arctic circle as in Poland, which gave northern Sweden
-  seventy provinces in one state and Iceland forty-two.
+## Why not trace the map instead
 
-Segmenting by border *thickness* instead — state borders are drawn heavier than
-province borders — yields 246 regions, which is state-scale, and would let the
-raster carry state shapes rather than just groupings. It is not wired up: the
-budget already fixes the counts, and the shapes would need the whole downstream
-calibration measured again.
+Because tracing it would make the map worse, and because the geometry is not
+ours to ship. Natural Earth's coastline is a couple of orders of magnitude
+finer than any screenshot, and the reference is not needed for it — only for
+the grouping and the seeding, which are counts and positions rather than
+shapes.
+
+## The fit
+
+Longitude is linear in the column; latitude is a quintic in the row, fitted by
+matching each row's land/sea profile against Natural Earth's coastline.
+Measured against that coastline:
+
+| | |
+|---|---|
+| land intersection-over-union | **0.928** |
+| pixels agreeing | **96.95%** |
+| root-mean-square of the row fit | **0.15°** (≈17 km) |
+
+Longitude was also fitted column-wise as a cubic and came back no better than
+the straight line (rms 0.55° either way), which is the expected answer for a
+cylindrical projection.
+
+The one place the source itself is off is Iceland, about 1.5° north of where
+Natural Earth puts it — the real game's map is a game map, not a survey.
+
+## What it reads out
+
+| | |
+|---|---|
+| states | **435** |
+| provinces | **4,271** |
+| provinces to a state | median **12**, p10 4, p90 24 |
+
+and what the build makes of it:
+
+| | ours | reference |
+|---|---|---|
+| states | 450 | 435 |
+| provinces | 4,222 | 4,271 |
+| provinces to a state | median 8 | median 12 |
+| our land against its land, in its own frame | IoU **0.870** | — |
+
+## The reference this replaced, and why
+
+The previous one read a state-mode *screenshot* by runs of flat colour. In
+state mode the game still draws its province borders inside each state, in the
+same shade — so a run of flat colour stops at a province border, not a state
+one. It was a province map wearing a state map's name.
+
+It was not a clean province map either: a 12-pixel floor and the fitted window
+dropped most of them, which left 415 cells and looked like a plausible number
+of states. What survived was uneven — Germany came out about right while
+Iceland was split into six and Latvia into seven, which is what players saw as
+「ドイツ以外が細すぎる」.
+
+Two workarounds existed to compensate, and both are gone with it: a hand-written
+table of state counts per country, and a floor on cell size that followed where
+the towns were. Neither is needed once the reference can be believed.

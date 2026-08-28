@@ -3,14 +3,14 @@ import polygonClipping from 'polygon-clipping';
 
 import {
   type LccParams, type Pt, type Ring,
-  bboxOfRing, poleOfInaccessibility, pointInRing, ringArea,
+  bboxOfRing, poleOfInaccessibility, pointInRing, projectLcc, ringArea,
 } from './geo';
 import type { CityJson, ProvinceGeoJson, StateGeoJson } from '../../src/sim/map/MapData';
 import type { TerrainType } from '../../src/sim/core/types';
 import { NATION_BY_TAG, NATIONS } from '../../src/sim/scenario/nations';
 import type { StateGroup } from './states';
-import { CARVE_1936, STATE_BUDGET_1936, type Carve } from './historical';
-import { referenceKmPerProvince, referenceStateAt } from './reference';
+import { CARVE_1936, type Carve } from './historical';
+import { referenceProvinceSeeds, referenceStateAt } from './reference';
 import type { BuiltProvinces } from './build';
 
 /**
@@ -50,21 +50,11 @@ const COLONIAL_AREA_PER_PROVINCE = 15_000;
  */
 const MIN_PROVINCES_PER_STATE = 2;
 /**
- * And no administrative block is cut into more than a dozen. Open a state in
- * the real game and it lists a handful of provinces however much ground it
- * covers -- Norrland is enormous and still reads as a page, not a country.
- * The cutting happens before the cells are regrouped into states, so a state
- * that ends up spanning several blocks can hold more; what this stops is one
- * block of desert turning into a state's worth of cells on its own.
+ * A ceiling for ground the reference does not reach -- the deep Sahara, the
+ * Atlantic islands. Where it does reach, its own province count decides and
+ * this never binds.
  */
-const MAX_PROVINCES_PER_STATE = 12;
-/**
- * What fraction of the cells asked for actually survive to the map -- rounding
- * down, the sliver floor and the per-state ceiling each shave one here and
- * there. Measured against the reference and corrected for, which brings every
- * region of Europe inside a few percent of the count the real game uses.
- */
-const REFERENCE_YIELD = 0.93;
+const MAX_PROVINCES_PER_STATE = 24;
 /**
  * The smallest patch of unclaimed ground worth handing back. Below this it is
  * a rasterising artefact along a coast, not a hole anyone can see.
@@ -76,12 +66,11 @@ const MIN_LEFTOVER_AREA = 40;
  */
 const MIN_FRAGMENT_AREA = 8;
 /**
- * How much of a town's own share of a state one province covers. Below one
- * because a province is a town plus its hinterland and the hinterland between
- * two towns has to go somewhere; measured to leave settled Europe untouched
- * while pulling Norrland and the Sahara back to the size the real game uses.
+ * How near a town has to be to lend a cell its name and its people. Beyond
+ * this the cell is named for the direction it lies in from the nearest town,
+ * which is what `nameProvinces` does anyway.
  */
-const SETTLEMENT_REACH = 0.55;
+const NAME_REACH_KM = 55;
 /** Cells smaller than this are merged away rather than shipped as slivers. */
 const MIN_PROVINCE_AREA = 260;
 
@@ -200,9 +189,86 @@ function pointInRings(x: number, y: number, rings: Ring[]): boolean {
   return winding % 2 === 1;
 }
 
+interface RefSeed { x: number; y: number; lon: number; lat: number; cell: number; }
+
+/** The real game's provinces, projected once and bucketed for lookup. */
+let refSeeds: { all: RefSeed[]; grid: Map<number, RefSeed[]> } | null = null;
+const REF_BUCKET = 120;
+
+function refSeedIndex(proj: LccParams): { all: RefSeed[]; grid: Map<number, RefSeed[]> } {
+  if (refSeeds) return refSeeds;
+  const all: RefSeed[] = [];
+  const grid = new Map<number, RefSeed[]>();
+  for (const s of referenceProvinceSeeds()) {
+    const [x, y] = projectLcc(s.lon, s.lat, proj);
+    const seed: RefSeed = { x, y, lon: s.lon, lat: s.lat, cell: s.cell };
+    all.push(seed);
+    const k = Math.floor(y / REF_BUCKET) * 100_000 + Math.floor(x / REF_BUCKET);
+    const list = grid.get(k);
+    if (list) list.push(seed);
+    else grid.set(k, [seed]);
+  }
+  refSeeds = { all, grid };
+  return refSeeds;
+}
+
+/**
+ * Seeds for one state: where the real game puts its provinces.
+ *
+ * Not a lattice and not the towns. Every province of the reference that lands
+ * on this ground becomes one of our cells, so our provinces sit where its do
+ * and there are as many of them -- and still not one line of its geometry is
+ * copied, because what the cell actually looks like is decided by the Voronoi
+ * against Natural Earth's coastline. A town near the seed lends its name and
+ * its people, which is what makes a cell urban; it does not move the seed.
+ */
+function referenceSeedsIn(
+  rings: Ring[], cities: CityJson[], proj: LccParams,
+): Seed[] {
+  const { grid } = refSeedIndex(proj);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const r of rings) {
+    const [a, b, c, d] = bboxOfRing(r);
+    minX = Math.min(minX, a); minY = Math.min(minY, b);
+    maxX = Math.max(maxX, c); maxY = Math.max(maxY, d);
+  }
+  const out: Seed[] = [];
+  for (let gy = Math.floor(minY / REF_BUCKET); gy <= Math.floor(maxY / REF_BUCKET); gy++) {
+    for (let gx = Math.floor(minX / REF_BUCKET); gx <= Math.floor(maxX / REF_BUCKET); gx++) {
+      for (const s of grid.get(gy * 100_000 + gx) ?? []) {
+        if (!pointInRings(s.x, s.y, rings)) continue;
+        out.push({ x: s.x, y: s.y, lon: s.lon, lat: s.lat, pop: 0, cityName: null });
+      }
+    }
+  }
+  // Same order on every machine: the reference's own cell order is stable, but
+  // the bucket walk is not, so sort.
+  out.sort((a, b) => a.y - b.y || a.x - b.x);
+
+  // Hand out the towns largest first, each to the nearest cell that has not got
+  // one yet. Nearest-town-to-each-cell reads the other way round and loses the
+  // town that matters: Algiers is a city of a million and Blida a market town
+  // twenty kilometres off, and whichever happened to sit closer to the seed
+  // took the name -- so the province holding Algiers was called Blida.
+  const reach = NAME_REACH_KM * NAME_REACH_KM;
+  for (const c of [...cities].sort((a, b) => b.pop - a.pop)) {
+    let take = -1;
+    let best = reach;
+    for (let i = 0; i < out.length; i++) {
+      if (out[i].cityName !== null) continue;
+      const d = (c.x - out[i].x) ** 2 + (c.y - out[i].y) ** 2;
+      if (d < best) { best = d; take = i; }
+    }
+    if (take >= 0) { out[take].cityName = c.name; out[take].pop = c.pop; }
+  }
+  return out;
+}
+
 /**
  * Picks seed points for one nation: its cities first, then filler points chosen
  * by farthest-point sampling so the empty interior still gets covered.
+ *
+ * The fallback, for ground the reference does not reach.
  */
 function makeSeeds(
   rings: Ring[], cities: CityJson[], count: number, proj: LccParams,
@@ -502,7 +568,7 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   groups.forEach((group, stateIdx) => {
     const area = group.area;
     const centre = centreOf(group.rings, 8);
-    const [centreLon, centreLat] = unprojectLcc(centre[0], centre[1], projection);
+    const [, centreLat] = unprojectLcc(centre[0], centre[1], projection);
 
     const unitMulti = toMultiPolygon(group.rings);
     // Seed only on landmasses big enough to hold a province. Otherwise
@@ -513,43 +579,25 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
     const usable = seedRings.length > 0 ? seedRings : group.rings;
     const mine = cities.filter((c) => pointInRings(c.x, c.y, usable));
 
-    // How finely the real game cuts this part of the world, where it says.
-    // Measured against it, an area rule alone came out at 0.81 of the
-    // reference overall and much further off in places -- 0.59 in Scandinavia,
-    // 0.70 in Germany and Poland, 1.13 in the Balkans.
-    // Asking for exactly the reference's number lands about a tenth short:
-    // rounding down, the sliver floor, and the ceiling per state all shave a
-    // cell here and there. The shortfall is measured, so it is corrected for.
-    const said = (referenceKmPerProvince(centreLon, centreLat)
-      ?? (centreLat < 37 ? COLONIAL_AREA_PER_PROVINCE : AREA_PER_PROVINCE)) * REFERENCE_YIELD;
-    // Empty ground gets coarser cells than the reference asks for.
-    //
-    // The density grid is read off a screenshot, and a screenshot of Lapland is
-    // mostly snow: the segmentation found about as many borders per square
-    // degree there as in Poland, which is false -- the real game cuts Norrland
-    // into a dozen provinces and Poland into sixty. Left alone it gave northern
-    // Sweden seventy provinces in one state and Iceland forty-two, which is
-    // 「プロヴィンスがおかしい」 whatever the reference says.
-    //
-    // Towns are the honest signal, and the one the reference itself follows
-    // wherever it reads correctly: a province is roughly a town and its
-    // hinterland. So the cell can be no smaller than the ground a town has to
-    // itself here. In settled country that floor is far below what the
-    // reference says and changes nothing; in the Sahara and above the Arctic
-    // circle it is what decides.
-    const perTown = area / Math.max(1, mine.length);
-    const density = Math.max(said, perTown * SETTLEMENT_REACH);
-    const byDensity = Math.min(
-      MAX_PROVINCES_PER_STATE,
-      Math.max(MIN_PROVINCES_PER_STATE, Math.round(area / density)),
-    );
-    // Never ask for more provinces than the territory can hold: splitting Malta
-    // in two produces two slivers, both of which are then discarded, and the
-    // island disappears from the map.
+    // Never cut a state finer than the ground can hold: splitting Malta in two
+    // produces two slivers, both of which are then discarded, and the island
+    // disappears from the map.
     const byArea = Math.max(1, Math.floor(area / MIN_PROVINCE_AREA));
-    const wanted = Math.min(byDensity, byArea);
 
-    const seeds = makeSeeds(usable, mine, wanted, projection);
+    // Where the real game says its provinces are. This is the whole of the
+    // granularity decision -- no lattice, no density estimate, no correction
+    // factor: it puts one of our cells on each of its cells.
+    let seeds = referenceSeedsIn(usable, mine, projection).slice(0, byArea);
+    if (seeds.length < MIN_PROVINCES_PER_STATE) {
+      // Off the reference's window -- the Atlantic islands, the deep Sahara --
+      // fall back to the towns and a lattice.
+      const density = centreLat < 37 ? COLONIAL_AREA_PER_PROVINCE : AREA_PER_PROVINCE;
+      const wanted = Math.min(byArea, Math.min(
+        MAX_PROVINCES_PER_STATE,
+        Math.max(MIN_PROVINCES_PER_STATE, Math.round(area / density)),
+      ));
+      if (wanted > seeds.length) seeds = makeSeeds(usable, mine, wanted, projection);
+    }
     const push = (p: RawProvince): void => {
       membersOfState[stateIdx].push(raw.length);
       raw.push(p);
@@ -646,8 +694,7 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   membersOfState.forEach((list, b) => { for (const i of list) blockOf[i] = b; });
   const touching = adjacencyOf(raw);
   const stateGroups = carveHistoricalStates(
-    applyStateBudget(regroupByReference(raw, blockOf, touching, projection), raw, touching),
-    raw, touching, projection,
+    regroupByReference(raw, blockOf, touching, projection), raw, touching, projection,
   );
 
   const stateOfProvince = new Int32Array(raw.length).fill(-1);
@@ -761,73 +808,6 @@ function referenceStateOf(p: RawProvince, proj: LccParams): number {
   let bestN = 0;
   for (const [cell, n] of votes) if (n > bestN || (n === bestN && cell < best)) { best = cell; bestN = n; }
   return best;
-}
-
-/**
- * Folds a country's states together until it has no more than its budget.
- *
- * The smallest goes first, into whichever same-nation state it shares the most
- * province border with -- so what disappears is the runt, and where it goes is
- * the neighbour it already looks like part of. A state with no same-nation
- * land neighbour at all -- Malta, Gibraltar, the Canaries -- is set aside
- * rather than flung across water, and sits outside the budget, which is what
- * `STATE_BUDGET_1936` says its numbers mean.
- */
-function applyStateBudget(
-  groups: number[][], raw: RawProvince[], touching: number[][],
-): number[][] {
-  const stateOf = new Int32Array(raw.length).fill(-1);
-  groups.forEach((members, i) => { for (const m of members) stateOf[m] = i; });
-  const live = groups.map((m) => [...m]);
-  const areaOf = live.map((m) => m.reduce((s, i) => s + raw[i].area, 0));
-  const tagOf = live.map((m) => (m.length > 0 ? raw[m[0]].tag : ''));
-
-  const byTag = new Map<string, number[]>();
-  live.forEach((m, i) => {
-    if (m.length === 0) return;
-    const list = byTag.get(tagOf[i]);
-    if (list) list.push(i);
-    else byTag.set(tagOf[i], [i]);
-  });
-
-  for (const [tag, indices] of byTag) {
-    const budget = STATE_BUDGET_1936[tag];
-    if (budget === undefined) continue;
-    let mine = indices.filter((i) => live[i].length > 0);
-    const stranded = new Set<number>();
-    while (mine.length - stranded.size > budget) {
-      let runt = -1;
-      for (const i of mine) {
-        if (stranded.has(i)) continue;
-        if (runt < 0 || areaOf[i] < areaOf[runt]) runt = i;
-      }
-      if (runt < 0) break;
-      // Shared border, counted in province pairs: the longest seam wins, so a
-      // sliver joins the state it is already part of the shape of.
-      const seam = new Map<number, number>();
-      for (const m of live[runt]) {
-        for (const nb of touching[m]) {
-          const s = stateOf[nb];
-          if (s < 0 || s === runt || live[s].length === 0) continue;
-          if (raw[nb].tag !== tag) continue;
-          seam.set(s, (seam.get(s) ?? 0) + 1);
-        }
-      }
-      let host = -1;
-      let best = 0;
-      for (const [s, n] of seam) if (n > best || (n === best && s < host)) { best = n; host = s; }
-      if (host < 0) { stranded.add(runt); continue; }
-      for (const m of live[runt]) { live[host].push(m); stateOf[m] = host; }
-      areaOf[host] += areaOf[runt];
-      live[runt] = [];
-      mine = mine.filter((i) => i !== runt);
-    }
-    if (mine.length - stranded.size > budget) {
-      console.warn(`  note: ${tag} stayed at ${mine.length} states, budget ${budget}`);
-    }
-  }
-
-  return live.filter((m) => m.length > 0);
 }
 
 /**
@@ -1365,6 +1345,16 @@ function largestRemainder(total: number, weights: number[]): number[] {
  * original coastlines -- are treated identically.
  */
 const ADJACENCY_TOLERANCE = 3;
+/**
+ * And a border has to be a seam, not a point.
+ *
+ * Two cells that really do share ground share a run of it: they are clipped
+ * from the same outline, so their contact is dozens of vertices long. A single
+ * pair of vertices that happen to fall within the tolerance is a strait seen
+ * end-on -- the Oresund pinches to 2.8 km at Helsingor, which put a land
+ * border between Sweden and Denmark and let an army walk to Copenhagen.
+ */
+const ADJACENCY_SEAM = 4;
 
 function computeGeometricAdjacency(provinces: ProvinceGeoJson[]): void {
   const rings = provinces.map((p) => p.rings.map(unflatten));
@@ -1428,13 +1418,22 @@ function computeGeometricAdjacency(provinces: ProvinceGeoJson[]): void {
 
 function ringsTouch(a: Ring[], b: Ring[], tolerance: number): boolean {
   const t2 = tolerance * tolerance;
+  const seam2 = ADJACENCY_SEAM * ADJACENCY_SEAM;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const ra of a) {
     for (const rb of b) {
       for (const p of ra) {
         for (const q of rb) {
           const dx = p[0] - q[0];
           const dy = p[1] - q[1];
-          if (dx * dx + dy * dy <= t2) return true;
+          if (dx * dx + dy * dy > t2) continue;
+          if (p[0] < minX) minX = p[0];
+          if (p[0] > maxX) maxX = p[0];
+          if (p[1] < minY) minY = p[1];
+          if (p[1] > maxY) maxY = p[1];
+          const w = maxX - minX;
+          const h = maxY - minY;
+          if (w * w + h * h >= seam2) return true;
         }
       }
     }
