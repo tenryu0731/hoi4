@@ -1,82 +1,73 @@
-import { Delaunay } from 'd3-delaunay';
-import polygonClipping from 'polygon-clipping';
-
-import {
-  type LccParams, type Pt, type Ring,
-  bboxOfRing, poleOfInaccessibility, pointInRing, projectLcc, ringArea,
-} from './geo';
-import type { CityJson, ProvinceGeoJson, StateGeoJson } from '../../src/sim/map/MapData';
-import type { TerrainType } from '../../src/sim/core/types';
+import type {
+  CityJson, MapProjection, ProvinceGeoJson, StateGeoJson,
+} from '../../src/sim/map/MapData';
+import type { ResourceType, TerrainType } from '../../src/sim/core/types';
 import { NATION_BY_TAG, NATIONS } from '../../src/sim/scenario/nations';
-import type { StateGroup } from './states';
-import { CARVE_1936, type Carve } from './historical';
-import { referenceProvinceSeeds, referenceStateAt } from './reference';
-import type { BuiltProvinces } from './build';
+import { CARVE_1936 } from './historical';
+import type { Pt, Ring } from './geo';
+import { loadReference, ringPoints, traceGrid, WATER } from './raster';
+import { simplifyArc } from './topology';
+import type { AdminUnit } from './states';
 
 /**
- * Provinces: the cells a state is cut into.
+ * The map, traced out of the reference export.
  *
- * States come from the world's real administrative map (see `states.ts`), and
- * every province is carved out of exactly one of them, so the two tiers nest
- * the way Hearts of Iron's do -- a state is a named region you can see, and
- * the provinces inside it are where divisions actually stand.
+ * 「Natural Earth の海岸線じゃなくて画像の線を使え」. What used to be here grew
+ * Voronoi cells from seeds and clipped them against Natural Earth's coastline,
+ * and however well that was tuned it could only ever be a map that *resembled*
+ * the one being copied -- measured at the end, 77.7% of its province borders
+ * fell within two pixels of the reference's and 61.2% of its state borders did.
+ * The lines now come from the reference itself, so those numbers are one by
+ * construction, and about eleven hundred lines of seeding, clipping, welding
+ * and leftover-reclaiming are gone with them.
  *
- * The cells themselves are Voronoi, seeded from real cities and clipped to the
- * state's own outline. Seeding from cities rather than a regular lattice means
- * the cells follow where people actually lived: dense in the Ruhr and the Po
- * valley, coarse across the steppe, which is exactly the granularity the
- * gameplay wants.
+ * Natural Earth is still read. It answers questions of fact -- who held this
+ * ground in 1936, where the towns are, which rivers are worth drawing -- and
+ * no questions of shape.
  */
-
-export interface SubdivideInput {
-  /** The 1936 states, already merged out of real administrative units. */
-  states: StateGroup[];
-  cities: CityJson[];
-  projection: LccParams;
-}
-
-/** Square kilometres of a European state per province, before clamping. */
-const AREA_PER_PROVINCE = 2_600;
-/**
- * The same for colonial and desert holdings. Sparsely held ground does not
- * deserve the same granularity as the Ruhr, and without this France ends up
- * with more provinces in the Sahara than in France.
- */
-const COLONIAL_AREA_PER_PROVINCE = 15_000;
-/**
- * Even the smallest state is cut in two. A single-province state has no
- * interior, so a front can never run through it and the fighting happens
- * entirely on its borders.
- */
-const MIN_PROVINCES_PER_STATE = 2;
-/**
- * A ceiling for ground the reference does not reach -- the deep Sahara, the
- * Atlantic islands. Where it does reach, its own province count decides and
- * this never binds.
- */
-const MAX_PROVINCES_PER_STATE = 24;
-/**
- * The smallest patch of unclaimed ground worth handing back. Below this it is
- * a rasterising artefact along a coast, not a hole anyone can see.
- */
-const MIN_LEFTOVER_AREA = 40;
-/**
- * The smallest ring worth drawing beyond a province's own body -- an outlying
- * islet, or a hole around one. Below this it is grit from a boolean op.
- */
-const MIN_FRAGMENT_AREA = 8;
-/**
- * How near a town has to be to lend a cell its name and its people. Beyond
- * this the cell is named for the direction it lies in from the nearest town,
- * which is what `nameProvinces` does anyway.
- */
-const NAME_REACH_KM = 55;
-/** Cells smaller than this are merged away rather than shipped as slivers. */
-const MIN_PROVINCE_AREA = 260;
 
 // ---------------------------------------------------------------------------
-// Terrain zones
+// Tuning
 // ---------------------------------------------------------------------------
+
+/**
+ * How much of a corner the simplifier may cut, in square source pixels.
+ *
+ * The raster's border is a staircase of 3.5km steps, and drawn as it is the
+ * map reads as a QR code. Two square pixels removes every single-step jog and
+ * leaves the shape: measured against the pixel counts, each province keeps its
+ * area to within 1.0%.
+ */
+const SIMPLIFY_PX = 2;
+/** Stored coordinates per source pixel, which is what one Chaikin pass needs. */
+export const QUANTUM = 4;
+/**
+ * Render units per stored integer, set so one unit is a kilometre along the
+ * 45th parallel. True there and nowhere else -- which is the whole reason
+ * nothing measures distance in render units any more.
+ */
+export const RENDER_SCALE = (0.04537247209597017 * 111.320 * Math.SQRT1_2) / QUANTUM;
+
+/**
+ * How far a town may be from the export's coastline and still belong to it.
+ *
+ * Twelve pixels is about forty kilometres, which covers every harbour the
+ * game's simplified coast puts out to sea and stops well short of carrying a
+ * town across a strait.
+ */
+const CITY_SEARCH_PX = 12;
+/** How far a strait may reach, in kilometres of open water. */
+/**
+ * How far a strait may reach, in kilometres of open water.
+ *
+ * Measured against this map rather than against the Earth, because this map is
+ * the game's and the game's coastlines are drawn apart where it needs room for
+ * sea provinces: the Dover Strait, thirty-four kilometres wide in life, is a
+ * hundred and forty-four here. The threshold has to clear that, and at a
+ * hundred and fifty it does while still leaving Sardinia to Tunisia (194km)
+ * and Malta's latitude to Sicily's a voyage rather than a crossing.
+ */
+const STRAIT_KM = 150;
 
 interface TerrainZone {
   name: string;
@@ -113,14 +104,6 @@ const TERRAIN_ZONES: TerrainZone[] = [
   { name: 'Russian forest belt', box: [27.0, 51.0, 52.0, 62.0], terrain: 'forest' },
 ];
 
-/**
- * Territory that changed hands between the Natural Earth present and 1936.
- *
- * The country-level map cannot express a border that runs through what is now a
- * single admin unit. At province granularity it can, so East Prussia goes back
- * to Germany rather than sitting inside the Soviet Union.
- */
-
 function classifyTerrain(lon: number, lat: number, cityPop: number): TerrainType {
   if (cityPop >= 900) return 'urban';
   for (const z of TERRAIN_ZONES) {
@@ -131,1000 +114,762 @@ function classifyTerrain(lon: number, lat: number, cityPop: number): TerrainType
 }
 
 // ---------------------------------------------------------------------------
-// Seeding
+// Spherical measurement
 // ---------------------------------------------------------------------------
 
-interface Seed {
-  x: number;
-  y: number;
+const EARTH_KM = 6371.0088;
+const RAD = Math.PI / 180;
+
+/** Great-circle kilometres. The only distance in the build that means anything. */
+export function haversineKm(
+  lon1: number, lat1: number, lon2: number, lat2: number,
+): number {
+  const dLat = (lat2 - lat1) * RAD;
+  const dLon = (lon2 - lon1) * RAD;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * RAD) * Math.cos(lat2 * RAD) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+// ---------------------------------------------------------------------------
+// Build
+// ---------------------------------------------------------------------------
+
+export interface ReferenceInput {
+  admin: AdminUnit[];
+  /** Towns, carrying lon/lat until the projection is applied. */
+  cities: BuildCity[];
+}
+
+/** A town as the build carries it, before its coordinates are projected. */
+export interface BuildCity extends CityJson {
   lon: number;
   lat: number;
-  /** City population in thousands; 0 for a filler point. */
-  pop: number;
-  cityName: string | null;
-  /** The state the reference puts this seed's province in; 0 off its window. */
-  refState?: number;
-}
-
-/** Inverse of the Lambert projection, needed to classify generated seeds. */
-function unprojectLcc(x: number, y: number, p: LccParams): [number, number] {
-  const D2R = Math.PI / 180;
-  const phi1 = p.lat1 * D2R;
-  const phi2 = p.lat2 * D2R;
-  const phi0 = p.lat0 * D2R;
-  const n = Math.abs(p.lat1 - p.lat2) < 1e-9
-    ? Math.sin(phi1)
-    : Math.log(Math.cos(phi1) / Math.cos(phi2))
-      / Math.log(Math.tan(Math.PI / 4 + phi2 / 2) / Math.tan(Math.PI / 4 + phi1 / 2));
-  const F = (Math.cos(phi1) * Math.pow(Math.tan(Math.PI / 4 + phi1 / 2), n)) / n;
-  const rho0 = F / Math.pow(Math.tan(Math.PI / 4 + phi0 / 2), n);
-
-  const px = (x - p.offsetX) / p.scale;
-  // The forward transform flips y so that north is up.
-  const py = -(y - p.offsetY) / p.scale;
-  const rho = Math.sign(n) * Math.hypot(px, rho0 - py);
-  const theta = Math.atan2(px, rho0 - py);
-  const lon = p.lon0 + (theta / n) / D2R;
-  const lat = (2 * Math.atan(Math.pow(F / rho, 1 / n)) - Math.PI / 2) / D2R;
-  return [lon, lat];
-}
-
-/**
- * The point furthest from any edge -- but of the polygon, not of its outline.
- *
- * A cell clipped out of a state that wraps an enclave comes back with holes in
- * it, and a pole of inaccessibility computed from the outer ring alone happily
- * lands in the middle of one. Udine, Saint Gallen and East Skopje all did, and
- * a province whose own centre is not inside it cannot be tapped.
- */
-function centreOf(rings: Ring[], precision = 3): Pt {
-  const sorted = [...rings].sort((a, b) => ringArea(b) - ringArea(a));
-  const outer = sorted[0];
-  const holes = sorted.slice(1).filter((r) => ringInsideRing(r, outer));
-  return poleOfInaccessibility([outer, ...holes], precision);
-}
-
-
-function pointInRings(x: number, y: number, rings: Ring[]): boolean {
-  let winding = 0;
-  for (const r of rings) if (pointInRing(x, y, r)) winding++;
-  return winding % 2 === 1;
-}
-
-interface RefSeed { x: number; y: number; lon: number; lat: number; cell: number; state: number; }
-
-/** The real game's provinces, projected once and bucketed for lookup. */
-let refSeeds: { all: RefSeed[]; grid: Map<number, RefSeed[]> } | null = null;
-const REF_BUCKET = 120;
-
-function refSeedIndex(proj: LccParams): { all: RefSeed[]; grid: Map<number, RefSeed[]> } {
-  if (refSeeds) return refSeeds;
-  const all: RefSeed[] = [];
-  const grid = new Map<number, RefSeed[]>();
-  for (const s of referenceProvinceSeeds()) {
-    const [x, y] = projectLcc(s.lon, s.lat, proj);
-    const seed: RefSeed = { x, y, lon: s.lon, lat: s.lat, cell: s.cell, state: s.state };
-    all.push(seed);
-    const k = Math.floor(y / REF_BUCKET) * 100_000 + Math.floor(x / REF_BUCKET);
-    const list = grid.get(k);
-    if (list) list.push(seed);
-    else grid.set(k, [seed]);
-  }
-  refSeeds = { all, grid };
-  return refSeeds;
-}
-
-/**
- * Seeds for one state: where the real game puts its provinces.
- *
- * Not a lattice and not the towns. Every province of the reference that lands
- * on this ground becomes one of our cells, so our provinces sit where its do
- * and there are as many of them -- and still not one line of its geometry is
- * copied, because what the cell actually looks like is decided by the Voronoi
- * against Natural Earth's coastline. A town near the seed lends its name and
- * its people, which is what makes a cell urban; it does not move the seed.
- */
-function referenceSeedsIn(
-  rings: Ring[], cities: CityJson[], proj: LccParams,
-): Seed[] {
-  const { grid } = refSeedIndex(proj);
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const r of rings) {
-    const [a, b, c, d] = bboxOfRing(r);
-    minX = Math.min(minX, a); minY = Math.min(minY, b);
-    maxX = Math.max(maxX, c); maxY = Math.max(maxY, d);
-  }
-  const out: Seed[] = [];
-  for (let gy = Math.floor(minY / REF_BUCKET); gy <= Math.floor(maxY / REF_BUCKET); gy++) {
-    for (let gx = Math.floor(minX / REF_BUCKET); gx <= Math.floor(maxX / REF_BUCKET); gx++) {
-      for (const s of grid.get(gy * 100_000 + gx) ?? []) {
-        if (!pointInRings(s.x, s.y, rings)) continue;
-        out.push({ x: s.x, y: s.y, lon: s.lon, lat: s.lat, pop: 0, cityName: null, refState: s.state });
-      }
-    }
-  }
-  // Same order on every machine: the reference's own cell order is stable, but
-  // the bucket walk is not, so sort.
-  out.sort((a, b) => a.y - b.y || a.x - b.x);
-
-  // Hand out the towns largest first, each to the nearest cell that has not got
-  // one yet. Nearest-town-to-each-cell reads the other way round and loses the
-  // town that matters: Algiers is a city of a million and Blida a market town
-  // twenty kilometres off, and whichever happened to sit closer to the seed
-  // took the name -- so the province holding Algiers was called Blida.
-  const reach = NAME_REACH_KM * NAME_REACH_KM;
-  for (const c of [...cities].sort((a, b) => b.pop - a.pop)) {
-    let take = -1;
-    let best = reach;
-    for (let i = 0; i < out.length; i++) {
-      if (out[i].cityName !== null) continue;
-      const d = (c.x - out[i].x) ** 2 + (c.y - out[i].y) ** 2;
-      if (d < best) { best = d; take = i; }
-    }
-    if (take >= 0) { out[take].cityName = c.name; out[take].pop = c.pop; }
-  }
-  return out;
-}
-
-/**
- * Picks seed points for one nation: its cities first, then filler points chosen
- * by farthest-point sampling so the empty interior still gets covered.
- *
- * The fallback, for ground the reference does not reach.
- */
-function makeSeeds(
-  rings: Ring[], cities: CityJson[], count: number, proj: LccParams,
-): Seed[] {
-  const seeds: Seed[] = [];
-  // Two cities closer together than a cell is wide would produce a sliver
-  // between them, so the spacing follows the cell size rather than a constant.
-  const spacing = Math.sqrt(AREA_PER_PROVINCE) * 0.55;
-  const sorted = [...cities].sort((a, b) => b.pop - a.pop);
-  for (const c of sorted) {
-    if (seeds.length >= count) break;
-    // Two cities in the same valley would produce a sliver between them.
-    if (seeds.some((s) => Math.hypot(s.x - c.x, s.y - c.y) < spacing)) continue;
-    const [lon, lat] = unprojectLcc(c.x, c.y, proj);
-    seeds.push({ x: c.x, y: c.y, lon, lat, pop: c.pop, cityName: c.name });
-  }
-  if (seeds.length >= count) return seeds;
-
-  // Candidate lattice over the nation's bounding box, kept to interior points.
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const r of rings) {
-    const [a, b, c, d] = bboxOfRing(r);
-    minX = Math.min(minX, a); minY = Math.min(minY, b);
-    maxX = Math.max(maxX, c); maxY = Math.max(maxY, d);
-  }
-  const span = Math.max(maxX - minX, maxY - minY);
-  const step = Math.max(12, span / 42);
-  const candidates: Pt[] = [];
-  for (let x = minX + step / 2; x < maxX; x += step) {
-    for (let y = minY + step / 2; y < maxY; y += step) {
-      if (pointInRings(x, y, rings)) candidates.push([x, y]);
-    }
-  }
-  if (candidates.length === 0) {
-    if (seeds.length === 0) {
-      const centre = poleOfInaccessibility([rings[0]], 4);
-      const [lon, lat] = unprojectLcc(centre[0], centre[1], proj);
-      seeds.push({ x: centre[0], y: centre[1], lon, lat, pop: 0, cityName: null });
-    }
-    return seeds;
-  }
-
-  // Farthest-point sampling: repeatedly take the candidate furthest from every
-  // seed placed so far, which spreads cells evenly without any randomness.
-  const dist = candidates.map((p) =>
-    seeds.length === 0
-      ? Infinity
-      : Math.min(...seeds.map((s) => Math.hypot(s.x - p[0], s.y - p[1]))));
-
-  while (seeds.length < count) {
-    let best = -1;
-    let bestD = -Infinity;
-    for (let i = 0; i < candidates.length; i++) {
-      if (dist[i] > bestD) { bestD = dist[i]; best = i; }
-    }
-    if (best < 0 || bestD <= 0) break;
-    const [x, y] = candidates[best];
-    const [lon, lat] = unprojectLcc(x, y, proj);
-    seeds.push({ x, y, lon, lat, pop: 0, cityName: null });
-    dist[best] = -Infinity;
-    for (let i = 0; i < candidates.length; i++) {
-      if (dist[i] === -Infinity) continue;
-      const d = Math.hypot(candidates[i][0] - x, candidates[i][1] - y);
-      if (d < dist[i]) dist[i] = d;
-    }
-  }
-  return seeds;
-}
-
-// ---------------------------------------------------------------------------
-// Subdivision
-// ---------------------------------------------------------------------------
-
-type MultiRing = number[][][];
-
-interface RawProvince {
+  /** Whose town it is, so a harbour the coastline missed lands at home. */
   tag: string;
-  seed: Seed;
-  rings: Ring[];
-  area: number;
-  centre: Pt;
+  /** Where it ends up on the lattice, once it has been put ashore. */
+  col: number;
+  row: number;
+}
+
+export interface BuiltMap {
+  projection: MapProjection;
+  arcs: number[][];
+  provinces: ProvinceGeoJson[];
+  states: StateGeoJson[];
+  land: number[][];
+  borders: { country: number[]; state: number[]; province: number[]; coast: number[] };
+}
+
+/** One province cell, as read off the raster before it becomes a province. */
+interface Cell {
+  /** Raster id, 1-based. */
+  ref: number;
+  /** Index in the province array. */
+  id: number;
+  pixels: number;
+  /** Representative pixel, guaranteed inside the cell. */
+  col: number;
+  row: number;
+  lon: number;
+  lat: number;
+  areaKm: number;
+  tag: string;
+  stateRef: number;
+  stateId: number;
   terrain: TerrainType;
-  /** Filled in by `nameProvinces`. */
   name: string;
-  /** The state this cell was carved out of, used when naming it. */
-  stateName: string;
-  /** Set when history gives this ground a name of its own. */
-  carved?: string;
+  cityName: string | null;
+  cityPop: number;
+  coastal: boolean;
+  /** A state name history insists on, whatever the towns say. */
+  carved: string | null;
 }
 
-/**
- * Is `inner` nested inside `outer`? Sampled across the whole ring rather than
- * tested at its first vertex: where a state was cut out of a larger admin unit
- * (the Karelian isthmus, Venezia Giulia) the two lobes meet along the cut, so
- * a lone vertex sitting on that shared edge can decide a whole lobe is a hole
- * and erase it. A majority of vertices and edge midpoints cannot be fooled by
- * a boundary they only touch.
- */
-function ringInsideRing(inner: Ring, outer: Ring): boolean {
-  const step = Math.max(1, Math.floor(inner.length / 24));
-  let inside = 0;
-  let tested = 0;
-  for (let k = 0; k < inner.length; k += step) {
-    const a = inner[k];
-    const b = inner[(k + 1) % inner.length];
-    const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    for (const [x, y] of [a, mid]) {
-      tested++;
-      if (pointInRing(x, y, outer)) inside++;
-    }
+export function buildFromReference(input: ReferenceInput): BuiltMap {
+  const ref = loadReference();
+  const { w, h } = ref;
+
+  // --- 1. Geometry ---------------------------------------------------------
+  const topo = traceGrid(ref.provinces, w, h);
+  const arcs = topo.arcs.map((a) => quantise(chaikin(simplifyArc(a, SIMPLIFY_PX, 3))));
+  console.log(`  traced ${arcs.length} arcs, `
+    + `${arcs.reduce((s, a) => s + a.length, 0) / 2} points`);
+
+  // --- 2. Cell statistics --------------------------------------------------
+  const cells = measureCells(ref);
+  console.log(`  ${cells.length} province cells`);
+
+  // --- 3. Who held the ground in 1936 --------------------------------------
+  assignOwners(cells, ref, input.admin);
+
+  // --- 4. Towns ------------------------------------------------------------
+  assignCities(cells, ref, input.cities);
+
+  // --- 5. Adjacency, straight off the lattice ------------------------------
+  const neighbors = rasterAdjacency(ref, cells);
+
+  // --- 6. Names ------------------------------------------------------------
+  nameProvinces(cells, input.cities);
+
+  // --- 7. States -----------------------------------------------------------
+  const stateGroups = groupStates(cells, neighbors);
+
+  // --- 8. Coast and straits ------------------------------------------------
+  const coastal = markCoastal(ref, cells);
+  const seaNeighbors = findStraits(ref, cells, coastal, neighbors);
+  console.log(`  ${coastal.filter(Boolean).length} coastal, `
+    + `${seaNeighbors.reduce((s, x) => s + x.length, 0) / 2} sea crossings`);
+
+  // --- 9. Assemble ---------------------------------------------------------
+  const provinces: ProvinceGeoJson[] = cells.map((c) => {
+    const rings = topo.rings.get(c.ref) ?? [];
+    const signed = rings.map((r) => ({ refs: r, area: ringArea(ringPoints(r, topo.arcs)) }));
+    // Every ring was wound with the cell on its left, so an outer boundary and
+    // a hole come out with opposite signs and nothing has to test containment.
+    signed.sort((a, b) => Math.abs(b.area) - Math.abs(a.area));
+    return {
+      id: c.id,
+      name: c.name,
+      stateId: c.stateId,
+      ownerTag: c.tag,
+      terrain: c.terrain,
+      vp: 0,
+      coastal: coastal[c.id],
+      rings: signed.map((s) => s.refs),
+      center: [Math.round(c.col * QUANTUM), Math.round(c.row * QUANTUM)] as [number, number],
+      area: Math.round(c.areaKm),
+      neighbors: neighbors[c.id],
+      seaNeighbors: seaNeighbors[c.id],
+    };
+  });
+
+  const states = buildStates(stateGroups, cells, provinces);
+  distributeNationalAssets(provinces, states, cells);
+
+  return {
+    projection: ref.projection(RENDER_SCALE, QUANTUM),
+    arcs,
+    provinces,
+    states,
+    land: landRings(topo, cells),
+    borders: classifyArcs(topo, cells),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Geometry helpers
+// ---------------------------------------------------------------------------
+
+/** Chaikin corner-cut, endpoints pinned so shared arcs still meet. */
+function chaikin(pts: Pt[]): Pt[] {
+  if (pts.length < 3) return pts;
+  const out: Pt[] = [pts[0]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i];
+    const [bx, by] = pts[i + 1];
+    if (i > 0) out.push([ax + (bx - ax) * 0.25, ay + (by - ay) * 0.25]);
+    if (i < pts.length - 2) out.push([ax + (bx - ax) * 0.75, ay + (by - ay) * 0.75]);
   }
-  return tested > 0 && inside * 2 > tested;
+  out.push(pts[pts.length - 1]);
+  return out;
 }
 
 /**
- * Groups a unit's rings into a proper MultiPolygon.
+ * Lattice coordinates to the integers the file stores.
  *
- * A nation's rings are a flat list: mainland, islands, and enclave holes all
- * mixed together. Handing that straight to a boolean-op library treats every
- * island as a hole in the mainland, and the intersection comes back empty --
- * which silently dropped Spain, Portugal and Greece from the map entirely.
- * Each outer ring must carry its own holes.
+ * A quarter of a source pixel is under 900 metres, which at the closest zoom
+ * the player can reach is a third of a pixel on the screen. Storing it as an
+ * integer rather than as a decimal is worth about a third of the file.
  */
-function toMultiPolygon(rings: Ring[]): MultiRing[] {
-  const order = rings
-    .map((r, i) => ({ i, area: ringArea(r) }))
-    .sort((a, b) => b.area - a.area);
-
-  const isHole = new Array(rings.length).fill(false);
-  const parent = new Array<number>(rings.length).fill(-1);
-
-  for (const { i } of order) {
-    // Nesting depth decides the role: inside an odd number of rings is a hole.
-    let depth = 0;
-    let smallestContainer = -1;
-    let smallestArea = Infinity;
-    for (let j = 0; j < rings.length; j++) {
-      if (i === j) continue;
-      const areaJ = ringArea(rings[j]);
-      if (areaJ <= ringArea(rings[i])) continue;
-      if (!ringInsideRing(rings[i], rings[j])) continue;
-      depth++;
-      if (areaJ < smallestArea) { smallestArea = areaJ; smallestContainer = j; }
-    }
-    isHole[i] = depth % 2 === 1;
-    parent[i] = smallestContainer;
+function quantise(pts: Pt[]): number[] {
+  const out: number[] = [];
+  let px = 0;
+  let py = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const x = Math.round(pts[i][0] * QUANTUM);
+    const y = Math.round(pts[i][1] * QUANTUM);
+    out.push(i === 0 ? x : x - px, i === 0 ? y : y - py);
+    px = x;
+    py = y;
   }
-
-  const polygons: MultiRing[] = [];
-  const indexOfOuter = new Map<number, number>();
-  for (let i = 0; i < rings.length; i++) {
-    if (isHole[i]) continue;
-    indexOfOuter.set(i, polygons.length);
-    polygons.push([rings[i].map((p) => [p[0], p[1]] as number[])]);
-  }
-  for (let i = 0; i < rings.length; i++) {
-    if (!isHole[i]) continue;
-    const owner = parent[i] >= 0 ? indexOfOuter.get(parent[i]) : undefined;
-    if (owner === undefined) continue;
-    polygons[owner].push(rings[i].map((p) => [p[0], p[1]] as number[]));
-  }
-  return polygons;
+  return out;
 }
 
-/** polygon-clipping's nested output, flattened back to the rings we carry. */
-function ringsOf(result: MultiRing[]): Ring[] {
-  const out: Ring[] = [];
-  for (const poly of result) {
-    for (const ring of poly) {
-      const r: Ring = ring.map((q) => [q[0], q[1]] as Pt);
-      // polygon-clipping repeats the first point at the end.
-      if (r.length > 1) {
-        const f = r[0];
-        const l = r[r.length - 1];
-        if (Math.abs(f[0] - l[0]) < 1e-9 && Math.abs(f[1] - l[1]) < 1e-9) r.pop();
-      }
-      if (r.length >= 3) out.push(r);
+function ringArea(pts: Pt[]): number {
+  let s = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    s += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  }
+  return s / 2;
+}
+
+// ---------------------------------------------------------------------------
+// Reading the raster
+// ---------------------------------------------------------------------------
+
+/**
+ * Pixel counts, a representative point, and true area for every cell.
+ *
+ * The representative point is the cell's mean nudged onto a pixel that is
+ * actually inside it, so a horseshoe-shaped province does not put its counter
+ * in its own bay. Area is summed per row from the real width of a pixel at
+ * that latitude, because on a cylindrical grid a pixel in Lapland covers a
+ * third of what a pixel in the Sahara does.
+ */
+function measureCells(ref: ReturnType<typeof loadReference>): Cell[] {
+  const { w, h, provinces, states, provinceCount } = ref;
+  const n = provinceCount + 1;
+  const px = new Int32Array(n);
+  const sumC = new Float64Array(n);
+  const sumR = new Float64Array(n);
+  const area = new Float64Array(n);
+
+  // Square kilometres of one pixel on each row.
+  const rowArea = new Float64Array(h);
+  for (let r = 0; r < h; r++) {
+    const latTop = ref.latOf(r);
+    const latBottom = ref.latOf(r + 1);
+    const midLat = (latTop + latBottom) / 2;
+    const dLat = Math.abs(latTop - latBottom);
+    rowArea[r] = dLat * 110.574 * ref.lonStep * 111.320 * Math.cos(midLat * RAD);
+  }
+
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      const cell = provinces[r * w + c];
+      if (cell === WATER) continue;
+      px[cell]++;
+      sumC[cell] += c;
+      sumR[cell] += r;
+      area[cell] += rowArea[r];
+    }
+  }
+
+  // Where a counter goes: the pixel of each cell that is furthest from any
+  // other cell. The mean would do for a compact province and fails for the
+  // rest -- a crescent around a bay has its mean in the water, and a province
+  // whose mean sits a pixel from its own border loses it altogether once the
+  // outline is simplified, which is how Çanakkale ended up with a centre no
+  // longer inside itself. This is inside by construction and by a margin.
+  const depth = insideness(provinces, w, h);
+  const bestDepth = new Float64Array(n);
+  const bestAt = new Int32Array(n).fill(-1);
+  for (let i = 0; i < w * h; i++) {
+    const cell = provinces[i];
+    if (cell === WATER) continue;
+    if (bestAt[cell] < 0 || depth[i] > bestDepth[cell]) {
+      bestDepth[cell] = depth[i];
+      bestAt[cell] = i;
+    }
+  }
+
+  const out: Cell[] = [];
+  for (let cellRef = 1; cellRef < n; cellRef++) {
+    if (px[cellRef] === 0) continue;
+    const at = bestAt[cellRef];
+    const row = Math.floor(at / w);
+    const col = at - row * w;
+    out.push({
+      ref: cellRef, id: out.length, pixels: px[cellRef],
+      col: col + 0.5, row: row + 0.5,
+      lon: ref.lonOf(col + 0.5), lat: ref.latOf(row + 0.5),
+      areaKm: area[cellRef],
+      tag: '', stateRef: states[row * w + col], stateId: -1,
+      terrain: 'plains', name: '', cityName: null, cityPop: 0,
+      coastal: false, carved: null,
+    });
+  }
+  return out;
+}
+
+/**
+ * How deep inside its own cell each pixel is, in pixels.
+ *
+ * A breadth-first flood from every pixel that has a different cell next to it,
+ * which gives the four-connected distance to the nearest edge. Four-connected
+ * rather than Euclidean because the only use is picking the deepest pixel, and
+ * the two agree about which that is.
+ */
+function insideness(cells: Uint16Array, w: number, h: number): Int32Array {
+  const depth = new Int32Array(w * h).fill(-1);
+  let frontier: number[] = [];
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      const i = r * w + c;
+      const cur = cells[i];
+      if (cur === WATER) { depth[i] = 0; continue; }
+      const edge = (c === 0 || cells[i - 1] !== cur)
+        || (c + 1 === w || cells[i + 1] !== cur)
+        || (r === 0 || cells[i - w] !== cur)
+        || (r + 1 === h || cells[i + w] !== cur);
+      if (edge) { depth[i] = 1; frontier.push(i); }
+    }
+  }
+  while (frontier.length > 0) {
+    const next: number[] = [];
+    for (const i of frontier) {
+      const r = Math.floor(i / w);
+      const c = i - r * w;
+      const d = depth[i] + 1;
+      if (c > 0 && depth[i - 1] < 0) { depth[i - 1] = d; next.push(i - 1); }
+      if (c + 1 < w && depth[i + 1] < 0) { depth[i + 1] = d; next.push(i + 1); }
+      if (r > 0 && depth[i - w] < 0) { depth[i - w] = d; next.push(i - w); }
+      if (r + 1 < h && depth[i + w] < 0) { depth[i + w] = d; next.push(i + w); }
+    }
+    frontier = next;
+  }
+  return depth;
+}
+
+/**
+ * Land adjacency, straight off the lattice.
+ *
+ * Two provinces are neighbours when two of their pixels touch. There is no
+ * tolerance to tune and no seam length to argue about, which between them were
+ * the cause of every adjacency bug this map has had: a strait that was really
+ * a T-junction, a border that was really a corner, an Øresund that had to be
+ * told apart from Bavaria by how long the two rings ran alongside each other.
+ */
+function rasterAdjacency(
+  ref: ReturnType<typeof loadReference>, cells: Cell[],
+): number[][] {
+  const { w, h, provinces } = ref;
+  const idOf = new Int32Array(ref.provinceCount + 1).fill(-1);
+  for (const c of cells) idOf[c.ref] = c.id;
+  const sets = cells.map(() => new Set<number>());
+  const link = (a: number, b: number): void => {
+    if (a === b || a === WATER || b === WATER) return;
+    const x = idOf[a];
+    const y = idOf[b];
+    if (x < 0 || y < 0) return;
+    sets[x].add(y);
+    sets[y].add(x);
+  };
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      const cur = provinces[r * w + c];
+      if (c + 1 < w) link(cur, provinces[r * w + c + 1]);
+      if (r + 1 < h) link(cur, provinces[(r + 1) * w + c]);
+    }
+  }
+  return sets.map((s) => [...s].sort((a, b) => a - b));
+}
+
+/**
+ * Which provinces touch open water.
+ *
+ * The export paints the sea blue, so this is not a judgement about geometry:
+ * the pixel next door either is water or it is not. Pixels off the edge of the
+ * export are *not* water -- the crop stops in the middle of Russia, and a
+ * province at the map's edge is not a port.
+ */
+function markCoastal(ref: ReturnType<typeof loadReference>, cells: Cell[]): boolean[] {
+  const { w, h, provinces } = ref;
+  const idOf = new Int32Array(ref.provinceCount + 1).fill(-1);
+  for (const c of cells) idOf[c.ref] = c.id;
+  const out = cells.map(() => false);
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      const cur = provinces[r * w + c];
+      if (cur === WATER) continue;
+      const id = idOf[cur];
+      if (id < 0) continue;
+      if ((c > 0 && provinces[r * w + c - 1] === WATER)
+        || (c + 1 < w && provinces[r * w + c + 1] === WATER)
+        || (r > 0 && provinces[(r - 1) * w + c] === WATER)
+        || (r + 1 < h && provinces[(r + 1) * w + c] === WATER)) out[id] = true;
     }
   }
   return out;
 }
 
 /**
- * Grids, in kilometres, to snap a boolean op's input to when it refuses the
- * geometry as it stands. polygon-clipping is exact in principle and fragile in
- * practice: a ring that all but touches itself makes it abandon an output ring
- * and throw. Snapping turns "all but touches" into "touches", which it handles
- * -- and a metre of slack on a province border is invisible, where a missing
- * province is the beige hole players report.
- */
-const SNAP_GRIDS = [0, 1e-3, 1e-2, 0.1] as const;
-
-function snapMulti(polys: MultiRing[], grid: number): MultiRing[] {
-  if (grid <= 0) return polys;
-  return polys.map((poly) => poly.map((ring) => {
-    const out: number[][] = [];
-    for (const q of ring) {
-      const p = [Math.round(q[0] / grid) * grid, Math.round(q[1] / grid) * grid];
-      const last = out[out.length - 1];
-      if (last && last[0] === p[0] && last[1] === p[1]) continue;
-      out.push(p);
-    }
-    return out;
-  }));
-}
-
-function clipCellToUnit(cell: Pt[], unit: MultiRing[]): Ring[] {
-  if (cell.length < 3) return [];
-  const cellPoly: MultiRing[] = [[cell.map((q) => [q[0], q[1]])]];
-  for (const grid of SNAP_GRIDS) {
-    try {
-      return ringsOf(polygonClipping.intersection(
-        snapMulti(cellPoly, grid) as never, snapMulti(unit, grid) as never,
-      ) as MultiRing[]);
-    } catch {
-      // Too tight for this grid; try a coarser one.
-    }
-  }
-  // Every grid refused it. `reclaimLeftover` gives the ground back, so a cell
-  // lost here costs a border, never a hole.
-  return [];
-}
-
-/** Net area of one polygon-clipping polygon: its outer ring less its holes. */
-function polyArea(poly: number[][][]): number {
-  let a = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const ring = poly[i].map((q) => [q[0], q[1]] as Pt);
-    a += i === 0 ? ringArea(ring) : -ringArea(ring);
-  }
-  return a;
-}
-
-/**
- * Ground inside a state that no province claimed, handed to the nearest one.
+ * Sea crossings, measured through the water rather than across it.
  *
- * A Voronoi cell can go missing for reasons that have nothing to do with
- * geography -- two seeds landing on the same point, a boolean op refusing a
- * ring that touches itself, a lobe misread as a hole -- and the result is
- * always the same: a gap in the state that renders as unowned land, which is
- * exactly the artefact players report. Rather than chase each cause, the state
- * is asked at the end what nobody took, and the remainder is merged into the
- * province next to it. Whatever goes wrong upstream, the map stays whole.
+ * Every water pixel is flooded outward from the coast at once, carrying the
+ * province it came from and how far it has travelled. Where two floods meet,
+ * the two provinces are a crossing apart -- and the distance is the length of
+ * the route a ship would take, so a bay does not become a strait just because
+ * its two headlands are close as the crow flies. Land cannot be crossed at
+ * all, because the flood never enters it.
  */
-function reclaimLeftover(unit: MultiRing[], members: RawProvince[]): void {
-  if (members.length === 0) return;
-  const claimed = members.map((p) => toMultiPolygon(p.rings));
-  let leftover: MultiRing[] = [];
-  for (const grid of SNAP_GRIDS) {
-    try {
-      leftover = polygonClipping.difference(
-        snapMulti(unit, grid) as never,
-        ...(claimed.map((c) => snapMulti(c, grid)) as never[]),
-      ) as MultiRing[];
-      break;
-    } catch {
-      // Too tight for this grid; try a coarser one.
-    }
-  }
-  for (const poly of leftover) {
-    if (polyArea(poly) < MIN_LEFTOVER_AREA) continue;
-    const rings = ringsOf([poly]);
-    if (rings.length === 0) continue;
-    const at = centreOf(rings);
-    let host = members[0];
-    let best = Infinity;
-    for (const p of members) {
-      const d = Math.hypot(p.centre[0] - at[0], p.centre[1] - at[1]);
-      if (d < best) { best = d; host = p; }
-    }
-    let merged: Ring[];
-    try {
-      merged = ringsOf(polygonClipping.union(
-        toMultiPolygon(host.rings) as never, [poly] as never,
-      ) as MultiRing[]);
-    } catch {
-      merged = [...host.rings, ...rings];
-    }
-    if (merged.length === 0) continue;
-    merged.sort((a, b) => ringArea(b) - ringArea(a));
-    host.rings = merged;
-    host.area = toMultiPolygon(merged).reduce((sum, q) => sum + polyArea(q), 0);
-    host.centre = centreOf(merged);
-  }
-}
-
-
-
-export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
-  const { states: groups, cities, projection } = input;
-
-  // --- 1. Voronoi cells inside each state ----------------------------------
-  const raw: RawProvince[] = [];
-  /** Province indices belonging to each state, in build order. */
-  const membersOfState: number[][] = groups.map(() => []);
-
-  groups.forEach((group, stateIdx) => {
-    const area = group.area;
-    const centre = centreOf(group.rings, 8);
-    const [, centreLat] = unprojectLcc(centre[0], centre[1], projection);
-
-    const unitMulti = toMultiPolygon(group.rings);
-    // Seed only on landmasses big enough to hold a province. Otherwise
-    // farthest-point sampling puts seeds on the outermost skerry -- the point
-    // furthest from everything else -- and its clipped cell is then discarded
-    // as a sliver, leaving the mainland as a single province.
-    const seedRings = group.rings.filter((r) => ringArea(r) >= MIN_PROVINCE_AREA * 3);
-    const usable = seedRings.length > 0 ? seedRings : group.rings;
-    const mine = cities.filter((c) => pointInRings(c.x, c.y, usable));
-
-    // Never cut a state finer than the ground can hold: splitting Malta in two
-    // produces two slivers, both of which are then discarded, and the island
-    // disappears from the map.
-    const byArea = Math.max(1, Math.floor(area / MIN_PROVINCE_AREA));
-
-    // Where the real game says its provinces are. This is the whole of the
-    // granularity decision -- no lattice, no density estimate, no correction
-    // factor: it puts one of our cells on each of its cells.
-    let seeds = referenceSeedsIn(usable, mine, projection).slice(0, byArea);
-    if (seeds.length < MIN_PROVINCES_PER_STATE) {
-      // Off the reference's window -- the Atlantic islands, the deep Sahara --
-      // fall back to the towns and a lattice.
-      const density = centreLat < 37 ? COLONIAL_AREA_PER_PROVINCE : AREA_PER_PROVINCE;
-      const wanted = Math.min(byArea, Math.min(
-        MAX_PROVINCES_PER_STATE,
-        Math.max(MIN_PROVINCES_PER_STATE, Math.round(area / density)),
-      ));
-      if (wanted > seeds.length) seeds = makeSeeds(usable, mine, wanted, projection);
-    }
-    const push = (p: RawProvince): void => {
-      membersOfState[stateIdx].push(raw.length);
-      raw.push(p);
-    };
-
-    if (seeds.length <= 1) {
-      const [lon, lat] = unprojectLcc(centre[0], centre[1], projection);
-      const seed = seeds[0] ?? { x: centre[0], y: centre[1], lon, lat, pop: 0, cityName: null };
-      push({
-        tag: group.tag,
-        seed,
-        rings: group.rings,
-        area,
-        centre,
-        terrain: classifyTerrain(seed.lon, seed.lat, seed.pop),
-        name: '',
-        stateName: group.name,
-      });
-      return;
-    }
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const r of group.rings) {
-      const [a, b, c, d] = bboxOfRing(r);
-      minX = Math.min(minX, a); minY = Math.min(minY, b);
-      maxX = Math.max(maxX, c); maxY = Math.max(maxY, d);
-    }
-    const pad = 50;
-    // Nearly collinear seeds -- which is exactly what a long coastal state
-    // produces -- degenerate the triangulation and make d3-delaunay return null
-    // cells. A sub-kilometre deterministic offset breaks the collinearity
-    // without moving anything visible.
-    const delaunay = Delaunay.from(seeds.map((s, i) => [
-      s.x + (((i * 37) % 7) - 3) * 0.35,
-      s.y + (((i * 53) % 5) - 2) * 0.35,
-    ] as [number, number]));
-    const voronoi = delaunay.voronoi([minX - pad, minY - pad, maxX + pad, maxY + pad]);
-
-    for (let i = 0; i < seeds.length; i++) {
-      const poly = voronoi.cellPolygon(i);
-      if (!poly) continue;
-      const rings = clipCellToUnit(poly.map((q: number[]) => [q[0], q[1]] as Pt), unitMulti);
-      if (rings.length === 0) continue;
-      const cellArea = rings.reduce((s, r) => s + ringArea(r), 0);
-      if (cellArea < MIN_PROVINCE_AREA) continue;
-      rings.sort((a, b) => ringArea(b) - ringArea(a));
-      push({
-        tag: group.tag,
-        seed: seeds[i],
-        rings,
-        area: cellArea,
-        centre: centreOf(rings),
-        terrain: classifyTerrain(seeds[i].lon, seeds[i].lat, seeds[i].pop),
-        name: '',
-        stateName: group.name,
-      });
-    }
-
-    // A state whose every cell came out a sliver would vanish; keep it whole.
-    if (membersOfState[stateIdx].length === 0) {
-      const [lon, lat] = unprojectLcc(centre[0], centre[1], projection);
-      push({
-        tag: group.tag,
-        seed: { x: centre[0], y: centre[1], lon, lat, pop: 0, cityName: null },
-        rings: group.rings,
-        area,
-        centre,
-        terrain: classifyTerrain(lon, lat, 0),
-        name: '',
-        stateName: group.name,
-      });
-    }
-
-    const members = membersOfState[stateIdx].map((i) => raw[i]);
-    reclaimLeftover(unitMulti, members);
-    // Every square kilometre of a state has to end up inside one of its
-    // provinces -- ground no cell claims renders as unowned land. Counting
-    // cells cannot see that: Leningrad's state produced 20 of its 36 and still
-    // lost its entire western lobe, because a geometry fault had classified
-    // that lobe as a hole. Area is what the player sees, so area is the guard.
-    const held = members.reduce((sum, p) => sum + p.area, 0);
-    if (held < area * 0.98) {
-      console.warn(`  note: ${group.name} (${group.tag}) covered ` +
-        `${Math.round(held)} of ${Math.round(area)} km2 in ` +
-        `${members.length} provinces`);
-    }
-  });
-
-  // --- 2. Name the provinces that have no city of their own ----------------
-  nameProvinces(raw, cities);
-
-  // --- 3. Group the cells into states, following the reference -------------
-  const blockOf = new Int32Array(raw.length).fill(-1);
-  membersOfState.forEach((list, b) => { for (const i of list) blockOf[i] = b; });
-  const touching = adjacencyOf(raw);
-  const stateGroups = carveHistoricalStates(
-    regroupByReference(raw, blockOf, touching, projection), raw, touching, projection,
-  );
-
-  const stateOfProvince = new Int32Array(raw.length).fill(-1);
-  // Two states can land on the same principal town -- one Pomerania either
-  // side of the Oder, one Pskov either side of the lake -- and two identically
-  // captioned regions next to each other read as one.
-  const takenNames = new Map<string, number>();
-  const states: StateGeoJson[] = stateGroups.map((members, id) => {
-    for (const idx of members) stateOfProvince[idx] = id;
-    const tag = raw[members[0]].tag;
-    const nation = NATION_BY_TAG.get(tag);
-    return {
-      id,
-      name: uniqueStateName(stateNameFor(raw, members), raw, members, takenNames),
-      ownerTag: tag,
-      provinces: [],           // filled once province ids are final
-      manpower: 0,
-      resources: {},
-      infrastructure: nation?.infrastructure ?? 3,
-      civilianFactories: 0,
-      militaryFactories: 0,
-      dockyards: 0,
-      buildingSlots: 0,
-    };
-  });
-
-  const provinces: ProvinceGeoJson[] = raw.map((p, id) => {
-    // Everything but the province's own body has to earn its place. A boolean
-    // op that clips a cell along the seam it already touches leaves grit --
-    // rings of a square kilometre and less -- and grit on the map reads as a
-    // grain of rice sitting in the sea. The largest ring is always kept, so a
-    // province this small in the first place (Gibraltar, four square
-    // kilometres) still survives whole.
-    const rings = p.rings.filter((r, i) => i === 0 || ringArea(r) >= MIN_FRAGMENT_AREA);
-    const ringDepth = rings.map((r, i) => {
-      let depth = 0;
-      for (let j = 0; j < rings.length; j++) {
-        if (i === j) continue;
-        if (ringArea(rings[j]) > ringArea(r) && ringInsideRing(r, rings[j])) depth++;
-      }
-      return depth % 2;
-    });
-    return {
-      id,
-      name: p.name,
-      stateId: Math.max(0, stateOfProvince[id]),
-      ownerTag: p.tag,
-      terrain: p.terrain,
-      vp: 0,
-      coastal: false,
-      rings: rings.map((r) => flatten(r)),
-      ringDepth,
-      center: [Math.round(p.centre[0] * 10) / 10, Math.round(p.centre[1] * 10) / 10],
-      area: Math.round(p.area),
-      neighbors: [],
-      seaNeighbors: [],
-    };
-  });
-
-  for (const p of provinces) {
-    const st = states[p.stateId];
-    if (st) st.provinces.push(p.id);
-  }
-
-  weldProvinceRings(provinces);
-
-  // --- 4. Distribute national assets across states -------------------------
-  distributeNationalAssets(provinces, states, raw);
-
-  // --- 5. Adjacency --------------------------------------------------------
-  computeGeometricAdjacency(provinces);
-
-  return { provinces, states };
-}
-
-
-// ---------------------------------------------------------------------------
-// Grouping cells into states
-// ---------------------------------------------------------------------------
-
-/** How many points inside a cell are put to the reference before it decides. */
-const REFERENCE_SAMPLES = 9;
-/** A state below this many square kilometres is folded into a neighbour. */
-const MIN_STATE_KM = 2_400;
-
-/**
- * Which of the reference's states a cell belongs to.
- *
- * Put to a vote rather than read off the centre: the georeference is good to a
- * couple of pixels and a pixel is eleven kilometres, so a cell whose centre
- * happens to land on a border line would otherwise be handed to whichever side
- * the rounding fell on. Nine points spread over the cell make that a tie-break
- * instead of a coin toss.
- */
-function referenceStateOf(p: RawProvince, proj: LccParams): number {
-  // The seed came from one of the reference's own provinces, and the reference
-  // already says which state that province is in. Taking its word is exact
-  // where a vote is not: our cell is a Voronoi region clipped to a different
-  // coastline, so sampling *its* shape puts a cell straddling a state border
-  // on whichever side happened to win nine points. Measured, the vote left
-  // only 61% of our state borders within two pixels of one of theirs against
-  // 78% for the province borders it could not disagree with.
-  if (p.seed.refState) return p.seed.refState;
-
-  const votes = new Map<number, number>();
-  const outer = p.rings[0];
-  const put = (x: number, y: number): void => {
-    const [lon, lat] = unprojectLcc(x, y, proj);
-    const cell = referenceStateAt(lon, lat);
-    if (cell > 0) votes.set(cell, (votes.get(cell) ?? 0) + 1);
-  };
-  put(p.centre[0], p.centre[1]);
-  const step = Math.max(1, Math.floor(outer.length / (REFERENCE_SAMPLES - 1)));
-  for (let i = 0; i < outer.length; i += step) {
-    // Pulled well inside, so a vertex on the coast does not vote for the sea.
-    put(p.centre[0] + (outer[i][0] - p.centre[0]) * 0.55,
-        p.centre[1] + (outer[i][1] - p.centre[1]) * 0.55);
-  }
-  let best = 0;
-  let bestN = 0;
-  for (const [cell, n] of votes) if (n > bestN || (n === bestN && cell < best)) { best = cell; bestN = n; }
-  return best;
-}
-
-/**
- * States, as the reference groups them.
- *
- * A state is a set of provinces, so following the reference is a matter of
- * asking each cell which of its states it stands in and collecting the answers
- * -- the borders that come out are our own province edges, not eleven-kilometre
- * pixel staircases traced off a screenshot.
- *
- * Three repairs after the vote, in order: a group split between two owners is
- * split with it, because a state cannot be half German; a group that is not
- * joined up is broken into its pieces, because a state with a detached half is
- * not a state; and anything left too small to be worth a name is folded into
- * the neighbour it shares the most border with.
- */
-function regroupByReference(
-  raw: RawProvince[], blockOf: Int32Array, touching: number[][], proj: LccParams,
+function findStraits(
+  ref: ReturnType<typeof loadReference>, cells: Cell[], coastal: boolean[],
+  neighbors: number[][],
 ): number[][] {
-  const key = new Array<string>(raw.length);
-  for (let i = 0; i < raw.length; i++) {
-    const cell = referenceStateOf(raw[i], proj);
-    // Off the edge of the reference -- the Atlantic islands, the deep Sahara,
-    // the ground east of it -- the administrative blocks stand in.
-    key[i] = cell > 0 ? `r${cell}|${raw[i].tag}` : `b${blockOf[i]}|${raw[i].tag}`;
+  const land = neighbors.map((list) => new Set(list));
+  const { w, h, provinces } = ref;
+  const idOf = new Int32Array(ref.provinceCount + 1).fill(-1);
+  for (const c of cells) idOf[c.ref] = c.id;
+
+  // Kilometres per step, by row. Diagonals are not walked: four-connectivity
+  // over a fine grid is within a few per cent of the true path length and
+  // costs nothing to reason about.
+  const stepX = new Float64Array(h);
+  const stepY = new Float64Array(h);
+  for (let r = 0; r < h; r++) {
+    const lat = ref.latOf(r + 0.5);
+    stepX[r] = ref.lonStep * 111.320 * Math.cos(lat * RAD);
+    stepY[r] = Math.abs(ref.latOf(r) - ref.latOf(r + 1)) * 110.574;
   }
 
-  const buckets = new Map<string, number[]>();
-  for (let i = 0; i < raw.length; i++) {
-    const list = buckets.get(key[i]);
-    if (list) list.push(i);
-    else buckets.set(key[i], [i]);
+  const source = new Int32Array(w * h).fill(-1);
+  const dist = new Float64Array(w * h).fill(Infinity);
+  // A bucket queue: distances are bounded by STRAIT_KM and the step is a few
+  // kilometres, so a heap would be all overhead.
+  const BUCKET = 2;
+  const buckets: number[][] = Array.from(
+    { length: Math.ceil(STRAIT_KM / BUCKET) + 2 }, () => [],
+  );
+  const pushCell = (i: number, d: number, src: number): void => {
+    if (d >= STRAIT_KM || d >= dist[i]) return;
+    dist[i] = d;
+    source[i] = src;
+    buckets[Math.floor(d / BUCKET)].push(i);
+  };
+
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      const cur = provinces[r * w + c];
+      if (cur === WATER) continue;
+      const id = idOf[cur];
+      if (id < 0 || !coastal[id]) continue;
+      const neighbours = [
+        c > 0 ? r * w + c - 1 : -1,
+        c + 1 < w ? r * w + c + 1 : -1,
+        r > 0 ? (r - 1) * w + c : -1,
+        r + 1 < h ? (r + 1) * w + c : -1,
+      ];
+      for (const nb of neighbours) {
+        if (nb < 0 || provinces[nb] !== WATER) continue;
+        pushCell(nb, 0, id);
+      }
+    }
   }
 
-  const out: number[][] = [];
-  for (const members of buckets.values()) {
-    const set = new Set(members);
-    const seen = new Set<number>();
-    for (const seed of members) {
-      if (seen.has(seed)) continue;
-      const comp: number[] = [];
-      const stack = [seed];
-      seen.add(seed);
-      while (stack.length > 0) {
-        const cur = stack.pop()!;
-        comp.push(cur);
-        for (const nb of touching[cur]) {
-          if (set.has(nb) && !seen.has(nb)) { seen.add(nb); stack.push(nb); }
+  const pairs = new Map<number, number>();
+  const note = (a: number, b: number, d: number): void => {
+    if (a === b) return;
+    const key = a < b ? a * 100000 + b : b * 100000 + a;
+    const had = pairs.get(key);
+    if (had === undefined || d < had) pairs.set(key, d);
+  };
+
+  for (let b = 0; b < buckets.length; b++) {
+    for (let qi = 0; qi < buckets[b].length; qi++) {
+      const i = buckets[b][qi];
+      if (dist[i] >= (b + 1) * BUCKET) continue;   // superseded by a shorter route
+      const r = (i / w) | 0;
+      const c = i - r * w;
+      const d = dist[i];
+      const src = source[i];
+      const step = [
+        [c > 0 ? i - 1 : -1, stepX[r]],
+        [c + 1 < w ? i + 1 : -1, stepX[r]],
+        [r > 0 ? i - w : -1, stepY[r]],
+        [r + 1 < h ? i + w : -1, stepY[r]],
+      ] as const;
+      for (const [j, cost] of step) {
+        if (j < 0) continue;
+        if (provinces[j] !== WATER) continue;
+        if (source[j] >= 0 && source[j] !== src) note(src, source[j], d + dist[j]);
+        pushCell(j, d + cost, src);
+      }
+    }
+  }
+
+  const out = cells.map(() => new Set<number>());
+  for (const [key, d] of pairs) {
+    const a = Math.floor(key / 100000);
+    const b = key - a * 100000;
+    // Two provinces that already share a land border do not also need a
+    // ferry between them: every river mouth on the map would be a strait.
+    if (land[a].has(b)) continue;
+    if (d > STRAIT_KM) continue;
+    out[a].add(b);
+    out[b].add(a);
+  }
+  return out.map((s) => [...s].sort((a, b) => a - b));
+}
+
+// ---------------------------------------------------------------------------
+// Ownership
+// ---------------------------------------------------------------------------
+
+/**
+ * Puts every cell in 1936 hands.
+ *
+ * Natural Earth's administrative units are rasterised onto the reference's own
+ * grid and each cell takes the tag most of its pixels agree on. A vote rather
+ * than a point sample because the two sources are fitted to each other to
+ * about a sixth of a degree, and on that scale a single point near a frontier
+ * is a coin toss while a whole province is not.
+ */
+function assignOwners(
+  cells: Cell[], ref: ReturnType<typeof loadReference>, admin: AdminUnit[],
+): void {
+  const { w, h } = ref;
+  const tags: string[] = [];
+  const tagIndex = new Map<string, number>();
+  const owner = new Int16Array(w * h).fill(-1);
+
+  const rowOf = rowLookup(ref);
+  for (const unit of admin) {
+    let ti = tagIndex.get(unit.tag);
+    if (ti === undefined) { ti = tags.length; tags.push(unit.tag); tagIndex.set(unit.tag, ti); }
+    for (const ring of unit.lonLat) {
+      fillRing(ring, ref, rowOf, w, h, (i) => { owner[i] = ti as number; });
+    }
+  }
+
+  const votes = new Map<number, Map<number, number>>();
+  const idOf = new Int32Array(ref.provinceCount + 1).fill(-1);
+  for (const c of cells) idOf[c.ref] = c.id;
+  for (let i = 0; i < w * h; i++) {
+    const cell = ref.provinces[i];
+    if (cell === WATER) continue;
+    const id = idOf[cell];
+    if (id < 0 || owner[i] < 0) continue;
+    let m = votes.get(id);
+    if (!m) { m = new Map(); votes.set(id, m); }
+    m.set(owner[i], (m.get(owner[i]) ?? 0) + 1);
+  }
+
+  const unclaimed: Cell[] = [];
+  for (const c of cells) {
+    const m = votes.get(c.id);
+    if (!m) { unclaimed.push(c); continue; }
+    let best = -1;
+    let bestN = -1;
+    for (const [ti, n] of m) if (n > bestN) { bestN = n; best = ti; }
+    c.tag = tags[best];
+  }
+  if (unclaimed.length > 0) {
+    console.log(`  ${unclaimed.length} cells with no admin unit under them`);
+  }
+  // Whatever Natural Earth does not cover -- a headland the fit puts a pixel
+  // off the coast, an island it never drew -- goes to the nearest cell that is
+  // claimed, so no ground is left ownerless.
+  for (const c of unclaimed) {
+    let best = '';
+    let bestD = Infinity;
+    for (const o of cells) {
+      if (!o.tag) continue;
+      const d = haversineKm(c.lon, c.lat, o.lon, o.lat);
+      if (d < bestD) { bestD = d; best = o.tag; }
+    }
+    c.tag = best || NATIONS[0].tag;
+  }
+}
+
+/**
+ * Longitude and latitude to the reference's own lattice.
+ *
+ * The map is drawn in this frame and nothing is measured in it, so the only
+ * thing that has to be right here is that a town lands on the province it
+ * belongs to and a river runs down the valley it belongs to.
+ */
+export function referenceProjector(): {
+  toLattice(lon: number, lat: number): Pt;
+  toLonLat(col: number, row: number): Pt;
+} {
+  const ref = loadReference();
+  const lats = new Float64Array(ref.h + 1);
+  for (let r = 0; r <= ref.h; r++) lats[r] = ref.latOf(r);
+  const descending = lats[0] > lats[ref.h];
+  return {
+    toLattice(lon: number, lat: number): Pt {
+      let lo = 0;
+      let hi = ref.h;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (descending ? lats[mid] > lat : lats[mid] < lat) lo = mid + 1;
+        else hi = mid;
+      }
+      // Between the two tabulated rows, so a river is not a staircase.
+      let row = lo;
+      if (lo > 0) {
+        const a = lats[lo - 1];
+        const b = lats[lo];
+        if (a !== b) row = lo - 1 + (lat - a) / (b - a);
+      }
+      return [(lon - ref.lon0) / ref.lonStep, row];
+    },
+    toLonLat(col: number, row: number): Pt {
+      return [ref.lonOf(col), ref.latOf(row)];
+    },
+  };
+}
+
+/** Row index for a latitude, tabulated once instead of bisected per vertex. */
+function rowLookup(ref: ReturnType<typeof loadReference>): (lat: number) => number {
+  const { h } = ref;
+  const lats = new Float64Array(h + 1);
+  for (let r = 0; r <= h; r++) lats[r] = ref.latOf(r);
+  const descending = lats[0] > lats[h];
+  return (lat: number): number => {
+    let lo = 0;
+    let hi = h;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (descending ? lats[mid] > lat : lats[mid] < lat) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+}
+
+/** Scanline fill of a lon/lat ring onto the reference grid. */
+function fillRing(
+  ring: Ring, ref: ReturnType<typeof loadReference>, rowOf: (lat: number) => number,
+  w: number, h: number, set: (index: number) => void,
+): void {
+  const n = ring.length;
+  if (n < 3) return;
+  let minRow = Infinity;
+  let maxRow = -Infinity;
+  const rows = new Float64Array(n);
+  const cols = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    rows[i] = rowOf(ring[i][1]);
+    cols[i] = (ring[i][0] - ref.lon0) / ref.lonStep;
+    if (rows[i] < minRow) minRow = rows[i];
+    if (rows[i] > maxRow) maxRow = rows[i];
+  }
+  const r0 = Math.max(0, Math.floor(minRow));
+  const r1 = Math.min(h - 1, Math.ceil(maxRow));
+  const xs: number[] = [];
+  for (let r = r0; r <= r1; r++) {
+    const y = r + 0.5;
+    xs.length = 0;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const yi = rows[i];
+      const yj = rows[j];
+      if ((yi > y) === (yj > y)) continue;
+      xs.push(cols[i] + ((y - yi) / (yj - yi)) * (cols[j] - cols[i]));
+    }
+    if (xs.length < 2) continue;
+    xs.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const c0 = Math.max(0, Math.ceil(xs[k] - 0.5));
+      const c1 = Math.min(w - 1, Math.floor(xs[k + 1] - 0.5));
+      const base = r * w;
+      for (let c = c0; c <= c1; c++) set(base + c);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Towns and names
+// ---------------------------------------------------------------------------
+
+function assignCities(
+  cells: Cell[], ref: ReturnType<typeof loadReference>,
+  cities: BuildCity[],
+): void {
+  const { w, h } = ref;
+  const idOf = new Int32Array(ref.provinceCount + 1).fill(-1);
+  for (const c of cells) idOf[c.ref] = c.id;
+  const rowOf = rowLookup(ref);
+
+  for (const city of cities) {
+    const col = Math.round((city.lon - ref.lon0) / ref.lonStep);
+    const row = rowOf(city.lat);
+    city.col = col;
+    city.row = row;
+    let id = -1;
+    if (col >= 0 && col < w && row >= 0 && row < h) {
+      const cell = ref.provinces[row * w + col];
+      if (cell !== WATER) id = idOf[cell];
+    }
+    if (id < 0) {
+      // A port whose pixel fell in its own harbour, which is most of them:
+      // the export's coastline is the game's, and the game's is a few
+      // kilometres inside the real one wherever it simplifies a bay. Spiral
+      // outward to the nearest land rather than asking which province centre
+      // is closest -- Iraklio is nearer the middle of Attica than the middle
+      // of Crete, and answering that way put half the Aegean's harbours on
+      // the mainland.
+      // eslint-disable-next-line no-labels
+      outer: for (let ring = 1; ring <= CITY_SEARCH_PX; ring++) {
+        for (let dr = -ring; dr <= ring; dr++) {
+          for (let dc = -ring; dc <= ring; dc++) {
+            if (Math.max(Math.abs(dr), Math.abs(dc)) !== ring) continue;
+            const r = row + dr;
+            const c = col + dc;
+            if (r < 0 || r >= h || c < 0 || c >= w) continue;
+            const cell = ref.provinces[r * w + c];
+            if (cell === WATER) continue;
+            id = idOf[cell];
+            if (id < 0) continue;
+            // Drawn where it was put ashore, not where the atlas says: a dot
+            // in the water is a bug the player can see.
+            city.col = c;
+            city.row = r;
+            break outer;
+          }
         }
       }
-      out.push(comp);
     }
-  }
-
-  // Fold the runts into whichever neighbouring state they touch most.
-  const stateOf = new Int32Array(raw.length).fill(-1);
-  out.forEach((members, i) => { for (const m of members) stateOf[m] = i; });
-  const areaOfState = out.map((m) => m.reduce((s, i) => s + raw[i].area, 0));
-  const order = out.map((_, i) => i).sort((a, b) => areaOfState[a] - areaOfState[b]);
-  const dead = new Set<number>();
-  for (const i of order) {
-    if (dead.has(i) || areaOfState[i] >= MIN_STATE_KM) continue;
-    const tally = new Map<number, number>();
-    for (const m of out[i]) {
-      for (const nb of touching[m]) {
-        const s = stateOf[nb];
-        if (s < 0 || s === i || dead.has(s)) continue;
-        if (raw[nb].tag !== raw[m].tag) continue;
-        tally.set(s, (tally.get(s) ?? 0) + 1);
+    if (id < 0) {
+      // Beyond the coastline's own error: the export puts Iceland about a
+      // degree and a half north of where Natural Earth does, so Reykjavik
+      // lands in the sea and no amount of spiralling reaches the island. Fall
+      // back to the nearest ground its own country holds, which is the answer
+      // the spiral was looking for anyway.
+      let bestD = Infinity;
+      for (const c of cells) {
+        if (c.tag !== city.tag) continue;
+        const d = haversineKm(city.lon, city.lat, c.lon, c.lat);
+        if (d < bestD) { bestD = d; id = c.id; city.col = c.col; city.row = c.row; }
       }
     }
-    let host = -1;
-    let bestN = 0;
-    for (const [s, n] of tally) if (n > bestN) { host = s; bestN = n; }
-    if (host < 0) continue;
-    for (const m of out[i]) { out[host].push(m); stateOf[m] = host; }
-    areaOfState[host] += areaOfState[i];
-    out[i] = [];
-    dead.add(i);
+    city.province = id;
   }
 
-  const kept = out.filter((m) => m.length > 0);
-  // Nation first, then north to south, so ids move as little as possible when
-  // the map is rebuilt.
-  const tagOrder = new Map<string, number>(NATIONS.map((n, i) => [n.tag, i]));
-  kept.sort((a, b) => {
-    const ta = tagOrder.get(raw[a[0]].tag) ?? 999;
-    const tb = tagOrder.get(raw[b[0]].tag) ?? 999;
-    if (ta !== tb) return ta - tb;
-    const ya = a.reduce((s, i) => s + raw[i].centre[1], 0) / a.length;
-    const yb = b.reduce((s, i) => s + raw[i].centre[1], 0) / b.length;
-    return ya - yb;
-  });
-  return kept;
-}
-
-
-/**
- * Takes the regions that history moves on their own out of the states they
- * would otherwise be buried in.
- *
- * The rim is grown a ring at a time from the frontier, nearest first, until it
- * has the area the region actually had. Growing rather than drawing keeps it on
- * real province edges and lets it follow the border round a corner, which a
- * box could not: the Sudetenland is a horseshoe.
- */
-function carveHistoricalStates(
-  groups: number[][], raw: RawProvince[], touching: number[][], proj: LccParams,
-): number[][] {
-  const stateOf = new Int32Array(raw.length).fill(-1);
-  groups.forEach((members, i) => { for (const m of members) stateOf[m] = i; });
-  const out = groups.map((m) => [...m]);
-
-  for (const carve of CARVE_1936) {
-    const taken = growRim(carve, raw, touching, proj);
-    if (taken.length === 0) {
-      console.warn(`  note: ${carve.name} found no frontier to grow from`);
-      continue;
-    }
-    for (const id of taken) {
-      const from = stateOf[id];
-      if (from < 0) continue;
-      out[from] = out[from].filter((m) => m !== id);
-    }
-    out.push(taken);
-    const id = out.length - 1;
-    for (const m of taken) stateOf[m] = id;
-    for (const m of taken) { raw[m].stateName = carve.name; raw[m].carved = carve.name; }
-    const area = taken.reduce((s, m) => s + raw[m].area, 0);
-    console.log(`  carved ${carve.name}: ${taken.length} cells, ${Math.round(area)} km2`);
+  // A province is named after the largest town on it, handed out largest
+  // first so Algiers is not left calling itself Blida.
+  const order = [...cities].sort((a, b) => b.pop - a.pop);
+  for (const city of order) {
+    if (city.province < 0) continue;
+    const c = cells[city.province];
+    if (city.pop > c.cityPop) { c.cityPop = city.pop; c.cityName = city.name; }
   }
-  return out.filter((m) => m.length > 0);
-}
-
-/** The provinces of one carve, grown inward from its frontier. */
-function growRim(
-  carve: Carve, raw: RawProvince[], touching: number[][], proj: LccParams,
-): number[] {
-  const eligible = (i: number): boolean => {
-    if (raw[i].tag !== carve.from) return false;
-    const [lon, lat] = unprojectLcc(raw[i].centre[0], raw[i].centre[1], proj);
-    const w = carve.window;
-    return lon >= w.minLon && lon <= w.maxLon && lat >= w.minLat && lat <= w.maxLat;
-  };
-
-  // Ring zero: our own ground that looks across the frontier.
-  let ring: number[] = [];
-  const chosen = new Set<number>();
-  for (let i = 0; i < raw.length; i++) {
-    if (!eligible(i)) continue;
-    if (!touching[i].some((nb) => carve.frontierWith.includes(raw[nb].tag))) continue;
-    ring.push(i);
-  }
-  // Nearest the frontier first, and by id after that so a rebuild takes the
-  // same ground twice.
-  ring.sort((a, b) => a - b);
-
-  // The first ring is taken whole, whatever it costs. It is the whole point:
-  // a rim that stops half way along the frontier does not separate the
-  // interior from it, and the cession would still find Prague on the German
-  // border and take that instead.
-  let area = 0;
-  for (const i of ring) { chosen.add(i); area += raw[i].area; }
-
-  while (area < carve.areaKm) {
-    const next: number[] = [];
-    for (const i of chosen) {
-      for (const nb of touching[i]) if (!chosen.has(nb) && eligible(nb)) next.push(nb);
-    }
-    if (next.length === 0) break;
-    let grew = false;
-    for (const i of [...new Set(next)].sort((a, b) => a - b)) {
-      if (area >= carve.areaKm) break;
-      chosen.add(i);
-      area += raw[i].area;
-      grew = true;
-    }
-    if (!grew) break;
-  }
-  return [...chosen].sort((a, b) => a - b);
-}
-
-/** Cell-to-cell adjacency, by shared ring geometry. */
-function adjacencyOf(raw: RawProvince[]): number[][] {
-  const out: number[][] = raw.map(() => []);
-  const bboxes = raw.map((p) => {
-    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
-    for (const ring of p.rings) {
-      const [x0, y0, x1, y1] = bboxOfRing(ring);
-      a = Math.min(a, x0); b = Math.min(b, y0); c = Math.max(c, x1); d = Math.max(d, y1);
-    }
-    return [a, b, c, d] as const;
-  });
-  // Bucket by a coarse grid so this stays linear in the number of cells.
-  const CELL = 120;
-  const grid = new Map<string, number[]>();
-  for (let i = 0; i < raw.length; i++) {
-    const [a, b, c, d] = bboxes[i];
-    for (let gx = Math.floor(a / CELL); gx <= Math.floor(c / CELL); gx++) {
-      for (let gy = Math.floor(b / CELL); gy <= Math.floor(d / CELL); gy++) {
-        const k = `${gx},${gy}`;
-        const list = grid.get(k);
-        if (list) list.push(i);
-        else grid.set(k, [i]);
-      }
-    }
-  }
-  const seen = new Set<number>();
-  for (const list of grid.values()) {
-    for (let a = 0; a < list.length; a++) {
-      for (let b = a + 1; b < list.length; b++) {
-        const i = list[a];
-        const j = list[b];
-        const pk = i < j ? i * 1e6 + j : j * 1e6 + i;
-        if (seen.has(pk)) continue;
-        seen.add(pk);
-        const [ax0, ay0, ax1, ay1] = bboxes[i];
-        const [bx0, by0, bx1, by1] = bboxes[j];
-        if (ax1 < bx0 - ADJACENCY_TOLERANCE || bx1 < ax0 - ADJACENCY_TOLERANCE) continue;
-        if (ay1 < by0 - ADJACENCY_TOLERANCE || by1 < ay0 - ADJACENCY_TOLERANCE) continue;
-        if (!ringsTouch(raw[i].rings, raw[j].rings, ADJACENCY_TOLERANCE)) continue;
-        out[i].push(j);
-        out[j].push(i);
-      }
-    }
-  }
-  return out;
-}
-
-/**
- * Keeps two states from carrying the same caption, by pointing at where the
- * second one is: North Pomerania and South Pomerania rather than two of them.
- */
-function uniqueStateName(
-  base: string, raw: RawProvince[], members: readonly number[], taken: Map<string, number>,
-): string {
-  const n = taken.get(base) ?? 0;
-  taken.set(base, n + 1);
-  if (n === 0) return base;
-  let x = 0;
-  let y = 0;
-  for (const m of members) { x += raw[m].centre[0]; y += raw[m].centre[1]; }
-  const anchor = raw[members[0]].centre;
-  const name = `${compass(x / members.length - anchor[0], y / members.length - anchor[1])} ${base}`;
-  const again = taken.get(name) ?? 0;
-  taken.set(name, again + 1);
-  return again === 0 ? name : `${base} ${romanish(n)}`;
-}
-
-/** A state is called after the largest place inside it. */
-function stateNameFor(raw: RawProvince[], members: readonly number[]): string {
-  // Unless history has already named it. The Sudetenland is not called Ostrava
-  // just because Ostrava is the biggest town on it.
-  const given = raw[members[0]].carved;
-  if (given) return given;
-  let best = members[0];
-  let bestPop = -1;
-  for (const m of members) {
-    const pop = raw[m].seed.pop;
-    if (pop > bestPop) { bestPop = pop; best = m; }
-  }
-  if (bestPop > 0 && raw[best].seed.cityName) return raw[best].seed.cityName!;
-  // Nothing but empty ground: fall back to the block the largest cell came from.
-  let widest = members[0];
-  for (const m of members) if (raw[m].area > raw[widest].area) widest = m;
-  return raw[widest].stateName;
+  for (const c of cells) c.terrain = classifyTerrain(c.lon, c.lat, c.cityPop);
 }
 
 /**
  * Gives every province a place name.
  *
- * A province seeded on a city takes that city's name. The rest are named for
- * the nearest real town with a compass qualifier, because "Sweden 282" tells a
+ * A province with a town takes that town's name. The rest are named for the
+ * nearest real town with a compass qualifier, because "Sweden 282" tells a
  * player nothing and breaks the illusion the map is working to create.
  */
-function nameProvinces(raw: RawProvince[], cities: CityJson[]): void {
+function nameProvinces(cells: Cell[], cities: BuildCity[]): void {
   const used = new Map<string, number>();
   const claim = (base: string): string => {
     const n = used.get(base) ?? 0;
     used.set(base, n + 1);
     return n === 0 ? base : `${base} ${romanish(n)}`;
   };
-
-  // Cities first, so they get the unqualified name.
-  for (const p of raw) {
-    if (p.seed.cityName) p.name = claim(p.seed.cityName);
-  }
-  for (const p of raw) {
-    if (p.name) continue;
-    let best: CityJson | null = null;
+  const named = [...cells].sort((a, b) => b.cityPop - a.cityPop);
+  for (const c of named) if (c.cityName) c.name = claim(c.cityName);
+  for (const c of cells) {
+    if (c.name) continue;
+    let best: BuildCity | null = null;
     let bestD = Infinity;
-    for (const c of cities) {
-      const d = (c.x - p.centre[0]) ** 2 + (c.y - p.centre[1]) ** 2;
-      if (d < bestD) { bestD = d; best = c; }
+    for (const city of cities) {
+      const d = (city.lon - c.lon) ** 2 + ((city.lat - c.lat) * 1.6) ** 2;
+      if (d < bestD) { bestD = d; best = city; }
     }
-    if (!best) {
-      p.name = claim(NATION_BY_TAG.get(p.tag)?.name ?? p.tag);
-      continue;
-    }
-    p.name = claim(`${compass(p.centre[0] - best.x, p.centre[1] - best.y)} ${best.name}`);
+    if (!best) { c.name = claim(NATION_BY_TAG.get(c.tag)?.name ?? c.tag); continue; }
+    c.name = claim(`${compass(c.lon - best.lon, c.lat - best.lat)} ${best.name}`);
   }
 }
 
-function compass(dx: number, dy: number): string {
-  // Screen y grows southward, matching the projection's flip.
-  const angle = Math.atan2(-dy, dx);
+function compass(dLon: number, dLat: number): string {
+  const angle = Math.atan2(dLat, dLon);
   const octant = Math.round((angle * 4) / Math.PI);
   switch (((octant % 8) + 8) % 8) {
     case 0: return 'East';
@@ -1142,117 +887,235 @@ function romanish(n: number): string {
   return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][n - 1] ?? String(n + 1);
 }
 
-/**
- * Coordinates go out at whole kilometres.
- *
- * A tenth of a kilometre is a hundred metres, and the map is six and a half
- * thousand kilometres across: at the closest zoom the player can reach that
- * hundred metres is under a fifth of a pixel, so every one of those decimal
- * places was two characters of a two-megabyte file spent on something nobody
- * can see. Dropping them took the baked map from 2.7 MB to 2.0.
- */
-/**
- * How far a rounded vertex can end up from the straight edge it started on:
- * half the diagonal of the one-kilometre lattice, plus a hair.
- */
-const WELD_TOLERANCE = 0.72;
+// ---------------------------------------------------------------------------
+// States
+// ---------------------------------------------------------------------------
 
 /**
- * Welds the T-junctions that rounding opens between neighbouring provinces.
+ * Groups provinces into states, following the reference's own state map.
  *
- * Two cells that share an edge share its endpoints exactly, so rounding moves
- * both sides the same way and the seam holds. A T-junction does not: where two
- * provinces meet along a third's straight edge, the meeting point sits *on*
- * that edge beforehand and up to seven hundred metres off it afterwards,
- * opening a rice-grain of unowned ground between the three. Every edge is
- * therefore re-noded against the rounded vertices lying along it -- the bend is
- * where the three provinces actually meet, and the straight line is the lie.
+ * The two tiers come from one raster, so a state is exactly a set of whole
+ * provinces and can never cut one in half. The grouping is split again by
+ * owner and by connectivity: the reference draws the game's 1936 borders and
+ * Natural Earth draws today's, and where the two disagree a state would
+ * otherwise straddle a frontier or arrive in two pieces.
  */
-function weldProvinceRings(provinces: ProvinceGeoJson[]): void {
-  const CELL = 8;
-  const cellOf = (x: number, y: number): number =>
-    Math.floor(y / CELL) * 100_000 + Math.floor(x / CELL);
-  const index = new Map<number, number[]>();
-  for (const p of provinces) {
-    for (const r of p.rings) {
-      for (let i = 0; i < r.length; i += 2) {
-        const k = cellOf(r[i], r[i + 1]);
-        let list = index.get(k);
-        if (!list) { list = []; index.set(k, list); }
-        let seen = false;
-        for (let j = 0; j < list.length; j += 2) {
-          if (list[j] === r[i] && list[j + 1] === r[i + 1]) { seen = true; break; }
+function groupStates(cells: Cell[], neighbors: number[][]): number[][] {
+  const byKey = new Map<string, number[]>();
+  for (const c of cells) {
+    const key = `${c.stateRef}|${c.tag}`;
+    const list = byKey.get(key);
+    if (list) list.push(c.id); else byKey.set(key, [c.id]);
+  }
+
+  const groups: number[][] = [];
+  for (const members of byKey.values()) {
+    const set = new Set(members);
+    const seen = new Set<number>();
+    for (const start of members) {
+      if (seen.has(start)) continue;
+      const part: number[] = [];
+      const stack = [start];
+      seen.add(start);
+      while (stack.length > 0) {
+        const cur = stack.pop() as number;
+        part.push(cur);
+        for (const nb of neighbors[cur]) {
+          if (!set.has(nb) || seen.has(nb)) continue;
+          seen.add(nb);
+          stack.push(nb);
         }
-        if (!seen) list.push(r[i], r[i + 1]);
       }
+      groups.push(part);
     }
   }
 
-  for (const p of provinces) {
-    p.rings = p.rings.map((r) => {
-      const n = r.length / 2;
-      const out: number[] = [];
-      for (let i = 0; i < n; i++) {
-        const ax = r[i * 2], ay = r[i * 2 + 1];
-        const j = (i + 1) % n;
-        const bx = r[j * 2], by = r[j * 2 + 1];
-        out.push(ax, ay);
-        const dx = bx - ax, dy = by - ay;
-        const len2 = dx * dx + dy * dy;
-        if (len2 === 0) continue;
-        const hits: [number, number, number][] = [];
-        const x0 = Math.floor((Math.min(ax, bx) - 1) / CELL);
-        const x1 = Math.floor((Math.max(ax, bx) + 1) / CELL);
-        const y0 = Math.floor((Math.min(ay, by) - 1) / CELL);
-        const y1 = Math.floor((Math.max(ay, by) + 1) / CELL);
-        for (let cy = y0; cy <= y1; cy++) {
-          for (let cx = x0; cx <= x1; cx++) {
-            const list = index.get(cy * 100_000 + cx);
-            if (!list) continue;
-            for (let k = 0; k < list.length; k += 2) {
-              const px = list[k], py = list[k + 1];
-              if ((px === ax && py === ay) || (px === bx && py === by)) continue;
-              const t = ((px - ax) * dx + (py - ay) * dy) / len2;
-              if (t <= 1e-6 || t >= 1 - 1e-6) continue;
-              const ex = ax + t * dx - px, ey = ay + t * dy - py;
-              if (ex * ex + ey * ey > WELD_TOLERANCE * WELD_TOLERANCE) continue;
-              hits.push([t, px, py]);
-            }
-          }
-        }
-        if (hits.length === 0) continue;
-        hits.sort((u, v) => u[0] - v[0]);
-        let lastX = ax, lastY = ay;
-        for (const [, px, py] of hits) {
-          if (px === lastX && py === lastY) continue;
-          out.push(px, py);
-          lastX = px; lastY = py;
+  carveHistoricalStates(groups, cells, neighbors);
+  groups.forEach((g, i) => { for (const id of g) cells[id].stateId = i; });
+  return groups;
+}
+
+/**
+ * Cuts the states history made that no administrative map remembers.
+ *
+ * The Sudetenland is the case that matters: it has to be its own state before
+ * Munich can hand it over, and no present-day unit describes it. The rim is
+ * grown inward from the frontier it faces until it has taken enough ground.
+ */
+function carveHistoricalStates(
+  groups: number[][], cells: Cell[], neighbors: number[][],
+): void {
+  for (const carve of CARVE_1936) {
+    const inWindow = (c: Cell): boolean => (
+      c.lon >= carve.window.minLon && c.lon <= carve.window.maxLon
+      && c.lat >= carve.window.minLat && c.lat <= carve.window.maxLat
+    );
+    const pool = new Set(
+      cells.filter((c) => c.tag === carve.from && inWindow(c)).map((c) => c.id),
+    );
+    if (pool.size === 0) continue;
+    // The frontier ring first, then inward until the area is met.
+    const taken = new Set<number>();
+    let frontier = [...pool].filter((id) => neighbors[id].some(
+      (nb) => carve.frontierWith.includes(cells[nb].tag),
+    ));
+    let area = 0;
+    while (frontier.length > 0 && area < carve.areaKm) {
+      const next: number[] = [];
+      for (const id of frontier) {
+        if (taken.has(id)) continue;
+        taken.add(id);
+        area += cells[id].areaKm;
+        for (const nb of neighbors[id]) {
+          if (pool.has(nb) && !taken.has(nb)) next.push(nb);
         }
       }
-      return out;
-    });
+      if (area >= carve.areaKm) break;
+      frontier = next;
+    }
+    if (taken.size === 0) continue;
+    for (const g of groups) {
+      for (let i = g.length - 1; i >= 0; i--) if (taken.has(g[i])) g.splice(i, 1);
+    }
+    for (let i = groups.length - 1; i >= 0; i--) if (groups[i].length === 0) groups.splice(i, 1);
+    const members = [...taken].sort((a, b) => a - b);
+    for (const id of members) cells[id].carved = carve.name;
+    groups.push(members);
+    console.log(`  carved ${carve.name}: ${members.length} provinces, `
+      + `${Math.round(area)} km2`);
   }
 }
 
-function flatten(ring: Ring, decimals = 0): number[] {
-  const f = 10 ** decimals;
-  const out = new Array<number>(ring.length * 2);
-  for (let i = 0; i < ring.length; i++) {
-    out[i * 2] = Math.round(ring[i][0] * f) / f;
-    out[i * 2 + 1] = Math.round(ring[i][1] * f) / f;
+function buildStates(
+  groups: number[][], cells: Cell[], provinces: ProvinceGeoJson[],
+): StateGeoJson[] {
+  const taken = new Map<string, number>();
+  return groups.map((members, i) => {
+    for (const id of members) provinces[id].stateId = i;
+    return {
+      id: i,
+      name: uniqueStateName(stateNameFor(cells, members), cells, members, taken),
+      ownerTag: cells[members[0]].tag,
+      provinces: members.slice().sort((a, b) => a - b),
+      manpower: 0,
+      resources: {} as Partial<Record<ResourceType, number>>,
+      infrastructure: 1,
+      civilianFactories: 0,
+      militaryFactories: 0,
+      dockyards: 0,
+      buildingSlots: 8,
+    };
+  });
+}
+
+/** A state is called after the largest place inside it. */
+function stateNameFor(cells: Cell[], members: readonly number[]): string {
+  const given = cells[members[0]].carved;
+  if (given) return given;
+  let best = members[0];
+  for (const m of members) if (cells[m].cityPop > cells[best].cityPop) best = m;
+  if (cells[best].cityName) return cells[best].cityName as string;
+  let widest = members[0];
+  for (const m of members) if (cells[m].areaKm > cells[widest].areaKm) widest = m;
+  return cells[widest].name;
+}
+
+function uniqueStateName(
+  base: string, cells: Cell[], members: readonly number[], taken: Map<string, number>,
+): string {
+  const n = taken.get(base) ?? 0;
+  taken.set(base, n + 1);
+  if (n === 0) return base;
+  let lon = 0;
+  let lat = 0;
+  for (const m of members) { lon += cells[m].lon; lat += cells[m].lat; }
+  const anchor = cells[members[0]];
+  const name = `${compass(lon / members.length - anchor.lon, lat / members.length - anchor.lat)} ${base}`;
+  const again = taken.get(name) ?? 0;
+  taken.set(name, again + 1);
+  return again === 0 ? name : `${base} ${romanish(n)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Borders and the silhouette
+// ---------------------------------------------------------------------------
+
+function classifyArcs(
+  topo: ReturnType<typeof traceGrid>, cells: Cell[],
+): BuiltMap['borders'] {
+  const byRef = new Map<number, Cell>();
+  for (const c of cells) byRef.set(c.ref, c);
+  const out: BuiltMap['borders'] = { country: [], state: [], province: [], coast: [] };
+  for (let i = 0; i < topo.arcs.length; i++) {
+    const { left, right } = topo.sides[i];
+    const a = byRef.get(left);
+    const b = byRef.get(right);
+    if (!a || !b) { out.coast.push(i); continue; }
+    if (a.tag !== b.tag) out.country.push(i);
+    else if (a.stateId !== b.stateId) out.state.push(i);
+    else out.province.push(i);
   }
   return out;
 }
 
+/**
+ * The land silhouette: every arc with water on one side, chained into loops.
+ *
+ * Taken from the same arcs the provinces use, so the background can never show
+ * through a hairline gap at the coast the way two independently traced
+ * outlines would.
+ */
+function landRings(topo: ReturnType<typeof traceGrid>, cells: Cell[]): number[][] {
+  const land = new Set(cells.map((c) => c.ref));
+  const refs: number[] = [];
+  for (let i = 0; i < topo.arcs.length; i++) {
+    const { left, right } = topo.sides[i];
+    const leftLand = land.has(left);
+    const rightLand = land.has(right);
+    if (leftLand === rightLand) continue;
+    refs.push(leftLand ? i : ~i);
+  }
+
+  const key = (p: Pt): string => `${p[0]},${p[1]}`;
+  const head = (r: number): Pt => (r >= 0 ? topo.arcs[r][0] : lastOf(topo.arcs[~r]));
+  const tail = (r: number): Pt => (r >= 0 ? lastOf(topo.arcs[r]) : topo.arcs[~r][0]);
+  const open = new Map<string, number[]>();
+  for (const r of refs) {
+    const k = key(head(r));
+    const list = open.get(k);
+    if (list) list.push(r); else open.set(k, [r]);
+  }
+  const used = new Set<number>();
+  const rings: number[][] = [];
+  for (const seed of refs) {
+    if (used.has(seed)) continue;
+    const ring: number[] = [];
+    let cur = seed;
+    for (let guard = 0; guard <= refs.length; guard++) {
+      used.add(cur);
+      ring.push(cur);
+      const next = (open.get(key(tail(cur))) ?? []).find((r) => !used.has(r));
+      if (next === undefined) break;
+      cur = next;
+    }
+    rings.push(ring);
+  }
+  return rings;
+}
+
+const lastOf = (pts: Pt[]): Pt => pts[pts.length - 1];
+
+// ---------------------------------------------------------------------------
+// National assets
+// ---------------------------------------------------------------------------
 
 function distributeNationalAssets(
-  provinces: ProvinceGeoJson[], states: StateGeoJson[], raw: RawProvince[],
+  provinces: ProvinceGeoJson[], states: StateGeoJson[], cells: Cell[],
 ): void {
   const byTag = new Map<string, number[]>();
   states.forEach((s, i) => {
     const list = byTag.get(s.ownerTag);
-    if (list) list.push(i);
-    else byTag.set(s.ownerTag, [i]);
+    if (list) list.push(i); else byTag.set(s.ownerTag, [i]);
   });
 
   for (const [tag, stateIds] of byTag) {
@@ -1267,31 +1130,21 @@ function distributeNationalAssets(
       let area = 0;
       let colonial = false;
       for (const pid of states[sid].provinces) {
-        pop += raw[pid].seed.pop;
+        pop += cells[pid].cityPop;
         area += provinces[pid].area;
-        if (raw[pid].seed.lat < 37) colonial = true;
+        if (cells[pid].lat < 37) colonial = true;
       }
       const base = 0.12 + pop / 250 + area / 900_000;
-      // Overseas holdings were raw-material suppliers, not industrial cores.
       return colonial ? base * 0.22 : base;
     });
     const totalWeight = weights.reduce((a, b) => a + b, 0) || 1;
-
     const share = (total: number, i: number) => (total * weights[i]) / totalWeight;
 
-    // Integer assets are handed out largest-remainder so the totals match the
-    // nation table exactly rather than drifting with rounding. Resources were
-    // rounded one state at a time instead, which cost almost nothing while a
-    // nation had eight states and a great deal once it had seventy: measured
-    // on the administrative map, the Soviet Union's twelve tungsten arrived as
-    // three, its twenty-four chromium as fourteen, and its sixty oil as
-    // sixty-four, because every share under a half vanished and every share
-    // over one rounded up.
     const civ = largestRemainder(nation.civilianFactories, weights);
     const mil = largestRemainder(nation.militaryFactories, weights);
     const dockWeights = stateIds.map((sid, i) =>
-      states[sid].provinces.some((pid) => provinces[pid].coastal) ? weights[i] : 0);
-    const anyCoastal = dockWeights.some((w) => w > 0);
+      (states[sid].provinces.some((pid) => provinces[pid].coastal) ? weights[i] : 0));
+    const anyCoastal = dockWeights.some((x) => x > 0);
     const dock = largestRemainder(nation.dockyards, anyCoastal ? dockWeights : weights);
     const mined = new Map<string, number[]>();
     for (const [r, v] of Object.entries(nation.resources) as [string, number][]) {
@@ -1308,17 +1161,10 @@ function distributeNationalAssets(
         const amount = spread[i];
         if (amount > 0) st.resources[r as keyof typeof st.resources] = amount;
       }
-      // A state with a big city has better roads and rail.
       let biggestCity = 0;
-      for (const pid of st.provinces) biggestCity = Math.max(biggestCity, raw[pid].seed.pop);
+      for (const pid of st.provinces) biggestCity = Math.max(biggestCity, cells[pid].cityPop);
       st.infrastructure = Math.max(1, Math.min(5,
         nation.infrastructure - 1 + (biggestCity > 400 ? 2 : biggestCity > 120 ? 1 : 0)));
-      // The ceiling is deliberately well above what any state's population
-      // reaches on its own. It used to be 24, which bound only the dense
-      // industrial states -- Germany's two states and Britain's five hit it
-      // while the Soviet Union's eight, spread thin, never did. The result was
-      // Germany starting with one free slot and Britain with none, so their
-      // economic game was over before it began, while the USSR built freely.
       st.buildingSlots = Math.max(
         6,
         st.civilianFactories + st.militaryFactories + st.dockyards + 6,
@@ -1345,116 +1191,3 @@ function largestRemainder(total: number, weights: number[]): number[] {
   }
   return floor;
 }
-
-/**
- * Land adjacency by proximity.
- *
- * Voronoi cells clipped against the same outline share exact edges, and Natural
- * Earth's neighbouring countries share exact boundary vertices, so a small
- * tolerance catches every genuine border and nothing else. Doing it
- * geometrically also means the two sources of geometry -- clipped cells and
- * original coastlines -- are treated identically.
- */
-const ADJACENCY_TOLERANCE = 3;
-/**
- * And a border has to be a seam, not a point.
- *
- * Two cells that really do share ground share a run of it: they are clipped
- * from the same outline, so their contact is dozens of vertices long. A single
- * pair of vertices that happen to fall within the tolerance is a strait seen
- * end-on -- the Oresund pinches to 2.8 km at Helsingor, which put a land
- * border between Sweden and Denmark and let an army walk to Copenhagen.
- */
-const ADJACENCY_SEAM = 4;
-
-function computeGeometricAdjacency(provinces: ProvinceGeoJson[]): void {
-  const rings = provinces.map((p) => p.rings.map(unflatten));
-  const boxes = provinces.map((_p, i) => {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const r of rings[i]) {
-      for (const [x, y] of r) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-    }
-    return [minX, minY, maxX, maxY] as const;
-  });
-
-  // Bucket by grid cell so the pair test is local rather than quadratic.
-  const CELL = 260;
-  const buckets = new Map<number, number[]>();
-  const key = (cx: number, cy: number) => cx * 100003 + cy;
-  provinces.forEach((_p, i) => {
-    const [minX, minY, maxX, maxY] = boxes[i];
-    for (let cx = Math.floor(minX / CELL); cx <= Math.floor(maxX / CELL); cx++) {
-      for (let cy = Math.floor(minY / CELL); cy <= Math.floor(maxY / CELL); cy++) {
-        const k = key(cx, cy);
-        const b = buckets.get(k);
-        if (b) b.push(i);
-        else buckets.set(k, [i]);
-      }
-    }
-  });
-
-  const sets = provinces.map(() => new Set<number>());
-  const tested = new Set<number>();
-  for (const bucket of buckets.values()) {
-    for (let a = 0; a < bucket.length; a++) {
-      for (let b = a + 1; b < bucket.length; b++) {
-        const i = bucket[a];
-        const j = bucket[b];
-        const pairKey = i < j ? i * 100003 + j : j * 100003 + i;
-        if (tested.has(pairKey)) continue;
-        tested.add(pairKey);
-
-        const [aMinX, aMinY, aMaxX, aMaxY] = boxes[i];
-        const [bMinX, bMinY, bMaxX, bMaxY] = boxes[j];
-        if (aMinX - bMaxX > ADJACENCY_TOLERANCE || bMinX - aMaxX > ADJACENCY_TOLERANCE) continue;
-        if (aMinY - bMaxY > ADJACENCY_TOLERANCE || bMinY - aMaxY > ADJACENCY_TOLERANCE) continue;
-
-        if (ringsTouch(rings[i], rings[j], ADJACENCY_TOLERANCE)) {
-          sets[i].add(j);
-          sets[j].add(i);
-        }
-      }
-    }
-  }
-
-  provinces.forEach((p, i) => {
-    p.neighbors = [...sets[i]].sort((x, y) => x - y);
-  });
-}
-
-function ringsTouch(a: Ring[], b: Ring[], tolerance: number): boolean {
-  const t2 = tolerance * tolerance;
-  const seam2 = ADJACENCY_SEAM * ADJACENCY_SEAM;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const ra of a) {
-    for (const rb of b) {
-      for (const p of ra) {
-        for (const q of rb) {
-          const dx = p[0] - q[0];
-          const dy = p[1] - q[1];
-          if (dx * dx + dy * dy > t2) continue;
-          if (p[0] < minX) minX = p[0];
-          if (p[0] > maxX) maxX = p[0];
-          if (p[1] < minY) minY = p[1];
-          if (p[1] > maxY) maxY = p[1];
-          const w = maxX - minX;
-          const h = maxY - minY;
-          if (w * w + h * h >= seam2) return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-function unflatten(flat: number[]): Ring {
-  const out: Ring = new Array(flat.length / 2);
-  for (let i = 0; i < flat.length; i += 2) out[i / 2] = [flat[i], flat[i + 1]];
-  return out;
-}
-

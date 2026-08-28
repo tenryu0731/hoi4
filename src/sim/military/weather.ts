@@ -10,16 +10,21 @@ import type { GameState, ProvinceId } from '../core/types';
  * Arctic was a slightly slower kind of Belgium and there was no reason to care
  * what the date was when you started.
  *
- * Severity is latitude times season. Latitude comes straight from the map --
- * this projection puts north at negative Y, so Rovaniemi sits at -1974 and
- * Rome at +836 -- and the season from the month. Nothing here is a weather
- * simulation; it is the one seasonal fact that changes how the war is fought.
+ * Severity is latitude times season, and latitude is the province's real
+ * latitude rather than a coordinate on the page. It used to be the page: the
+ * old projection put north at negative Y, so the thresholds were written as
+ * "-1800" and "100" and meant nothing without knowing which projection had
+ * produced them. 「距離は別に持つ」 -- and so is everything else that is a fact
+ * about the Earth rather than about the drawing.
+ *
+ * Nothing here is a weather simulation; it is the one seasonal fact that
+ * changes how the war is fought.
  */
 
-/** Y at which winter bites hardest; everything past it is equally Arctic. */
-const ARCTIC_Y = -1800;
-/** Y at which winter stops being a factor at all. */
-const TEMPERATE_Y = 100;
+/** Latitude at which winter bites hardest; everything north is equally Arctic. */
+const ARCTIC_LAT = 66.5;
+/** Latitude at which winter stops being a factor at all. */
+const TEMPERATE_LAT = 43;
 
 /** How much of winter each month carries, indexed from January. */
 const SEASON = [1, 1, 0.5, 0, 0, 0, 0, 0, 0, 0, 0.5, 1];
@@ -37,8 +42,8 @@ export function winterSeverity(
 ): number {
   const season = SEASON[state.clock.month - 1] ?? 0;
   if (season === 0) return 0;
-  const y = index.get(province).centerY;
-  if (y >= TEMPERATE_Y) return 0;
-  const cold = Math.min(1, (TEMPERATE_Y - y) / (TEMPERATE_Y - ARCTIC_Y));
+  const lat = index.get(province).lat;
+  if (lat <= TEMPERATE_LAT) return 0;
+  const cold = Math.min(1, (lat - TEMPERATE_LAT) / (ARCTIC_LAT - TEMPERATE_LAT));
   return cold * season;
 }

@@ -23,6 +23,9 @@ export interface Province {
   ringDepth: number[];
   centerX: number;
   centerY: number;
+  /** Where the province is on the Earth. Distances are measured from this. */
+  lon: number;
+  lat: number;
   area: number;
   neighbors: ProvinceId[];
   seaNeighbors: ProvinceId[];
@@ -43,6 +46,11 @@ export interface PathOptions {
 }
 
 const DEFAULT_SEA_MULTIPLIER = 4;
+
+const EARTH_KM = 6371.0088;
+const RAD = Math.PI / 180;
+/** Wide enough that a province-pair key never collides. */
+const KEY_STRIDE = 100_000;
 
 /**
  * How close a vertex has to be to the other province's edge to count as on the
@@ -71,6 +79,12 @@ export class ProvinceIndex {
   readonly provinces: Province[];
   readonly bounds: [number, number, number, number];
   readonly data: MapDataJson;
+  /** Every boundary line on the map, in render units, each held once. */
+  readonly arcs: Float32Array[];
+  /** The land silhouette, assembled from the same arcs the provinces use. */
+  readonly landRings: Float32Array[];
+  /** Rivers, in render units. */
+  readonly rivers: Float32Array[];
 
   private cellSize: number;
   private gridW: number;
@@ -89,11 +103,39 @@ export class ProvinceIndex {
   /** The A* open set, as a binary heap of province ids. */
   private open: Int32Array;
   private stamp = 0;
+  /** Memoised great-circle distances, keyed by the unordered province pair. */
+  private distanceCache = new Map<number, number>();
 
   private constructor(data: MapDataJson) {
     this.data = data;
     this.bounds = data.bounds;
-    this.provinces = data.provinces.map(toProvince);
+    // Delta-encoded lattice integers to render units, once, for everything
+    // that draws.
+    const scale = data.projection.scale;
+    this.arcs = data.arcs.map((a) => {
+      const out = new Float32Array(a.length);
+      let x = 0;
+      let y = 0;
+      for (let i = 0; i < a.length; i += 2) {
+        x += a[i];
+        y += a[i + 1];
+        out[i] = x * scale;
+        out[i + 1] = y * scale;
+      }
+      return out;
+    });
+    const place = geographer(data.projection);
+    this.provinces = data.provinces.map((p) => toProvince(p, this.arcs, scale, place));
+    this.landRings = data.land.map((refs) => assembleRing(refs, this.arcs));
+    // Towns are stored on the same lattice as everything else; the UI reads
+    // them straight off `data.cities`, so they are put into render units here
+    // rather than at every call site.
+    for (const c of data.cities) { c.x *= scale; c.y *= scale; }
+    this.rivers = data.rivers.map((flat) => {
+      const out = new Float32Array(flat.length);
+      for (let i = 0; i < flat.length; i++) out[i] = flat[i] * scale;
+      return out;
+    });
 
     const [minX, minY, maxX, maxY] = data.bounds;
     const w = maxX - minX;
@@ -417,18 +459,35 @@ export class ProvinceIndex {
     return this.provinces[a].seaNeighbors.includes(b);
   }
 
-  /** Straight-line distance between province centres, in kilometres. */
+  /**
+   * Great-circle distance between province centres, in kilometres.
+   *
+   * 「円筒図法にして、距離は別に持つ」. The map is drawn in a cylindrical frame so
+   * that it looks like the game it is modelled on, and a cylindrical frame
+   * stretches east-west by 1/cos(latitude): measuring in it would make the
+   * Gulf of Finland twice as wide as the Adriatic when the two are the same
+   * distance, and Murmansk further from Archangel than Rome is from Tunis.
+   * Everything that depends on how far apart two places are -- marching,
+   * shipping, supply range, the AI choosing a target -- comes through here,
+   * so here is where the sphere is.
+   *
+   * The haversine costs three trigonometric calls where the old subtraction
+   * cost none, and this is on the hot path, so the answer is cached per pair
+   * the first time it is asked for.
+   */
   distance(a: ProvinceId, b: ProvinceId): number {
+    const key = a < b ? a * KEY_STRIDE + b : b * KEY_STRIDE + a;
+    const had = this.distanceCache.get(key);
+    if (had !== undefined) return had;
     const pa = this.provinces[a];
     const pb = this.provinces[b];
-    // sqrt of the sum of squares, not Math.hypot. Hypot's overflow-safe
-    // scaling costs several times as much, and these are map coordinates
-    // within a few thousand units of the origin -- nowhere near the range
-    // where that scaling buys anything. Measured at 8.3% of a twelve-year
-    // campaign's CPU time before this.
-    const dx = pa.centerX - pb.centerX;
-    const dy = pa.centerY - pb.centerY;
-    return Math.sqrt(dx * dx + dy * dy);
+    const dLat = (pb.lat - pa.lat) * RAD;
+    const dLon = (pb.lon - pa.lon) * RAD;
+    const s = Math.sin(dLat / 2) ** 2
+      + Math.cos(pa.lat * RAD) * Math.cos(pb.lat * RAD) * Math.sin(dLon / 2) ** 2;
+    const km = 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(s)));
+    this.distanceCache.set(key, km);
+    return km;
   }
 
   // -------------------------------------------------------------------------
@@ -599,8 +658,77 @@ export class ProvinceIndex {
 
 const EMPTY = new Int32Array(0);
 
-function toProvince(p: ProvinceGeoJson): Province {
-  const rings = p.rings.map((r) => Float32Array.from(r));
+function signedRingArea(ring: Float32Array): number {
+  let s = 0;
+  const n = ring.length / 2;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    s += ring[j * 2] * ring[i * 2 + 1] - ring[i * 2] * ring[j * 2 + 1];
+  }
+  return s / 2;
+}
+
+/**
+ * Turns a lattice position into a place on the Earth.
+ *
+ * Longitude is linear in the column and latitude is a polynomial in the row --
+ * the fit the reference export was georeferenced with. This is the only route
+ * from the drawn map back to real geography, and everything that measures a
+ * distance goes through it once, at load.
+ */
+function geographer(
+  proj: MapDataJson['projection'],
+): (col: number, row: number) => [number, number] {
+  const { quantum, lon0, lonStep, latPoly, latV0, latVStep } = proj;
+  return (col, row) => {
+    const v = latV0 + (row / quantum) * latVStep;
+    let lat = 0;
+    for (const c of latPoly) lat = lat * v + c;
+    return [lon0 + lonStep * (col / quantum), lat];
+  };
+}
+
+/**
+ * Expands a ring of signed arc references into a flat outline.
+ *
+ * `i` reads arc `i` forward, `~i` reads it backwards. Each arc ends where the
+ * next begins, so the shared endpoint is written once.
+ */
+function assembleRing(refs: number[], arcs: Float32Array[]): Float32Array {
+  let n = 0;
+  for (const ref of refs) n += (arcs[ref >= 0 ? ref : ~ref].length / 2) - 1;
+  const out = new Float32Array(n * 2);
+  let k = 0;
+  for (const ref of refs) {
+    const arc = arcs[ref >= 0 ? ref : ~ref];
+    const m = arc.length / 2;
+    if (ref >= 0) {
+      for (let i = 0; i < m - 1; i++) { out[k++] = arc[i * 2]; out[k++] = arc[i * 2 + 1]; }
+    } else {
+      for (let i = m - 1; i > 0; i--) { out[k++] = arc[i * 2]; out[k++] = arc[i * 2 + 1]; }
+    }
+  }
+  return out;
+}
+
+/**
+ * Rebuilds a province's outlines from the shared arc table.
+ *
+ * The file stores every boundary once and each province names the arcs its
+ * rings are made of, so two neighbours are guaranteed the same vertices rather
+ * than merely simplified to nearly the same ones. Expanding them here costs a
+ * few milliseconds at load and means nothing downstream has to know.
+ */
+function toProvince(
+  p: ProvinceGeoJson, arcs: Float32Array[], scale: number,
+  place: (col: number, row: number) => [number, number],
+): Province {
+  const rings = p.rings.map((refs) => assembleRing(refs, arcs));
+  // Outer rings and holes are told apart by which way they wind: the build
+  // walks every ring with the province on its left, so a hole comes back with
+  // the opposite sign from the outline it sits in.
+  const areas = rings.map(signedRingArea);
+  const outerSign = Math.sign(areas.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0));
+  const [lon, lat] = place(p.center[0], p.center[1]);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const r of rings) {
     for (let i = 0; i < r.length; i += 2) {
@@ -619,9 +747,11 @@ function toProvince(p: ProvinceGeoJson): Province {
     vp: p.vp,
     coastal: p.coastal,
     rings,
-    ringDepth: p.ringDepth,
-    centerX: p.center[0],
-    centerY: p.center[1],
+    ringDepth: areas.map((a) => (Math.sign(a) === outerSign ? 0 : 1)),
+    centerX: p.center[0] * scale,
+    centerY: p.center[1] * scale,
+    lon,
+    lat,
     area: p.area,
     neighbors: p.neighbors,
     seaNeighbors: p.seaNeighbors,

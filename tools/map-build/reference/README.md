@@ -1,23 +1,23 @@
-# What the reference map is for
+# The reference map
 
-Two things about *Hearts of Iron IV*'s map are worth copying, and neither of
-them is geometry:
+`hoi4-cells.json` is where the map comes from. It holds two rasters — one of
+state-cell ids, one of province-cell ids — and the lon/lat fit that places
+them. `tools/map-build` traces its cell boundaries into the shared arcs that
+`public/data/map.json` ships, so **every line the game draws is the
+reference's**: its coastline, its province borders, its state borders.
 
-- **which of our cells belong to the same state**, and
-- **where its provinces actually sit**.
+Natural Earth is still read, but only for facts rather than shapes:
 
-`hoi4-cells.json` holds both: a raster of state-cell ids, a raster of
-province-cell ids, and the lon/lat fit that places them. The build reads it to
-group its own cells and to decide where to seed them. It never takes a line
-from it.
+| | |
+|---|---|
+| who held which ground in 1936 | `ne_10m_admin_1_states_provinces` |
+| where the towns were, and how big | `ne_10m_populated_places` |
+| which rivers are worth drawing | `ne_50m_rivers_lake_centerlines` |
 
-Every border the game draws comes from **Natural Earth** (public domain), at
-10 m resolution, with the 1936 owners applied by `historical.ts`.
+## Provenance
 
-## The export it is derived from
-
-A [mapchart.net](https://www.mapchart.net/hearts-of-iron-iv.html) Hearts of
-Iron IV export, in **primary colours**:
+This is a [mapchart.net](https://www.mapchart.net/hearts-of-iron-iv.html)
+Hearts of Iron IV export, in **primary colours**:
 
 | | |
 |---|---|
@@ -26,11 +26,19 @@ Iron IV export, in **primary colours**:
 | province borders | green |
 | state borders | black |
 
-The colours are the whole trick. Telling the two tiers apart by the colour of
-the line is exact, where telling them apart by anything else is not — see
-below. The export must also be cropped above the Horn of Africa, or mapchart's
-watermark sits on land and its lettering cuts the cells underneath it into
-confetti.
+The colours are the whole trick: telling the two tiers apart by the colour of
+the line is exact, where telling them apart by anything else is not. An earlier
+reference read a state-mode *screenshot* by runs of flat colour — but the game
+draws its province borders inside each state in the same shade, so a run of
+flat colour stops at a province border rather than a state one. It was a
+province map wearing a state map's name, and it cut Latvia into seven.
+
+The export must be cropped above the Horn of Africa, or mapchart's watermark
+sits on land and its lettering cuts the cells underneath it into confetti.
+
+The province layout in this file is Paradox's, and tracing it reproduces their
+work rather than only their groupings. That is a deliberate choice by the
+repository's owner, made after the alternative had been built and measured.
 
 ## Regenerating
 
@@ -40,20 +48,27 @@ Needs `numpy`, `scipy` and `pillow`, and the export above, which is not in this
 repository.
 
 State borders are drawn *over* the province borders they follow, so a pixel or
-two of green can survive beside the black. That costs nothing here: a state
-border is always also a province border, so black is treated as splitting both
-tiers, and the hairline cells the leftovers would make fall under the minimum
-size.
+two of green can survive beside the black. That costs nothing: a state border
+is always also a province border, so black is treated as splitting both tiers,
+and the hairline cells the leftovers would make fall under the minimum size.
 
-## Why not trace the map instead
+## What it holds
 
-Because tracing it would make the map worse, and because the geometry is not
-ours to ship. Natural Earth's coastline is a couple of orders of magnitude
-finer than any screenshot, and the reference is not needed for it — only for
-the grouping and the seeding, which are counts and positions rather than
-shapes.
+| | |
+|---|---|
+| grid | 1702 × 1411, about 3.6 km to a pixel |
+| window | lon −24.2 … 53.0, lat 26.0 … 73.0 |
+| states | **435** |
+| provinces | **4,271** |
+| provinces to a state | median **12**, p10 4, p90 24 |
 
-## The fit
+and what the build makes of it: 4,271 provinces and 479 states. The provinces
+are one-for-one; the states are more numerous because a state here may not
+straddle a 1936 frontier or arrive in two pieces, and the reference's own
+grouping does both in a few places where its borders and Natural Earth's
+disagree.
+
+## The fit, and what it is good for
 
 Longitude is linear in the column; latitude is a quintic in the row, fitted by
 matching each row's land/sea profile against Natural Earth's coastline.
@@ -65,43 +80,21 @@ Measured against that coastline:
 | pixels agreeing | **96.95%** |
 | root-mean-square of the row fit | **0.15°** (≈17 km) |
 
-Longitude was also fitted column-wise as a cubic and came back no better than
-the straight line (rms 0.55° either way), which is the expected answer for a
-cylindrical projection.
+and measured a second way, by rasterising each 1936 administrative unit onto
+this grid and comparing where its pixels land against where Natural Earth puts
+its centroid: **median 7 km, p90 28 km, p99 106 km** over 1,484 units.
 
-The one place the source itself is off is Iceland, about 1.5° north of where
-Natural Earth puts it — the real game's map is a game map, not a survey.
+That is good enough to place a province, and it is *not* a promise that
+distances inside the map are true. This is a game map: where Hearts of Iron IV
+needs room for sea provinces it draws the coasts apart, so the Dover Strait,
+thirty-four kilometres wide in life, measures a hundred and forty-four here.
+The build measures crossings against this map rather than against the Earth,
+and `STRAIT_KM` is set from what it finds.
 
-## What it reads out
+Two known departures from the world:
 
-| | |
-|---|---|
-| states | **435** |
-| provinces | **4,271** |
-| provinces to a state | median **12**, p10 4, p90 24 |
-
-and what the build makes of it:
-
-| | ours | reference |
-|---|---|---|
-| states | 450 | 435 |
-| provinces | 4,222 | 4,271 |
-| provinces to a state | median 8 | median 12 |
-| our land against its land, in its own frame | IoU **0.870** | — |
-
-## The reference this replaced, and why
-
-The previous one read a state-mode *screenshot* by runs of flat colour. In
-state mode the game still draws its province borders inside each state, in the
-same shade — so a run of flat colour stops at a province border, not a state
-one. It was a province map wearing a state map's name.
-
-It was not a clean province map either: a 12-pixel floor and the fitted window
-dropped most of them, which left 415 cells and looked like a plausible number
-of states. What survived was uneven — Germany came out about right while
-Iceland was split into six and Latvia into seven, which is what players saw as
-「ドイツ以外が細すぎる」.
-
-Two workarounds existed to compensate, and both are gone with it: a hand-written
-table of state counts per country, and a floor on cell size that followed where
-the towns were. Neither is needed once the reference can be believed.
+- **Iceland** sits about 1.5° north of where Natural Earth puts it, far enough
+  that Reykjavík's own coordinates land in the sea. Towns that fall outside
+  every province are put ashore on the nearest ground their own country holds.
+- **Malta** is not here at all: at 316 km² it is under the 250-pixel floor
+  `derive.py` uses to reject the confetti left by the export's lettering.

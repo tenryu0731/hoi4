@@ -7,7 +7,7 @@ import type { CountryId, GameState, ProvinceId } from '../sim/core/types';
 import { Camera } from './Camera';
 import {
   PALETTE, RESOURCE_RAMP, SUPPLY_RAMP, TERRAIN_COLOR, VICTORY_RAMP,
-  type MapMode, mix, ramp, rgbToHex, shade,
+  type MapMode, mix, ramp, rgbToHex,
 } from './palette';
 import {
   createGrainTexture, createOceanTexture, createReliefTexture, createVerticalRamp,
@@ -291,7 +291,6 @@ export class MapRenderer {
 
     this.world.addChild(this.lakeLayer);
     this.world.addChild(this.riverLayer);
-    this.buildWater();
 
     this.world.addChild(this.borderLayer);
 
@@ -330,7 +329,7 @@ export class MapRenderer {
     const passes: [number, number][] = [[46, 0.16], [16, 0.24]];
     for (const [width, alpha] of passes) {
       const g = new Graphics();
-      for (const ring of this.index.data.land) {
+      for (const ring of this.index.landRings) {
         this.tracePolygon(g, ring);
       }
       g.stroke({ color: PALETTE.coastGlow, width, alpha, join: 'round', cap: 'round' });
@@ -340,7 +339,7 @@ export class MapRenderer {
 
   private buildNeutralLand(): void {
     const g = this.neutralLand;
-    for (const ring of this.index.data.land) this.tracePolygon(g, ring);
+    for (const ring of this.index.landRings) this.tracePolygon(g, ring);
     g.fill({
       texture: this.reliefTexture,
       color: PALETTE.neutralLand,
@@ -427,12 +426,6 @@ export class MapRenderer {
     this.coarseDirty.add(tint);
   }
 
-  private buildWater(): void {
-    for (const ring of this.index.data.lakes) this.tracePolygon(this.lakeLayer, ring);
-    this.lakeLayer.fill({ color: PALETTE.lake });
-    this.lakeLayer.stroke({ color: shade(PALETTE.lake, 0.7), width: 3, alpha: 0.7 });
-  }
-
   /**
    * Redraws the city markers at the given zoom.
    *
@@ -507,7 +500,7 @@ export class MapRenderer {
     }
   }
 
-  private tracePolygon(g: Graphics, flat: number[]): void {
+  private tracePolygon(g: Graphics, flat: ArrayLike<number>): void {
     if (flat.length < 6) return;
     g.moveTo(flat[0], flat[1]);
     for (let i = 2; i < flat.length; i += 2) g.lineTo(flat[i], flat[i + 1]);
@@ -552,7 +545,6 @@ export class MapRenderer {
     // no states. It was showing both, as one undifferentiated mesh. What
     // separates them has to be weight, not alpha: 0.9 / 2.0 / 2.8 px of dark
     // core, each with its own halo, so the eye sorts them without being told.
-    const internal = this.internalBorders();
     if (step >= 2) {
       // The finest tier is a hairline with no halo. It is texture: it says
       // "this cell divides further", and it must not compete with the state
@@ -564,7 +556,9 @@ export class MapRenderer {
       // was given. At 0.9px of (92,83,67) over Germany's grey the seams were
       // measurably present and visually absent -- 3424 world units of them
       // inside Germany alone, and the screenshot showed three lines.
-      for (const line of internal.province) this.tracePolyline(g, line);
+      for (const i of this.index.data.borders.province) {
+        this.tracePolyline(g, this.index.arcs[i]);
+      }
       g.stroke({ color: 0x14110c, width: px(0.8), alpha: 0.22, join: 'round' });
     }
     if (step >= 1) {
@@ -581,27 +575,27 @@ export class MapRenderer {
       // were recovered per-edge from midpoints, so the light stroke drew a
       // lozenge around every two-vertex run and the map read as scale armour.
       // The boundaries now come straight out of the topology as whole arcs.
-      const seams = this.index.data.borders.province;
-      for (const line of seams) this.tracePolyline(g, line);
+      const seams = this.index.data.borders.state;
+      for (const i of seams) this.tracePolyline(g, this.index.arcs[i]);
       g.stroke({ color: 0xf0e6cf, width: px(3.4), alpha: 0.16, join: 'round', cap: 'round' });
-      for (const line of seams) this.tracePolyline(g, line);
+      for (const i of seams) this.tracePolyline(g, this.index.arcs[i]);
       g.stroke({ color: 0x14110c, width: px(2.1), alpha: 0.72, join: 'round', cap: 'round' });
     }
 
-    for (const line of this.index.data.borders.coast) this.tracePolyline(g, line);
+    for (const i of this.index.data.borders.coast) this.tracePolyline(g, this.index.arcs[i]);
     g.stroke({ color: PALETTE.borderCoast, width: px(1.4), alpha: 0.7, join: 'round' });
 
     // Country borders get a soft light halo first, then the dark line, which is
     // what gives printed political maps their engraved look.
-    for (const line of this.index.data.borders.country) this.tracePolyline(g, line);
+    for (const i of this.index.data.borders.country) this.tracePolyline(g, this.index.arcs[i]);
     g.stroke({ color: 0xf0e6cf, width: px(4.4), alpha: 0.26, join: 'round', cap: 'round' });
-    for (const line of this.index.data.borders.country) this.tracePolyline(g, line);
+    for (const i of this.index.data.borders.country) this.tracePolyline(g, this.index.arcs[i]);
     g.stroke({ color: PALETTE.borderCountry, width: px(2.8), alpha: 0.95, join: 'round', cap: 'round' });
 
     const rg = this.riverLayer;
     rg.clear();
     if (step >= 2) {
-      for (const line of this.index.data.rivers) this.tracePolyline(rg, line);
+      for (const line of this.index.rivers) this.tracePolyline(rg, line);
       rg.stroke({ color: PALETTE.river, width: px(1.3), alpha: 0.55, join: 'round', cap: 'round' });
     }
 
@@ -614,7 +608,7 @@ export class MapRenderer {
     this.units.setZoom(zoom);
   }
 
-  private tracePolyline(g: Graphics, flat: number[]): void {
+  private tracePolyline(g: Graphics, flat: ArrayLike<number>): void {
     if (flat.length < 4) return;
     g.moveTo(flat[0], flat[1]);
     for (let i = 2; i < flat.length; i += 2) g.lineTo(flat[i], flat[i + 1]);
@@ -1346,45 +1340,16 @@ export class MapRenderer {
   }
 
   /**
-   * Seams inside a country, split by which tier they separate.
+   * The three land tiers now come straight out of the map file.
    *
-   * The state tier is not one of them any more. States are now merged out of
-   * real administrative units, so the map build knows exactly which arcs sit
-   * between two of them and ships them in borders.province -- one unbroken
-   * polyline per stretch of state boundary, which is what the tier wanted all
-   * along.
-   *
-   * The province tier is still built here, because a Voronoi seam inside a
-   * state exists only in the cells themselves. It is built from whole rings
-   * rather than from the runs two provinces agree on. The agreement version
-   * drew the map as fish scales, and the measurement says why: the average
-   * boundary between two provinces is **2.7 vertices long**, so the mesh was
-   * thousands of two-point capsules -- and 28% of neighbouring pairs produced
-   * no run at all, leaving holes as well. A ring is a closed loop and needs no
-   * agreement with anything, so the tier is simply every outline.
+   * They used to be recovered here: the state seam from the units the build
+   * merged, and the province hairline from whole province outlines, because a
+   * Voronoi seam existed only in the cells themselves. The map is traced from
+   * one raster now, so every boundary is an arc that knows the two cells it
+   * separates, and which tier it belongs to is a question about those two
+   * cells rather than a reconstruction. Each line is also drawn once rather
+   * than once per province that touches it.
    */
-  private internalCache: { province: number[][] } | null = null;
-
-  private internalBorders(): { province: number[][] } {
-    if (this.internalCache) return this.internalCache;
-    const province: number[][] = [];
-    for (const p of this.index.provinces) {
-      for (const ring of p.rings) {
-        const n = ring.length / 2;
-        if (n < 2) continue;
-        // The whole outline, as the finest tier.
-        const loop: number[] = [];
-        for (let i = 0; i <= n; i++) {
-          const j = (i % n) * 2;
-          loop.push(ring[j], ring[j + 1]);
-        }
-        province.push(loop);
-      }
-    }
-    this.internalCache = { province };
-    return this.internalCache;
-  }
-
   private frontCache = new Map<number, number[][]>();
 
   private sharedBorderCached(a: ProvinceId, b: ProvinceId): number[][] {

@@ -381,6 +381,10 @@ describe('movement', () => {
     const ger = f.country('GER');
     const from = f.provinceOf('GER');
     const to = f.index.get(from).neighbors[0];
+    // Its own ground: a peacetime border is closed, and whether the first
+    // German province on the map happens to have a German province next to it
+    // is an accident of the map rather than anything this test is about.
+    f.state.provinces[to].controller = ger.id;
     const d = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, from, 1);
     expect(orderMove(f.state, ctxOf(f), d, to)).toBe(true);
     expect(d.path).toEqual([to]);
@@ -504,7 +508,14 @@ describe('retreat and destruction', () => {
     const ger = f.country('GER');
     const home = f.provinceOf('GER');
     const front = f.index.get(home).neighbors[0];
+    // Everything around the front is German, so the only question the test
+    // asks is whether a beaten division falls back rather than which way.
+    // Left open, it retreats into whichever neutral the map happens to put
+    // next door, and the assertion below is about ownership.
     f.state.provinces[front].controller = ger.id;
+    for (const nb of f.index.get(front).neighbors) {
+      f.state.provinces[nb].controller = ger.id;
+    }
 
     const d = spawnDivision(f.state, ger.id, TEMPLATE_INFANTRY, front, 1);
     retreat(f.state, ctxOf(f), d, front);

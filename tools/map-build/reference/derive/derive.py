@@ -57,8 +57,8 @@ def pack(arr):
     return base64.b64encode(gzip.compress(arr.tobytes(), 9)).decode('ascii')
 
 doc = {
-    'note': 'HOI4 state and province cell ids. Groupings only -- every line the '
-            'game draws comes from Natural Earth.',
+    'note': 'HOI4 state and province cell ids. The map is traced from these: '
+            'every line the game draws is the reference export\u2019s.',
     'width': W, 'height': H,
     'states': nst, 'provinces': npv,
     # lon is linear in the column; lat is a quintic in the row, both fitted
