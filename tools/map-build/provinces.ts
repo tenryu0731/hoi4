@@ -468,13 +468,17 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   const stateGroups = regroupByReference(raw, blockOf, projection);
 
   const stateOfProvince = new Int32Array(raw.length).fill(-1);
+  // Two states can land on the same principal town -- one Pomerania either
+  // side of the Oder, one Pskov either side of the lake -- and two identically
+  // captioned regions next to each other read as one.
+  const takenNames = new Map<string, number>();
   const states: StateGeoJson[] = stateGroups.map((members, id) => {
     for (const idx of members) stateOfProvince[idx] = id;
     const tag = raw[members[0]].tag;
     const nation = NATION_BY_TAG.get(tag);
     return {
       id,
-      name: stateNameFor(raw, members),
+      name: uniqueStateName(stateNameFor(raw, members), raw, members, takenNames),
       ownerTag: tag,
       provinces: [],           // filled once province ids are final
       manpower: 0,
@@ -709,6 +713,26 @@ function adjacencyOf(raw: RawProvince[]): number[][] {
     }
   }
   return out;
+}
+
+/**
+ * Keeps two states from carrying the same caption, by pointing at where the
+ * second one is: North Pomerania and South Pomerania rather than two of them.
+ */
+function uniqueStateName(
+  base: string, raw: RawProvince[], members: readonly number[], taken: Map<string, number>,
+): string {
+  const n = taken.get(base) ?? 0;
+  taken.set(base, n + 1);
+  if (n === 0) return base;
+  let x = 0;
+  let y = 0;
+  for (const m of members) { x += raw[m].centre[0]; y += raw[m].centre[1]; }
+  const anchor = raw[members[0]].centre;
+  const name = `${compass(x / members.length - anchor[0], y / members.length - anchor[1])} ${base}`;
+  const again = taken.get(name) ?? 0;
+  taken.set(name, again + 1);
+  return again === 0 ? name : `${base} ${romanish(n)}`;
 }
 
 /** A state is called after the largest place inside it. */
