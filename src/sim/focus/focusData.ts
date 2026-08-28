@@ -95,8 +95,15 @@ export type FocusEffect =
    * over instead, which is what a refused demand historically left behind.
    */
   | { k: 'annex'; target: string }
-  /** The same pressure for a border strip: `states` of the target's, ceded. */
-  | { k: 'cede'; target: string; states: number }
+  /**
+   * The same pressure for a border strip: `states` of the target's, ceded.
+   *
+   * `region` names what is being demanded, when history demanded something in
+   * particular. Munich was not an ultimatum for three border districts; it was
+   * an ultimatum for the Sudetenland, and which ground that is should not
+   * depend on which state happened to weigh most that year.
+   */
+  | { k: 'cede'; target: string; states: number; region?: string }
   | { k: 'guarantee'; target: string }
   | { k: 'opinion'; target: string; amount: number; direction?: 'ours' | 'theirs' | 'both' }
   | { k: 'worldTension'; amount: number };
@@ -258,7 +265,7 @@ const GERMANY: FocusTree = {
       requires: [{ k: 'date', from: '1938-08' }, { k: 'countryAlive', tag: 'CZE' }],
       effects: [
         { k: 'opinion', target: 'CZE', amount: 30, direction: 'theirs' },
-        { k: 'cede', target: 'CZE', states: 3 },
+        { k: 'cede', target: 'CZE', states: 1, region: 'Sudetenland' },
         { k: 'politicalPower', amount: 60 },
         { k: 'worldTension', amount: 4 },
       ],
@@ -513,7 +520,12 @@ const SOVIET: FocusTree = {
       requires: [{ k: 'date', from: '1940-05' }, { k: 'countryAlive', tag: 'ROM' }],
       effects: [
         { k: 'opinion', target: 'ROM', amount: 25, direction: 'theirs' },
-        { k: 'cede', target: 'ROM', states: 2 },
+        // Three, because that is what Romania actually gave up in June 1940
+        // and the map now has the three of them as separate states: northern
+        // Bukovina at Cernăuți, Bessarabia proper at Chișinău, and the Budjak
+        // at Ismail. They are also the only Romanian states on the Soviet
+        // border, so the demand cannot reach past them into Moldavia.
+        { k: 'cede', target: 'ROM', states: 3 },
         { k: 'politicalPower', amount: 55 },
         { k: 'worldTension', amount: 3 },
       ],

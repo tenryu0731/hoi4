@@ -705,9 +705,16 @@ export function runMilitaryAI(state: GameState, ctx: AIContext, c: Country): voi
       if (t.overseas && overseasBudget <= 0) continue;
       // A province that is already carrying as much as it can move is not a
       // place to send another division: the whole stack starves together.
-      if (roomAt(state, ctx, c.id, booked, t.province) <= 0) continue;
+      const room = roomAt(state, ctx, c.id, booked, t.province);
+      if (room <= 0) continue;
       const dist = ctx.index.distance(d.provinceId, t.province);
-      const power = divisionPower(state, d) * ATTACK_RATIO;
+      // What the party that can stand here is worth, not what this division is
+      // worth on its own. The comparison used to be one division against the
+      // whole defending stack, and nobody is stronger alone than the people
+      // they are attacking -- so a province held by two was refused by every
+      // attacker in the army, one after another, and the front never moved.
+      // Armies attack in numbers; the test has to be about numbers.
+      const power = divisionPower(state, d) * room * ATTACK_RATIO;
       // Attack when locally strong, otherwise close up and wait.
       if (power < t.defence && t.defence > 0) continue;
       if (dist < chosenDistance) { chosen = t; chosenDistance = dist; }

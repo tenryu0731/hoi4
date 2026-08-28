@@ -9,6 +9,7 @@ import type { CityJson, ProvinceGeoJson, StateGeoJson } from '../../src/sim/map/
 import type { TerrainType } from '../../src/sim/core/types';
 import { NATION_BY_TAG, NATIONS } from '../../src/sim/scenario/nations';
 import type { StateGroup } from './states';
+import { CARVE_1936, type Carve } from './historical';
 import { referenceKmPerProvince, referenceStateAt } from './reference';
 import type { BuiltProvinces } from './build';
 
@@ -263,6 +264,8 @@ interface RawProvince {
   name: string;
   /** The state this cell was carved out of, used when naming it. */
   stateName: string;
+  /** Set when history gives this ground a name of its own. */
+  carved?: string;
 }
 
 /**
@@ -465,7 +468,10 @@ export function subdivideProvinces(input: SubdivideInput): BuiltProvinces {
   // --- 3. Group the cells into states, following the reference -------------
   const blockOf = new Int32Array(raw.length).fill(-1);
   membersOfState.forEach((list, b) => { for (const i of list) blockOf[i] = b; });
-  const stateGroups = regroupByReference(raw, blockOf, projection);
+  const touching = adjacencyOf(raw);
+  const stateGroups = carveHistoricalStates(
+    regroupByReference(raw, blockOf, touching, projection), raw, touching, projection,
+  );
 
   const stateOfProvince = new Int32Array(raw.length).fill(-1);
   // Two states can land on the same principal town -- one Pomerania either
@@ -586,7 +592,7 @@ function referenceStateOf(p: RawProvince, proj: LccParams): number {
  * the neighbour it shares the most border with.
  */
 function regroupByReference(
-  raw: RawProvince[], blockOf: Int32Array, proj: LccParams,
+  raw: RawProvince[], blockOf: Int32Array, touching: number[][], proj: LccParams,
 ): number[][] {
   const key = new Array<string>(raw.length);
   for (let i = 0; i < raw.length; i++) {
@@ -602,9 +608,6 @@ function regroupByReference(
     if (list) list.push(i);
     else buckets.set(key[i], [i]);
   }
-
-  // Adjacency between cells, from the rings themselves.
-  const touching = adjacencyOf(raw);
 
   const out: number[][] = [];
   for (const members of buckets.values()) {
@@ -666,6 +669,92 @@ function regroupByReference(
     return ya - yb;
   });
   return kept;
+}
+
+
+/**
+ * Takes the regions that history moves on their own out of the states they
+ * would otherwise be buried in.
+ *
+ * The rim is grown a ring at a time from the frontier, nearest first, until it
+ * has the area the region actually had. Growing rather than drawing keeps it on
+ * real province edges and lets it follow the border round a corner, which a
+ * box could not: the Sudetenland is a horseshoe.
+ */
+function carveHistoricalStates(
+  groups: number[][], raw: RawProvince[], touching: number[][], proj: LccParams,
+): number[][] {
+  const stateOf = new Int32Array(raw.length).fill(-1);
+  groups.forEach((members, i) => { for (const m of members) stateOf[m] = i; });
+  const out = groups.map((m) => [...m]);
+
+  for (const carve of CARVE_1936) {
+    const taken = growRim(carve, raw, touching, proj);
+    if (taken.length === 0) {
+      console.warn(`  note: ${carve.name} found no frontier to grow from`);
+      continue;
+    }
+    for (const id of taken) {
+      const from = stateOf[id];
+      if (from < 0) continue;
+      out[from] = out[from].filter((m) => m !== id);
+    }
+    out.push(taken);
+    const id = out.length - 1;
+    for (const m of taken) stateOf[m] = id;
+    for (const m of taken) { raw[m].stateName = carve.name; raw[m].carved = carve.name; }
+    const area = taken.reduce((s, m) => s + raw[m].area, 0);
+    console.log(`  carved ${carve.name}: ${taken.length} cells, ${Math.round(area)} km2`);
+  }
+  return out.filter((m) => m.length > 0);
+}
+
+/** The provinces of one carve, grown inward from its frontier. */
+function growRim(
+  carve: Carve, raw: RawProvince[], touching: number[][], proj: LccParams,
+): number[] {
+  const eligible = (i: number): boolean => {
+    if (raw[i].tag !== carve.from) return false;
+    const [lon, lat] = unprojectLcc(raw[i].centre[0], raw[i].centre[1], proj);
+    const w = carve.window;
+    return lon >= w.minLon && lon <= w.maxLon && lat >= w.minLat && lat <= w.maxLat;
+  };
+
+  // Ring zero: our own ground that looks across the frontier.
+  let ring: number[] = [];
+  const chosen = new Set<number>();
+  for (let i = 0; i < raw.length; i++) {
+    if (!eligible(i)) continue;
+    if (!touching[i].some((nb) => carve.frontierWith.includes(raw[nb].tag))) continue;
+    ring.push(i);
+  }
+  // Nearest the frontier first, and by id after that so a rebuild takes the
+  // same ground twice.
+  ring.sort((a, b) => a - b);
+
+  // The first ring is taken whole, whatever it costs. It is the whole point:
+  // a rim that stops half way along the frontier does not separate the
+  // interior from it, and the cession would still find Prague on the German
+  // border and take that instead.
+  let area = 0;
+  for (const i of ring) { chosen.add(i); area += raw[i].area; }
+
+  while (area < carve.areaKm) {
+    const next: number[] = [];
+    for (const i of chosen) {
+      for (const nb of touching[i]) if (!chosen.has(nb) && eligible(nb)) next.push(nb);
+    }
+    if (next.length === 0) break;
+    let grew = false;
+    for (const i of [...new Set(next)].sort((a, b) => a - b)) {
+      if (area >= carve.areaKm) break;
+      chosen.add(i);
+      area += raw[i].area;
+      grew = true;
+    }
+    if (!grew) break;
+  }
+  return [...chosen].sort((a, b) => a - b);
 }
 
 /** Cell-to-cell adjacency, by shared ring geometry. */
@@ -737,6 +826,10 @@ function uniqueStateName(
 
 /** A state is called after the largest place inside it. */
 function stateNameFor(raw: RawProvince[], members: readonly number[]): string {
+  // Unless history has already named it. The Sudetenland is not called Ostrava
+  // just because Ostrava is the biggest town on it.
+  const given = raw[members[0]].carved;
+  if (given) return given;
   let best = members[0];
   let bestPop = -1;
   for (const m of members) {

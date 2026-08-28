@@ -171,3 +171,54 @@ export const CITY_NAMES_1936: Readonly<Record<string, string>> = {
   'Rijeka|HRV': 'Fiume',
   'Rodos|GRC': 'Rodi',
 };
+
+/**
+ * A region that has to exist as a state of its own because history hands it
+ * over on its own.
+ *
+ * 「ズデーテン地方は割譲できるようにステートだよ」. The reference has the
+ * Sudetenland as a separate state for exactly this reason, and the screenshot
+ * it was read off cannot show it: at nine hundred and fifty pixels for the
+ * whole of Europe, Bohemia is twenty pixels across and its German rim is two,
+ * so the extraction merged it into Prague. Left merged, Munich would have
+ * ceded the Czech capital in 1938 -- the cession takes the border states by
+ * weight, and undivided Bohemia is the heaviest thing on that border.
+ *
+ * The rim is grown inward from the frontier until it reaches the area the
+ * region actually had, rather than being drawn as a shape: the German-settled
+ * districts were a belt along the border, and that is a rule rather than an
+ * outline.
+ */
+export interface Carve {
+  /** Whose ground it is in January 1936. */
+  from: string;
+  name: string;
+  /** Grown inward from a frontier with any of these. */
+  frontierWith: string[];
+  /** How much to take, in square kilometres. */
+  areaKm: number;
+  /** Confined to this window, so a different border of the same country is
+   * not swept in with it. */
+  window: Window;
+}
+
+export const CARVE_1936: readonly Carve[] = [
+  {
+    // The German-speaking rim of Bohemia, Moravia and Czech Silesia: a
+    // horseshoe from Eger round to Troppau, which is what the Munich agreement
+    // moved. The window stops at the Moravian gate so that Slovakia's own
+    // frontier is left alone.
+    //
+    // Munich took about 29,000 km2 and this takes 39,000, because the first
+    // ring is taken whole and the Czech frontier with Germany and Austria is
+    // long enough that one ring of provinces already overruns the figure. The
+    // alternative is a rim with a gap in it, and a rim with a gap does not
+    // separate Prague from the German border -- which is the whole reason the
+    // region needs to be a state.
+    from: 'CZE',
+    name: 'Sudetenland',
+    frontierWith: ['GER', 'AUS'],
+    areaKm: 28_000,
+    window: { minLon: 11.8, maxLon: 19.0, minLat: 48.4, maxLat: 51.2 },
+  },
+];
