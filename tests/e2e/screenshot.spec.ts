@@ -29,12 +29,18 @@ interface Scene {
   setup?: (page: import('@playwright/test').Page) => Promise<void>;
 }
 
+/**
+ * Zoom is not free to choose: below about 0.2 the map is shorter than the
+ * viewport and the camera springs to the middle of it, so two scenes named for
+ * different places come out as the same picture of Europe. Only `europe-wide`
+ * wants that, and it asks for it deliberately.
+ */
 const SCENES: Scene[] = [
   { name: 'europe-wide', lon: 12.2, lat: 52.7, zoom: 0.055 },
   { name: 'central-europe', lon: 10.7, lat: 51.3, zoom: 0.18 },
   { name: 'germany-close', lon: 12.5, lat: 52.0, zoom: 0.42 },
-  { name: 'mediterranean', lon: 16.4, lat: 43.7, zoom: 0.12 },
-  { name: 'scandinavia', lon: 16.0, lat: 60.8, zoom: 0.12 },
+  { name: 'mediterranean', lon: 16.4, lat: 40.0, zoom: 0.22 },
+  { name: 'scandinavia', lon: 16.0, lat: 62.0, zoom: 0.22 },
   {
     name: 'terrain-mode',
     lon: 10.7, lat: 51.3, zoom: 0.18,
