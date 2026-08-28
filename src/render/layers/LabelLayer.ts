@@ -294,22 +294,29 @@ export class LabelLayer {
         : acc.members;
       const pool = home.length > 0 ? home : acc.members;
 
+      // Weighted by what is worth holding rather than by acreage. Area puts
+      // Italy's name in the Ionian, because Libya is four times the size of
+      // the peninsula and empty; victory points put it on the peninsula,
+      // which is where a player looks for it.
       let sx = 0;
       let sy = 0;
+      let weight = 0;
       let homeArea = 0;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const id of pool) {
         const p = this.index.get(id);
-        sx += p.centerX * p.area;
-        sy += p.centerY * p.area;
+        const w = p.vp;
+        sx += p.centerX * w;
+        sy += p.centerY * w;
+        weight += w;
         homeArea += p.area;
         minX = Math.min(minX, p.bbox[0]);
         minY = Math.min(minY, p.bbox[1]);
         maxX = Math.max(maxX, p.bbox[2]);
         maxY = Math.max(maxY, p.bbox[3]);
       }
-      const targetX = sx / Math.max(1, homeArea);
-      const targetY = sy / Math.max(1, homeArea);
+      const targetX = sx / Math.max(1, weight);
+      const targetY = sy / Math.max(1, weight);
 
       let best = pool[0];
       let bestD = Infinity;
