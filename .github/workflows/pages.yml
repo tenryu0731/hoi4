@@ -4,11 +4,14 @@ name: Deploy to GitHub Pages
 # point and its TypeScript sources are not runnable in a browser. This builds
 # first and publishes dist/, which is what the site needs to be.
 
+# main only. The github-pages environment will not deploy from anything else,
+# so a push to a working branch built fine and then failed on the deploy step
+# every single time -- a red cross on every pull request that meant nothing and
+# hid the ones that would have meant something.
 on:
   push:
     branches:
       - main
-      - claude/hoi4-grand-strategy-game-33etuq
   workflow_dispatch:
 
 permissions:
