@@ -26,14 +26,45 @@ describe('map data integrity', () => {
     data.states.forEach((s, i) => expect(s.id).toBe(i));
   });
 
-  it('has closed, non-degenerate rings with an even coordinate count', () => {
+  it('names arcs that exist, and assembles them into real rings', () => {
     for (const p of data.provinces) {
       expect(p.rings.length).toBeGreaterThan(0);
+      for (const ring of p.rings) {
+        expect(ring.length).toBeGreaterThan(0);
+        for (const ref of ring) {
+          const i = ref >= 0 ? ref : ~ref;
+          expect(i).toBeGreaterThanOrEqual(0);
+          expect(i).toBeLessThan(data.arcs.length);
+        }
+      }
+    }
+    for (const p of index.provinces) {
       expect(p.rings.length).toBe(p.ringDepth.length);
       for (const ring of p.rings) {
         expect(ring.length % 2).toBe(0);
         expect(ring.length / 2).toBeGreaterThanOrEqual(3);
         for (const v of ring) expect(Number.isFinite(v)).toBe(true);
+      }
+    }
+  });
+
+  it('closes every ring: each arc ends where the next begins', () => {
+    const arcs = index.arcs;
+    const head = (ref: number): [number, number] => (ref >= 0
+      ? [arcs[ref][0], arcs[ref][1]]
+      : [arcs[~ref][arcs[~ref].length - 2], arcs[~ref][arcs[~ref].length - 1]]);
+    const tail = (ref: number): [number, number] => (ref >= 0
+      ? [arcs[ref][arcs[ref].length - 2], arcs[ref][arcs[ref].length - 1]]
+      : [arcs[~ref][0], arcs[~ref][1]]);
+    for (const p of data.provinces) {
+      for (const ring of p.rings) {
+        for (let i = 0; i < ring.length; i++) {
+          const [ax, ay] = tail(ring[i]);
+          const [bx, by] = head(ring[(i + 1) % ring.length]);
+          expect(Math.hypot(ax - bx, ay - by),
+            `${p.name}: arc ${ring[i]} does not meet ${ring[(i + 1) % ring.length]}`)
+            .toBeLessThan(1e-3);
+        }
       }
     }
   });
@@ -168,6 +199,35 @@ describe('map data integrity', () => {
       expect([...(nb.get(a) ?? [])], `${a}-${b} must not be a land border`).not.toContain(b);
     }
   });
+
+  it('puts a coast at both ends of every sea crossing', () => {
+    for (const p of data.provinces) {
+      if (p.seaNeighbors.length === 0) continue;
+      expect(p.coastal, `${p.name} has a sea link but no coast`).toBe(true);
+      for (const nb of p.seaNeighbors) {
+        expect(data.provinces[nb].coastal,
+          `${p.name} sails to ${data.provinces[nb].name}, which has no coast`).toBe(true);
+      }
+    }
+  });
+
+  it('leaves the interior of the continent dry', () => {
+    // The gap between two coasts used to be believed whenever it measured
+    // under the land raster's resolution, so a T-junction between three inland
+    // provinces read as a strait: Nürnberg came out with sea neighbours in
+    // Coburg, Hof and Regensburg, four thousand of four thousand two hundred
+    // provinces were flagged coastal, and the AI shipped garrisons across
+    // Bavaria. A coast is a minority of a continent.
+    const coastal = data.provinces.filter((p) => p.coastal).length;
+    expect(coastal).toBeLessThan(data.provinces.length * 0.4);
+
+    // Named for how far each is from salt water, not for anything about them.
+    for (const name of ['Nürnberg', 'Paris', 'München', 'Praha', 'Madrid', 'Minsk']) {
+      const p = data.provinces.find((q) => q.name === name);
+      if (!p) continue;
+      expect(p.coastal, `${name} is inland`).toBe(false);
+    }
+  });
 });
 
 describe('ProvinceIndex', () => {
@@ -289,10 +349,14 @@ describe('ProvinceIndex', () => {
   });
 
   it('computes reachable sets that respect the passability predicate', () => {
-    const all = index.reachable(0, () => true);
+    // Not province 0: on this map that is Kolguyev, which has no land
+    // neighbour at all and would make the first assertion a lie about the
+    // predicate rather than about the island.
+    const mainland = index.provinces.find((p) => p.neighbors.length > 0)!.id;
+    const all = index.reachable(mainland, () => true);
     expect(all.size).toBeGreaterThan(1);
-    const none = index.reachable(0, (id) => id === 0);
-    expect([...none]).toEqual([0]);
+    const none = index.reachable(mainland, (id) => id === mainland);
+    expect([...none]).toEqual([mainland]);
   });
 
   it('measures symmetric, positive distances', () => {

@@ -35,8 +35,14 @@ export async function bootGame(page: Page, opts: BootOptions = {}): Promise<stri
 }
 
 /**
- * Drives the camera to a fixed position so screenshots do not depend on the
- * default framing, which shifts whenever the map data is rebuilt.
+ * Drives the camera over a place on the Earth, so screenshots do not depend on
+ * the default framing, which shifts whenever the map data is rebuilt.
+ *
+ * Longitude and latitude rather than render units, so that changing the
+ * projection reframes a scene instead of pointing it at open ocean. It did
+ * exactly that once: the scenes held Lambert coordinates, the map became
+ * cylindrical, and `germany-close` re-recorded itself as an empty stretch of
+ * the Atlantic.
  *
  * The requested position is then allowed to settle: when the map is smaller
  * than the viewport on an axis, the camera springs back to the centre of that
@@ -44,17 +50,34 @@ export async function bootGame(page: Page, opts: BootOptions = {}): Promise<stri
  * drift on whatever gesture it ran next.
  */
 export async function setCamera(
-  page: Page, x: number, y: number, zoom: number,
+  page: Page, lon: number, lat: number, zoom: number,
 ): Promise<void> {
-  await page.evaluate(({ x: cx, y: cy, z }) => {
+  await page.evaluate(({ x: lo, y: la, z }) => {
     const g = window.__game!;
+    const pr = g.index.data.projection;
+    const latOf = (row: number): number => {
+      const v = pr.latV0 + row * pr.latVStep;
+      let out = 0;
+      for (const c of pr.latPoly) out = out * v + c;
+      return out;
+    };
+    // The polynomial only runs one way, so it is inverted by bisection over
+    // the rows the map holds.
+    let loRow = 0;
+    let hiRow = 4000;
+    for (let i = 0; i < 60; i++) {
+      const mid = (loRow + hiRow) / 2;
+      if (latOf(mid) > la) loRow = mid; else hiRow = mid;
+    }
+    const cx = ((lo - pr.lon0) / pr.lonStep) * pr.quantum * pr.scale;
+    const cy = ((loRow + hiRow) / 2) * pr.quantum * pr.scale;
     g.renderer.camera.zoom = z;
     g.renderer.camera.x = cx;
     g.renderer.camera.y = cy;
     g.renderer.camera.velocityX = 0;
     g.renderer.camera.velocityY = 0;
     for (let i = 0; i < 60; i++) g.tickFrame(16.667);
-  }, { x, y, z: zoom });
+  }, { x: lon, y: lat, z: zoom });
   await page.waitForTimeout(120);
 }
 

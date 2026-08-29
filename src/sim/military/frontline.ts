@@ -138,14 +138,12 @@ export function assignToFront(
   // where the enemy comes through.
   const holes = front.filter((p) => (held.get(p) ?? 0) === 0);
   const send = (div: Division, choices: readonly ProvinceId[]): boolean => {
-    const from = ctx.index.get(div.provinceId);
     const order = [...choices].sort((a, b) => {
-      const pa = ctx.index.get(a);
-      const pb = ctx.index.get(b);
-      const da = Math.hypot(from.centerX - pa.centerX, from.centerY - pa.centerY)
-        + (held.get(a) ?? 0) * 4000;
-      const db = Math.hypot(from.centerX - pb.centerX, from.centerY - pb.centerY)
-        + (held.get(b) ?? 0) * 4000;
+      // On the sphere, not on the page: the map is drawn cylindrically and a
+      // cylindrical frame stretches east-west with latitude, so measuring in
+      // it would make a Finnish army think its own line ran diagonally.
+      const da = ctx.index.distance(div.provinceId, a) + (held.get(a) ?? 0) * 4000;
+      const db = ctx.index.distance(div.provinceId, b) + (held.get(b) ?? 0) * 4000;
       // By id after that, so the assignment is the same on every machine.
       return da - db || a - b;
     });
@@ -391,15 +389,10 @@ export function pressOffensive(
 
   /** Somewhere with room this division can actually march to, nearest first. */
   const send = (div: Division, choices: readonly ProvinceId[]): boolean => {
-    const here = ctx.index.get(div.provinceId);
     const order = choices
       .filter((id) => room(id) > 0)
-      .sort((a, b) => {
-        const pa = ctx.index.get(a);
-        const pb = ctx.index.get(b);
-        return Math.hypot(here.centerX - pa.centerX, here.centerY - pa.centerY)
-          - Math.hypot(here.centerX - pb.centerX, here.centerY - pb.centerY);
-      });
+      .sort((a, b) => ctx.index.distance(div.provinceId, a)
+        - ctx.index.distance(div.provinceId, b));
     for (const target of order) {
       if (!reorder(state, ctx, div, target)) continue;
       booked.set(target, (booked.get(target) ?? 0) + 1);

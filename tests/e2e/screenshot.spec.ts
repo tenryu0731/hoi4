@@ -22,35 +22,42 @@ const MAX_HOT_TILES = 4;
 
 interface Scene {
   name: string;
-  x: number;
-  y: number;
+  /** Where to point the camera, in degrees. */
+  lon: number;
+  lat: number;
   zoom: number;
   setup?: (page: import('@playwright/test').Page) => Promise<void>;
 }
 
+/**
+ * Zoom is not free to choose: below about 0.2 the map is shorter than the
+ * viewport and the camera springs to the middle of it, so two scenes named for
+ * different places come out as the same picture of Europe. Only `europe-wide`
+ * wants that, and it asks for it deliberately.
+ */
 const SCENES: Scene[] = [
-  { name: 'europe-wide', x: -200, y: -300, zoom: 0.055 },
-  { name: 'central-europe', x: -300, y: -150, zoom: 0.18 },
-  { name: 'germany-close', x: -180, y: -230, zoom: 0.42 },
-  { name: 'mediterranean', x: 100, y: 700, zoom: 0.12 },
-  { name: 'scandinavia', x: 100, y: -1200, zoom: 0.12 },
+  { name: 'europe-wide', lon: 12.2, lat: 52.7, zoom: 0.055 },
+  { name: 'central-europe', lon: 10.7, lat: 51.3, zoom: 0.18 },
+  { name: 'germany-close', lon: 12.5, lat: 52.0, zoom: 0.42 },
+  { name: 'mediterranean', lon: 16.4, lat: 40.0, zoom: 0.22 },
+  { name: 'scandinavia', lon: 16.0, lat: 62.0, zoom: 0.22 },
   {
     name: 'terrain-mode',
-    x: -300, y: -150, zoom: 0.18,
+    lon: 10.7, lat: 51.3, zoom: 0.18,
     setup: async (page) => {
       await page.evaluate(() => window.__game!.setMapMode('terrain'));
     },
   },
   {
     name: 'resource-mode',
-    x: -300, y: -150, zoom: 0.18,
+    lon: 10.7, lat: 51.3, zoom: 0.18,
     setup: async (page) => {
       await page.evaluate(() => window.__game!.setMapMode('resource'));
     },
   },
   {
     name: 'province-selected',
-    x: -300, y: -150, zoom: 0.22,
+    lon: 10.7, lat: 51.3, zoom: 0.22,
     setup: async (page) => {
       await page.evaluate(() => {
         const g = window.__game!;
@@ -66,7 +73,7 @@ test.describe('visual regression', () => {
     test(`scene: ${scene.name}`, async ({ page }) => {
       const errors = await bootGame(page, { seed: 20250101 });
       await freezeLoop(page);
-      await setCamera(page, scene.x, scene.y, scene.zoom);
+      await setCamera(page, scene.lon, scene.lat, scene.zoom);
       await scene.setup?.(page);
       // Two settled frames: one to apply the change, one to draw it.
       await page.evaluate(() => {
@@ -99,14 +106,14 @@ test.describe('visual regression', () => {
   test('the same seed renders identically twice', async ({ page }) => {
     await bootGame(page, { seed: 4242 });
     await freezeLoop(page);
-    await setCamera(page, -300, -150, 0.18);
+    await setCamera(page, 10.7, 51.3, 0.18);
     const first = await page.screenshot({ animations: 'disabled' });
 
     await page.reload();
     await page.waitForFunction(() => window.__gameReady === true, null, { timeout: 90_000 });
     await page.waitForTimeout(700);
     await freezeLoop(page);
-    await setCamera(page, -300, -150, 0.18);
+    await setCamera(page, 10.7, 51.3, 0.18);
     const second = await page.screenshot({ animations: 'disabled' });
 
     const r = compareToBaseline('determinism-check', second, {

@@ -21,7 +21,6 @@ export const PALETTE = {
   borderCoast: 0x2b2318,
 
   river: 0x3f7fa6,
-  lake: 0x24587a,
 
   textPrimary: 0xf2ead8,
   textShadow: 0x120e08,

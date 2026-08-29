@@ -303,7 +303,11 @@ describe('battle plans', () => {
 
     const time = new TimeEngine(f.state.clock.totalHours);
     time.on((c) => sim.tick(c));
-    time.step(24 * 20);
+    // Long enough for the line to have settled. Twenty days was enough when a
+    // front was six provinces long; the map is four times finer now, so the
+    // last divisions are still taking up their posts on day twenty and the
+    // first day of the measurement caught one of them moving one post over.
+    time.step(24 * 40);
 
     const where = new Map<number, number>();
     const sentTo = new Map<number, number | null>();

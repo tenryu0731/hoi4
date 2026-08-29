@@ -21,16 +21,21 @@ import type { CountryId, GameState, ProvinceId } from '../core/types';
  *
  * vp is how the map says "there is a town here", so the threshold reads the
  * data rather than picking a number. It is a sum over the towns inside a
- * province, which means it moves with how finely the map is cut: when the
- * cells were whole regions three was the gap, at 1704 cells five gave 133
- * harbours, and once the states were cut to the real game's granularity --
- * 2169 cells, a province being a town and its hinterland -- five let a
- * seventh of the whole map put a man on a ship. Of 1872 coastal cells, 637
- * carry three or more, 290 carry five, and 136 carry seven. Seven is where a
- * coastal cell has a town rather than a hamlet, and 136 harbours is the same
- * count the threshold was set to give when it was last measured.
+ * province, which means it moves with how finely the map is cut -- and with
+ * how much of the map is coast. Seven was measured against a coastline of
+ * 1,872 cells, which turned out to be four fifths of the continent: inland
+ * provinces were being flagged coastal, so the threshold was doing double
+ * duty as a filter for Nürnberg. With the coast corrected to 816 of 4,222
+ * provinces, seven left Germany with two harbours in the whole Reich and
+ * nothing at Kiel, Lübeck, Rostock or Bremerhaven.
+ *
+ * Of the 816 coastal provinces, 245 carry two or more, 235 three, 143 four
+ * and 128 five. Three is where a coastal province has a town rather than a
+ * hamlet -- it gives Germany the eight Baltic and North Sea harbours it
+ * actually had -- and 235 of 816 is a harbour on roughly every third piece
+ * of coast, which is what a 1936 admiralty chart looks like.
  */
-const PORT_VP = 7;
+const PORT_VP = 3;
 
 const cache = new WeakMap<ProvinceIndex, Set<ProvinceId>>();
 

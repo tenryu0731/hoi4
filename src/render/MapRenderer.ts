@@ -7,7 +7,7 @@ import type { CountryId, GameState, ProvinceId } from '../sim/core/types';
 import { Camera } from './Camera';
 import {
   PALETTE, RESOURCE_RAMP, SUPPLY_RAMP, TERRAIN_COLOR, VICTORY_RAMP,
-  type MapMode, mix, ramp, rgbToHex, shade,
+  type MapMode, mix, ramp, rgbToHex,
 } from './palette';
 import {
   createGrainTexture, createOceanTexture, createReliefTexture, createVerticalRamp,
@@ -63,6 +63,46 @@ const COARSE_REBUILD_PER_FRAME = 2;
 /** On-screen height of a front-line tag, and the size its atlas was built at. */
 const PLAN_LABEL_PX = 12;
 const PLAN_FONT_PX = 24;
+
+/**
+ * How finely a passage is divided when deciding which hulls sail together.
+ *
+ * Too fine and a corps that embarked over three days smears into a queue of
+ * single-ship marks; too coarse and a convoy halfway across snaps back onto
+ * one that has only just cast off. Eight is roughly a convoy a day on the
+ * Mediterranean crossings the AI actually makes.
+ */
+const CONVOY_BUCKETS = 8;
+
+/** Half-length of a convoy mark, in screen pixels at any zoom. */
+const CONVOY_PX = 10;
+
+/** A convoy under way: where it is, which way it is pointing, and how big. */
+interface Lane {
+  x: number;
+  y: number;
+  /** Unit heading, so the hull can be drawn bow-first. */
+  ux: number;
+  uy: number;
+  n: number;
+  owner: CountryId;
+}
+
+/** A hull seen from above -- blunt stern, pointed bow -- laid along a heading. */
+function hull(
+  g: Graphics,
+  at: (lane: Lane, along: number, across: number, r: number) => { x: number; y: number },
+  lane: Lane,
+  r: number,
+): void {
+  const p = [
+    at(lane, -1, -0.42, r), at(lane, 0.45, -0.42, r), at(lane, 1, 0, r),
+    at(lane, 0.45, 0.42, r), at(lane, -1, 0.42, r),
+  ];
+  g.moveTo(p[0].x, p[0].y);
+  for (let i = 1; i < p.length; i++) g.lineTo(p[i].x, p[i].y);
+  g.closePath();
+}
 
 /**
  * Which of the map's two tiers an outline belongs to. A province is where a
@@ -129,7 +169,6 @@ export class MapRenderer {
   private coarseTint: number[] = [];
   private coarseDirty = new Set<number>();
   private fillLayerIndex = 0;
-  private lakeLayer = new Graphics();
   private riverLayer = new Graphics();
   private borderLayer = new Graphics();
   private grain!: TilingSprite;
@@ -249,9 +288,7 @@ export class MapRenderer {
     this.world.addChild(this.coarseLayer);
     this.coarseLayer.visible = false;
 
-    this.world.addChild(this.lakeLayer);
     this.world.addChild(this.riverLayer);
-    this.buildWater();
 
     this.world.addChild(this.borderLayer);
 
@@ -290,7 +327,7 @@ export class MapRenderer {
     const passes: [number, number][] = [[46, 0.16], [16, 0.24]];
     for (const [width, alpha] of passes) {
       const g = new Graphics();
-      for (const ring of this.index.data.land) {
+      for (const ring of this.index.landRings) {
         this.tracePolygon(g, ring);
       }
       g.stroke({ color: PALETTE.coastGlow, width, alpha, join: 'round', cap: 'round' });
@@ -300,7 +337,7 @@ export class MapRenderer {
 
   private buildNeutralLand(): void {
     const g = this.neutralLand;
-    for (const ring of this.index.data.land) this.tracePolygon(g, ring);
+    for (const ring of this.index.landRings) this.tracePolygon(g, ring);
     g.fill({
       texture: this.reliefTexture,
       color: PALETTE.neutralLand,
@@ -387,12 +424,6 @@ export class MapRenderer {
     this.coarseDirty.add(tint);
   }
 
-  private buildWater(): void {
-    for (const ring of this.index.data.lakes) this.tracePolygon(this.lakeLayer, ring);
-    this.lakeLayer.fill({ color: PALETTE.lake });
-    this.lakeLayer.stroke({ color: shade(PALETTE.lake, 0.7), width: 3, alpha: 0.7 });
-  }
-
   /**
    * Redraws the city markers at the given zoom.
    *
@@ -467,7 +498,7 @@ export class MapRenderer {
     }
   }
 
-  private tracePolygon(g: Graphics, flat: number[]): void {
+  private tracePolygon(g: Graphics, flat: ArrayLike<number>): void {
     if (flat.length < 6) return;
     g.moveTo(flat[0], flat[1]);
     for (let i = 2; i < flat.length; i += 2) g.lineTo(flat[i], flat[i + 1]);
@@ -512,7 +543,6 @@ export class MapRenderer {
     // no states. It was showing both, as one undifferentiated mesh. What
     // separates them has to be weight, not alpha: 0.9 / 2.0 / 2.8 px of dark
     // core, each with its own halo, so the eye sorts them without being told.
-    const internal = this.internalBorders();
     if (step >= 2) {
       // The finest tier is a hairline with no halo. It is texture: it says
       // "this cell divides further", and it must not compete with the state
@@ -524,7 +554,9 @@ export class MapRenderer {
       // was given. At 0.9px of (92,83,67) over Germany's grey the seams were
       // measurably present and visually absent -- 3424 world units of them
       // inside Germany alone, and the screenshot showed three lines.
-      for (const line of internal.province) this.tracePolyline(g, line);
+      for (const i of this.index.data.borders.province) {
+        this.tracePolyline(g, this.index.arcs[i]);
+      }
       g.stroke({ color: 0x14110c, width: px(0.8), alpha: 0.22, join: 'round' });
     }
     if (step >= 1) {
@@ -541,27 +573,27 @@ export class MapRenderer {
       // were recovered per-edge from midpoints, so the light stroke drew a
       // lozenge around every two-vertex run and the map read as scale armour.
       // The boundaries now come straight out of the topology as whole arcs.
-      const seams = this.index.data.borders.province;
-      for (const line of seams) this.tracePolyline(g, line);
+      const seams = this.index.data.borders.state;
+      for (const i of seams) this.tracePolyline(g, this.index.arcs[i]);
       g.stroke({ color: 0xf0e6cf, width: px(3.4), alpha: 0.16, join: 'round', cap: 'round' });
-      for (const line of seams) this.tracePolyline(g, line);
+      for (const i of seams) this.tracePolyline(g, this.index.arcs[i]);
       g.stroke({ color: 0x14110c, width: px(2.1), alpha: 0.72, join: 'round', cap: 'round' });
     }
 
-    for (const line of this.index.data.borders.coast) this.tracePolyline(g, line);
+    for (const i of this.index.data.borders.coast) this.tracePolyline(g, this.index.arcs[i]);
     g.stroke({ color: PALETTE.borderCoast, width: px(1.4), alpha: 0.7, join: 'round' });
 
     // Country borders get a soft light halo first, then the dark line, which is
     // what gives printed political maps their engraved look.
-    for (const line of this.index.data.borders.country) this.tracePolyline(g, line);
+    for (const i of this.index.data.borders.country) this.tracePolyline(g, this.index.arcs[i]);
     g.stroke({ color: 0xf0e6cf, width: px(4.4), alpha: 0.26, join: 'round', cap: 'round' });
-    for (const line of this.index.data.borders.country) this.tracePolyline(g, line);
+    for (const i of this.index.data.borders.country) this.tracePolyline(g, this.index.arcs[i]);
     g.stroke({ color: PALETTE.borderCountry, width: px(2.8), alpha: 0.95, join: 'round', cap: 'round' });
 
     const rg = this.riverLayer;
     rg.clear();
     if (step >= 2) {
-      for (const line of this.index.data.rivers) this.tracePolyline(rg, line);
+      for (const line of this.index.rivers) this.tracePolyline(rg, line);
       rg.stroke({ color: PALETTE.river, width: px(1.3), alpha: 0.55, join: 'round', cap: 'round' });
     }
 
@@ -574,7 +606,7 @@ export class MapRenderer {
     this.units.setZoom(zoom);
   }
 
-  private tracePolyline(g: Graphics, flat: number[]): void {
+  private tracePolyline(g: Graphics, flat: ArrayLike<number>): void {
     if (flat.length < 4) return;
     g.moveTo(flat[0], flat[1]);
     for (let i = 2; i < flat.length; i += 2) g.lineTo(flat[i], flat[i + 1]);
@@ -1078,9 +1110,11 @@ export class MapRenderer {
     const zoom = Math.max(0.02, this.camera.zoom);
     const u = 1 / zoom;
 
-    // One mark per crossing, not per division: twelve divisions in one convoy
-    // are one convoy.
-    const lanes = new Map<string, { x: number; y: number; n: number; owner: CountryId }>();
+    // One mark per convoy, not per division: twelve divisions crossing together
+    // are one convoy. Bucketed coarsely along the passage as well as by lane,
+    // so a column that left on successive days reads as the two or three
+    // convoys it is rather than as a dozen separate hulls a pixel apart.
+    const lanes = new Map<string, Lane>();
     for (const d of state.divisions) {
       if (d.dead || d.path.length === 0) continue;
       const to = d.path[0];
@@ -1088,44 +1122,79 @@ export class MapRenderer {
       const a = this.index.provinces[d.provinceId];
       const b = this.index.provinces[to];
       if (!a || !b) continue;
-      // Rounded, so the whole convoy shares one mark instead of smearing into
-      // a line of hulls a pixel apart.
-      const t = Math.round(Math.min(1, Math.max(0, d.moveProgress)) * 24) / 24;
-      const key = `${d.provinceId}:${to}:${t}`;
+      const t = Math.round(Math.min(1, Math.max(0, d.moveProgress)) * CONVOY_BUCKETS)
+        / CONVOY_BUCKETS;
+      const key = `${d.provinceId}:${to}:${t}:${d.owner}`;
       const lane = lanes.get(key);
       if (lane) { lane.n++; continue; }
+      const dx = b.centerX - a.centerX;
+      const dy = b.centerY - a.centerY;
       const at = this.afloat(
-        a.centerX + (b.centerX - a.centerX) * t,
-        a.centerY + (b.centerY - a.centerY) * t,
-        b.centerY - a.centerY, -(b.centerX - a.centerX),
+        a.centerX + dx * t, a.centerY + dy * t, dy, -dx,
       );
-      lanes.set(key, { x: at.x, y: at.y, n: 1, owner: d.owner });
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      lanes.set(key, { x: at.x, y: at.y, ux: dx / len, uy: dy / len, n: 1, owner: d.owner });
     }
     if (lanes.size === 0) return;
 
+    // Bow-first. The hull used to be drawn pointing east whatever course it
+    // was on, so a convoy steaming south read as a shape lying across its own
+    // wake rather than as a ship: 「船みたいな謎のもの」. A mark that does not
+    // face where it is going is not a ship, it is a smudge.
+    const at = (lane: Lane, along: number, across: number, r: number) => ({
+      x: lane.x + lane.ux * along * r - lane.uy * across * r,
+      y: lane.y + lane.uy * along * r + lane.ux * across * r,
+    });
+    // A fixed size on screen, as the counters are. The ceiling this replaces
+    // was in world units, so it did the opposite of what a ceiling is for:
+    // 26km is 11 screen pixels at the zoom the Baltic fills the phone and half
+    // a pixel at the zoom Europe does, and the convoys disappeared exactly
+    // when the player was looking at the sea they were crossing.
+    const size = (lane: Lane) => CONVOY_PX * u * (lane.n > 3 ? 1.15 : 1);
+
     for (const lane of lanes.values()) {
-      const r = Math.min(9 * u, 26);
+      const r = size(lane);
       // A wake: two short strokes trailing the hull, which is what says the
       // thing is under way rather than anchored.
-      g.moveTo(lane.x - r * 2.2, lane.y - r * 0.5);
-      g.lineTo(lane.x - r * 0.7, lane.y - r * 0.5);
-      g.moveTo(lane.x - r * 1.7, lane.y + r * 0.5);
-      g.lineTo(lane.x - r * 0.6, lane.y + r * 0.5);
+      for (const side of [-0.5, 0.5]) {
+        const tail = at(lane, side === -0.5 ? -2.2 : -1.7, side, r);
+        const head = at(lane, -0.7, side, r);
+        g.moveTo(tail.x, tail.y);
+        g.lineTo(head.x, head.y);
+      }
     }
     g.stroke({ color: 0xd8ecf4, width: 1.6 * u, alpha: 0.5, cap: 'round' });
 
+    // A dark shadow under the hull, so the mark separates from the sea at any
+    // zoom instead of dissolving into it.
+    for (const lane of lanes.values()) hull(g, at, lane, size(lane) * 1.28);
+    g.fill({ color: 0x07100f, alpha: 0.55 });
+
+    for (const lane of lanes.values()) hull(g, at, lane, size(lane));
+    // The owner's colour, as on its counters. Filling this in the sea's own
+    // shade -- which is what it used to be -- left nothing but the outline,
+    // and an outline drifting across the Mediterranean belongs to nobody.
+    g.fill({ color: 0x24313a, alpha: 0.95 });
+
     for (const lane of lanes.values()) {
-      const r = Math.min(9 * u, 26);
-      // A hull, seen from above: a blunt stern and a pointed bow.
-      g.moveTo(lane.x - r, lane.y - r * 0.42);
-      g.lineTo(lane.x + r * 0.45, lane.y - r * 0.42);
-      g.lineTo(lane.x + r, lane.y);
-      g.lineTo(lane.x + r * 0.45, lane.y + r * 0.42);
-      g.lineTo(lane.x - r, lane.y + r * 0.42);
+      const r = size(lane);
+      // A deck stripe in the owner's colour: the identity, on a hull small
+      // enough that filling the whole thing would read as a coloured blob.
+      const tint = rgbToHex(state.countries[lane.owner].color);
+      const c1 = at(lane, -0.62, -0.3, r);
+      const c2 = at(lane, 0.34, -0.3, r);
+      const c3 = at(lane, 0.34, 0.3, r);
+      const c4 = at(lane, -0.62, 0.3, r);
+      g.moveTo(c1.x, c1.y);
+      g.lineTo(c2.x, c2.y);
+      g.lineTo(c3.x, c3.y);
+      g.lineTo(c4.x, c4.y);
       g.closePath();
+      g.fill({ color: tint, alpha: 0.95 });
     }
-    g.fill({ color: 0x1d2a30, alpha: 0.92 });
-    g.stroke({ color: 0xd8ecf4, width: 1.2 * u, alpha: 0.85, join: 'round' });
+
+    for (const lane of lanes.values()) hull(g, at, lane, size(lane));
+    g.stroke({ color: 0xe6f2f8, width: 1.3 * u, alpha: 0.95, join: 'round' });
   }
 
   /**
@@ -1269,45 +1338,16 @@ export class MapRenderer {
   }
 
   /**
-   * Seams inside a country, split by which tier they separate.
+   * The three land tiers now come straight out of the map file.
    *
-   * The state tier is not one of them any more. States are now merged out of
-   * real administrative units, so the map build knows exactly which arcs sit
-   * between two of them and ships them in borders.province -- one unbroken
-   * polyline per stretch of state boundary, which is what the tier wanted all
-   * along.
-   *
-   * The province tier is still built here, because a Voronoi seam inside a
-   * state exists only in the cells themselves. It is built from whole rings
-   * rather than from the runs two provinces agree on. The agreement version
-   * drew the map as fish scales, and the measurement says why: the average
-   * boundary between two provinces is **2.7 vertices long**, so the mesh was
-   * thousands of two-point capsules -- and 28% of neighbouring pairs produced
-   * no run at all, leaving holes as well. A ring is a closed loop and needs no
-   * agreement with anything, so the tier is simply every outline.
+   * They used to be recovered here: the state seam from the units the build
+   * merged, and the province hairline from whole province outlines, because a
+   * Voronoi seam existed only in the cells themselves. The map is traced from
+   * one raster now, so every boundary is an arc that knows the two cells it
+   * separates, and which tier it belongs to is a question about those two
+   * cells rather than a reconstruction. Each line is also drawn once rather
+   * than once per province that touches it.
    */
-  private internalCache: { province: number[][] } | null = null;
-
-  private internalBorders(): { province: number[][] } {
-    if (this.internalCache) return this.internalCache;
-    const province: number[][] = [];
-    for (const p of this.index.provinces) {
-      for (const ring of p.rings) {
-        const n = ring.length / 2;
-        if (n < 2) continue;
-        // The whole outline, as the finest tier.
-        const loop: number[] = [];
-        for (let i = 0; i <= n; i++) {
-          const j = (i % n) * 2;
-          loop.push(ring[j], ring[j + 1]);
-        }
-        province.push(loop);
-      }
-    }
-    this.internalCache = { province };
-    return this.internalCache;
-  }
-
   private frontCache = new Map<number, number[][]>();
 
   private sharedBorderCached(a: ProvinceId, b: ProvinceId): number[][] {
