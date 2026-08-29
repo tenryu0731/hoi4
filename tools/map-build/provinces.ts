@@ -5,7 +5,7 @@ import type { ResourceType, TerrainType } from '../../src/sim/core/types';
 import { NATION_BY_TAG, NATIONS } from '../../src/sim/scenario/nations';
 import { CARVE_1936 } from './historical';
 import type { Pt, Ring } from './geo';
-import { loadReference, ringPoints, traceGrid, WATER } from './raster';
+import { chainRings, loadReference, ringPoints, traceGrid, WATER } from './raster';
 import { simplifyArc } from './topology';
 import type { AdminUnit } from './states';
 
@@ -615,13 +615,24 @@ function assignOwners(
   const owner = new Int16Array(w * h).fill(-1);
 
   const rowOf = rowLookup(ref);
-  for (const unit of admin) {
+  // Which unit painted each pixel, alongside which tag, so a unit that the
+  // vote erases can be found again afterwards.
+  const unitAt = new Int32Array(w * h).fill(-1);
+  // How many pixels each unit covered at all, land or water. A unit that
+  // covered none is smaller than the lattice; one that covered only water is
+  // an island this export does not have. The two need opposite answers.
+  const painted = new Int32Array(admin.length);
+  admin.forEach((unit, ui) => {
     let ti = tagIndex.get(unit.tag);
     if (ti === undefined) { ti = tags.length; tags.push(unit.tag); tagIndex.set(unit.tag, ti); }
     for (const ring of unit.lonLat) {
-      fillRing(ring, ref, rowOf, w, h, (i) => { owner[i] = ti as number; });
+      fillRing(ring, ref, rowOf, w, h, (i) => {
+        owner[i] = ti as number;
+        unitAt[i] = ui;
+        painted[ui]++;
+      });
     }
-  }
+  });
 
   const votes = new Map<number, Map<number, number>>();
   const idOf = new Int32Array(ref.provinceCount + 1).fill(-1);
@@ -661,6 +672,119 @@ function assignOwners(
     }
     c.tag = best || NATIONS[0].tag;
   }
+
+  rescueErasedUnits(cells, ref, admin, unitAt, painted, idOf);
+}
+
+/** How far from a cell a claim may stand, in the cell's own radii. */
+const RESCUE_REACH = 1.5;
+/** How much of a cell a distant claim must cover to be believed. */
+const RESCUE_SHARE = 0.05;
+
+/**
+ * Gives back the ground the vote took from anything smaller than a province.
+ *
+ * A majority is the right answer for a frontier and the wrong one for a
+ * territory that does not fill a cell. Gibraltar is six square kilometres
+ * against a cell of two thousand, so every pixel of the cell that is not
+ * Gibraltar is Spain and the vote hands the Rock to Spain; the same
+ * arithmetic gave Rhodes to Turkey, whose coast is twenty kilometres away.
+ *
+ * So: a unit that does not hold a single one of the cells it covers has been
+ * erased rather than outvoted, and it takes the cell it covers most. Only
+ * then -- a unit that lost one cell of six and kept the others is a border
+ * being drawn, which is what the vote is for.
+ *
+ * A claim still has to be credible, because the two sources are fitted to
+ * each other and the fit is loose in places. It is credible if the unit
+ * stands on the cell -- within about a cell's own reach of it -- or if it
+ * covers a real share of the cell without standing near the middle, which is
+ * what an island group looks like when the export draws it as one piece: the
+ * Dodecanese are a hundred and thirty kilometres from the point that
+ * represents their cell and still cover a fifth of it. Neither is true of a
+ * unit the export simply does not contain. Malta is not on this map at all,
+ * so a Maltese parish lands on Sicily -- one pixel of two hundred, a hundred
+ * and twenty kilometres out -- and rescuing it painted a piece of Sicily
+ * British. There is no ground here to give it, and saying so is the honest
+ * answer.
+ */
+function rescueErasedUnits(
+  cells: Cell[], ref: ReturnType<typeof loadReference>, admin: AdminUnit[],
+  unitAt: Int32Array, painted: Int32Array, idOf: Int32Array,
+): void {
+  const { w, h } = ref;
+  // Pixels each unit contributes to each cell.
+  const spread = admin.map(() => new Map<number, number>());
+  for (let i = 0; i < w * h; i++) {
+    const ui = unitAt[i];
+    if (ui < 0) continue;
+    const cell = ref.provinces[i];
+    if (cell === WATER) continue;
+    const id = idOf[cell];
+    if (id < 0) continue;
+    const m = spread[ui];
+    m.set(id, (m.get(id) ?? 0) + 1);
+  }
+
+  const rescued: string[] = [];
+  const taken = new Set<number>();
+  admin.forEach((unit, ui) => {
+    const m = spread[ui];
+    let held = false;
+    let best = -1;
+    let bestN = 0;
+    for (const [id, n] of m) {
+      if (cells[id].tag === unit.tag) held = true;
+      if (n > bestN) { bestN = n; best = id; }
+    }
+    if (held) return;
+    const at = unitCentre(unit);
+    if (!at) return;
+    if (m.size === 0) {
+      // Nothing to rescue unless the unit is smaller than a lattice pixel and
+      // therefore covers nothing at all. One that painted pixels and reached
+      // no cell painted only water, which is a different thing: an island the
+      // export does not draw.
+      if (painted[ui] > 0) return;
+      best = cellAtLonLat(ref, idOf, at[0], at[1]);
+    }
+    if (best < 0 || taken.has(best) || cells[best].tag === unit.tag) return;
+
+    const cell = cells[best];
+    const reach = Math.sqrt(cell.areaKm / Math.PI);
+    const away = haversineKm(at[0], at[1], cell.lon, cell.lat);
+    if (away > reach * RESCUE_REACH && bestN < cell.pixels * RESCUE_SHARE) return;
+
+    taken.add(best);
+    rescued.push(`${unit.name} (${cell.tag} -> ${unit.tag})`);
+    cell.tag = unit.tag;
+  });
+  if (rescued.length > 0) {
+    console.log(`  ${rescued.length} units the vote had erased: `
+      + `${rescued.join(', ')}`);
+  }
+}
+
+/** Mean of a unit's outline, which is inside it for anything this small. */
+function unitCentre(unit: AdminUnit): [number, number] | null {
+  let lon = 0;
+  let lat = 0;
+  let n = 0;
+  for (const ring of unit.lonLat) {
+    for (const [x, y] of ring) { lon += x; lat += y; n++; }
+  }
+  return n === 0 ? null : [lon / n, lat / n];
+}
+
+/** The province standing on this point, or -1 for water and off the map. */
+function cellAtLonLat(
+  ref: ReturnType<typeof loadReference>, idOf: Int32Array, lon: number, lat: number,
+): number {
+  const col = Math.round((lon - ref.lon0) / ref.lonStep);
+  const row = ref.rowOfLat(lat);
+  if (col < 0 || col >= ref.w || row < 0 || row >= ref.h) return -1;
+  const cell = ref.provinces[row * ref.w + col];
+  return cell === WATER ? -1 : idOf[cell];
 }
 
 /**
@@ -1073,37 +1197,13 @@ function landRings(topo: ReturnType<typeof traceGrid>, cells: Cell[]): number[][
     const leftLand = land.has(left);
     const rightLand = land.has(right);
     if (leftLand === rightLand) continue;
+    // Wound with land on the left, so a coastline and the shore of a lake
+    // inside it come out with opposite signed areas and the lake reads as a
+    // hole rather than as more ground.
     refs.push(leftLand ? i : ~i);
   }
-
-  const key = (p: Pt): string => `${p[0]},${p[1]}`;
-  const head = (r: number): Pt => (r >= 0 ? topo.arcs[r][0] : lastOf(topo.arcs[~r]));
-  const tail = (r: number): Pt => (r >= 0 ? lastOf(topo.arcs[r]) : topo.arcs[~r][0]);
-  const open = new Map<string, number[]>();
-  for (const r of refs) {
-    const k = key(head(r));
-    const list = open.get(k);
-    if (list) list.push(r); else open.set(k, [r]);
-  }
-  const used = new Set<number>();
-  const rings: number[][] = [];
-  for (const seed of refs) {
-    if (used.has(seed)) continue;
-    const ring: number[] = [];
-    let cur = seed;
-    for (let guard = 0; guard <= refs.length; guard++) {
-      used.add(cur);
-      ring.push(cur);
-      const next = (open.get(key(tail(cur))) ?? []).find((r) => !used.has(r));
-      if (next === undefined) break;
-      cur = next;
-    }
-    rings.push(ring);
-  }
-  return rings;
+  return chainRings(refs, topo.arcs);
 }
-
-const lastOf = (pts: Pt[]): Pt => pts[pts.length - 1];
 
 // ---------------------------------------------------------------------------
 // National assets

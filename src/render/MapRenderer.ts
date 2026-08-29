@@ -150,7 +150,6 @@ export class MapRenderer {
   private oceanSprite!: TilingSprite;
   private oceanDepth!: Sprite;
   private glowLayer = new Container();
-  private neutralLand = new Graphics();
   private fillLayer = new Container();
   private provinceFills: Graphics[] = [];
   /**
@@ -279,9 +278,13 @@ export class MapRenderer {
     this.buildCoastGlow();
 
     // --- land --------------------------------------------------------------
-    this.world.addChild(this.neutralLand);
-    this.buildNeutralLand();
-
+    // Only what a country owns is painted. There is no layer under the
+    // province fills: one existed, filling the land silhouette with a neutral
+    // tone so unowned ground would not read as sea, and every lake on the map
+    // sat on top of it -- Ladoga, Onega, Vänern, Peipus, the whole Finnish
+    // Lakeland -- because a lake is a hole in the silhouette and the layer
+    // filled it in grey. Every cell has an owner now, so the layer had
+    // nothing left to cover but water.
     this.world.addChild(this.fillLayer);
     this.fillLayerIndex = this.world.getChildIndex(this.fillLayer);
     this.buildProvinceFills();
@@ -333,17 +336,6 @@ export class MapRenderer {
       g.stroke({ color: PALETTE.coastGlow, width, alpha, join: 'round', cap: 'round' });
       this.glowLayer.addChild(g);
     }
-  }
-
-  private buildNeutralLand(): void {
-    const g = this.neutralLand;
-    for (const ring of this.index.landRings) this.tracePolygon(g, ring);
-    g.fill({
-      texture: this.reliefTexture,
-      color: PALETTE.neutralLand,
-      textureSpace: 'global',
-      matrix: new Matrix().scale(1.6, 1.6),
-    });
   }
 
   private buildProvinceFills(): void {

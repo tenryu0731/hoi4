@@ -320,6 +320,24 @@ function assembleRings(
     push(sides[i].right, ~i);
   }
 
+  const out = new Map<number, number[][]>();
+  for (const [cell, refs] of byCell) out.set(cell, chainRings(refs, arcs));
+  return out;
+}
+
+/**
+ * Chains signed arc references into closed rings.
+ *
+ * Arcs meet only at their endpoints, so the chain is found by looking up which
+ * arc starts where the last one ended. Several may: a cell that pinches to a
+ * point has two, and a headland where three provinces meet the sea has three.
+ * Taking whichever comes first threads the ring through the wrong one and ties
+ * two separate loops together: the land silhouette came out as 263 rings that
+ * way and 285 this way, the difference being islands welded to the mainland
+ * through a shared corner. Turning as far left as the incoming heading allows
+ * keeps the ring on its own side of the junction.
+ */
+export function chainRings(refs: readonly number[], arcs: Pt[][]): number[][] {
   const head = (ref: number): Pt => (ref >= 0 ? arcs[ref][0] : last(arcs[~ref]));
   const tail = (ref: number): Pt => (ref >= 0 ? last(arcs[ref]) : arcs[~ref][0]);
   // The direction the ring leaves this arc's start, or arrives at its end,
@@ -333,44 +351,39 @@ function assembleRings(
     return Math.atan2(b[1] - a[1], b[0] - a[0]);
   };
 
-  const out = new Map<number, number[][]>();
-  for (const [cell, refs] of byCell) {
-    const open = new Map<string, number[]>();
-    for (const ref of refs) {
-      const k = key(head(ref));
-      const list = open.get(k);
-      if (list) list.push(ref); else open.set(k, [ref]);
-    }
-    const used = new Set<number>();
-    const rings: number[][] = [];
-    for (const seed of refs) {
-      if (used.has(seed)) continue;
-      const ring: number[] = [];
-      let cur = seed;
-      for (let guard = 0; guard <= refs.length; guard++) {
-        used.add(cur);
-        ring.push(cur);
-        const at = key(tail(cur));
-        const candidates = (open.get(at) ?? []).filter((r) => !used.has(r));
-        if (candidates.length === 0) break;
-        if (candidates.length === 1) { cur = candidates[0]; continue; }
-        // A pinch point. Turn as far left as the incoming heading allows.
-        const inbound = heading(cur, false);
-        let best = candidates[0];
-        let bestTurn = -Infinity;
-        for (const c of candidates) {
-          let turn = heading(c, true) - inbound;
-          while (turn <= -Math.PI) turn += 2 * Math.PI;
-          while (turn > Math.PI) turn -= 2 * Math.PI;
-          if (turn > bestTurn) { bestTurn = turn; best = c; }
-        }
-        cur = best;
-      }
-      if (ring.length > 0) rings.push(ring);
-    }
-    out.set(cell, rings);
+  const open = new Map<string, number[]>();
+  for (const ref of refs) {
+    const k = key(head(ref));
+    const list = open.get(k);
+    if (list) list.push(ref); else open.set(k, [ref]);
   }
-  return out;
+  const used = new Set<number>();
+  const rings: number[][] = [];
+  for (const seed of refs) {
+    if (used.has(seed)) continue;
+    const ring: number[] = [];
+    let cur = seed;
+    for (let guard = 0; guard <= refs.length; guard++) {
+      used.add(cur);
+      ring.push(cur);
+      const at = key(tail(cur));
+      const candidates = (open.get(at) ?? []).filter((r) => !used.has(r));
+      if (candidates.length === 0) break;
+      if (candidates.length === 1) { cur = candidates[0]; continue; }
+      const inbound = heading(cur, false);
+      let best = candidates[0];
+      let bestTurn = -Infinity;
+      for (const c of candidates) {
+        let turn = heading(c, true) - inbound;
+        while (turn <= -Math.PI) turn += 2 * Math.PI;
+        while (turn > Math.PI) turn -= 2 * Math.PI;
+        if (turn > bestTurn) { bestTurn = turn; best = c; }
+      }
+      cur = best;
+    }
+    if (ring.length > 0) rings.push(ring);
+  }
+  return rings;
 }
 
 const last = (pts: Pt[]): Pt => pts[pts.length - 1];
