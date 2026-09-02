@@ -119,6 +119,8 @@ export class ProvinceIndex {
   private unitX: Float64Array;
   private unitY: Float64Array;
   private unitZ: Float64Array;
+  /** Latitude and longitude to a render position: `geographer` run backwards. */
+  private surveyor: (lon: number, lat: number) => [number, number];
 
   private constructor(data: MapDataJson) {
     this.data = data;
@@ -139,6 +141,7 @@ export class ProvinceIndex {
       return out;
     });
     const place = geographer(data.projection);
+    this.surveyor = surveyor(data.projection);
     this.provinces = data.provinces.map((p) => toProvince(p, this.arcs, scale, place));
     const n0 = this.provinces.length;
     this.unitX = new Float64Array(n0);
@@ -336,6 +339,19 @@ export class ProvinceIndex {
       if (this.contains(cands[i], x, y)) return cands[i];
     }
     return null;
+  }
+
+  /**
+   * The province standing at a place on the Earth, or null for sea and for
+   * ground this map does not draw.
+   *
+   * The counterpart of `get(id).lon/lat`, and the way to ask a question about
+   * real geography -- who held Danzig, is Reykjavík ashore -- without
+   * hand-rolling the projection at the call site.
+   */
+  atLonLat(lon: number, lat: number): ProvinceId | null {
+    const [x, y] = this.surveyor(lon, lat);
+    return this.pick(x, y);
   }
 
   /**
@@ -725,6 +741,43 @@ function geographer(
     let lat = 0;
     for (const c of latPoly) lat = lat * v + c;
     return [lon0 + lonStep * (col / quantum), lat];
+  };
+}
+
+/**
+ * Turns a place on the Earth into a render position.
+ *
+ * Longitude inverts in closed form; latitude does not, so the polynomial is
+ * tabulated once per row and bisected. The table is the same one the fit was
+ * made against, which is what keeps this and `geographer` exact inverses
+ * rather than merely close.
+ */
+function surveyor(
+  proj: MapDataJson['projection'],
+): (lon: number, lat: number) => [number, number] {
+  const { quantum, scale, lon0, lonStep, latPoly, latV0, latVStep } = proj;
+  const latAt = (row: number): number => {
+    const v = latV0 + row * latVStep;
+    let lat = 0;
+    for (const c of latPoly) lat = lat * v + c;
+    return lat;
+  };
+  // The fit is monotone over the map's rows; which way it runs comes from the
+  // file rather than from an assumption about north being up.
+  const rows = 4096;
+  const descending = latAt(0) > latAt(rows);
+  return (lon, lat) => {
+    let lo = 0;
+    let hi = rows;
+    for (let i = 0; i < 48; i++) {
+      const mid = (lo + hi) / 2;
+      if (descending ? latAt(mid) > lat : latAt(mid) < lat) lo = mid;
+      else hi = mid;
+    }
+    return [
+      ((lon - lon0) / lonStep) * quantum * scale,
+      ((lo + hi) / 2) * quantum * scale,
+    ];
   };
 }
 

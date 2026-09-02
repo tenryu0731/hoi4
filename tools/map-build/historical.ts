@@ -35,6 +35,15 @@ export const RETAG_1936: Readonly<Record<string, string>> = {
   // --- Czechoslovakia's eastern tail ---------------------------------------
   'UA-21': 'CZE', // Transcarpathia — Podkarpatská Rus
 
+  // --- The Moldavian ASSR, Soviet since 1924 --------------------------------
+  // Bessarabia was Romanian and the left bank of the Dniester was not: the
+  // autonomous republic inside Soviet Ukraine ran from Camenca down to
+  // Slobozia. Natural Earth files all of it under Moldova, which the roster
+  // reads as Romania, so without this the frontier sits on the wrong river.
+  'MD-SN': 'SOV', // Stînga Nistrului — the left bank as one unit
+  'MD-CAM': 'SOV', // Camenca
+  'MD-GRI': 'SOV', // Grigoriopol
+
   // --- Greater Romania ------------------------------------------------------
   'UA-77': 'ROM', // Chernivtsi — northern Bukovina
   'BG-08': 'ROM', // Dobrich — the Cadrilater, Romanian since 1913
@@ -112,6 +121,36 @@ export const CUTS_1936: readonly Cut[] = [
   { from: 'GR-L', tag: 'ITA', name: 'Dodecaneso',
     window: { minLon: 26.4, maxLon: 29.5, minLat: 34.8, maxLat: 37.6 } },
 ];
+
+/**
+ * Cells the vote gets wrong because the two sources are fitted to each other
+ * rather than drawn to the same border.
+ *
+ * The vote needs no help at an ordinary frontier: a border running down the
+ * middle of a cell has to come out on one side, and which side is a detail.
+ * It needs help where a whole 1936 territory is about the size of one cell
+ * and the fit puts most of that cell on the far side of the line. The Saar is
+ * that case -- returned to Germany by the plebiscite of January 1935, 2,570
+ * km² against a cell of some two thousand -- and the vote counts 83 pixels of
+ * Lorraine against 69 of Saarland, so the Reich's western border comes out
+ * forty kilometres east of where it stood.
+ *
+ * A point and who held it. Nothing here moves a border the two sources agree
+ * on, and nothing here belongs to a territory smaller than a cell: Fiume at
+ * 28 km² and Eupen-Malmedy at 1,036 cannot be provinces on this map however
+ * they are tagged, and pretending otherwise would hand Italy a Croatian
+ * province rather than give Italy Fiume.
+ */
+export const CLAIMS_1936: readonly Claim[] = [
+  { lon: 6.99, lat: 49.23, tag: 'GER', why: 'the Saar, returned by plebiscite in January 1935' },
+];
+
+export interface Claim {
+  lon: number;
+  lat: number;
+  tag: string;
+  why: string;
+}
 
 /**
  * Towns whose names had not changed yet, keyed by `NAME|ADM0_A3`.

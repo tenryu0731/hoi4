@@ -62,7 +62,7 @@ and the hairline cells the leftovers would make fall under the minimum size.
 | provinces | **4,271** |
 | provinces to a state | median **12**, p10 4, p90 24 |
 
-and what the build makes of it: 4,271 provinces and 479 states. The provinces
+and what the build makes of it: 4,271 provinces and 483 states. The provinces
 are one-for-one; the states are more numerous because a state here may not
 straddle a 1936 frontier or arrive in two pieces, and the reference's own
 grouping does both in a few places where its borders and Natural Earth's
@@ -98,3 +98,9 @@ Two known departures from the world:
   every province are put ashore on the nearest ground their own country holds.
 - **Malta** is not here at all: at 316 km² it is under the 250-pixel floor
   `derive.py` uses to reject the confetti left by the export's lettering.
+  Nothing on this map is British Malta, and nothing should be: Sicily is drawn
+  far enough south that Malta's own coordinates fall inside it, so the one
+  Maltese pixel Natural Earth paints lands on a Sicilian province. Giving it
+  to a Maltese parish painted a piece of Sicily British, which is why a
+  rescued claim has to be either near the cell it takes or covering a real
+  share of it (`RESCUE_REACH`, `RESCUE_SHARE` in `provinces.ts`).

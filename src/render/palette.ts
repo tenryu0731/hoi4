@@ -11,8 +11,6 @@ export const PALETTE = {
   /** Halo painted around every coastline to lift land off the water. */
   coastGlow: 0x74b3cf,
 
-  /** Land that belongs to no playable nation. */
-  neutralLand: 0x8f8974,
   /** Base tone the relief texture is tinted from. */
   landBase: 0xc9bda0,
 
