@@ -3,7 +3,7 @@ import type {
 } from '../../src/sim/map/MapData';
 import type { ResourceType, TerrainType } from '../../src/sim/core/types';
 import { NATION_BY_TAG, NATIONS } from '../../src/sim/scenario/nations';
-import { CARVE_1936 } from './historical';
+import { CARVE_1936, CLAIMS_1936 } from './historical';
 import type { Pt, Ring } from './geo';
 import { chainRings, loadReference, ringPoints, traceGrid, WATER } from './raster';
 import { simplifyArc } from './topology';
@@ -671,6 +671,19 @@ function assignOwners(
       if (d < bestD) { bestD = d; best = o.tag; }
     }
     c.tag = best || NATIONS[0].tag;
+  }
+
+  // Named corrections last, so nothing downstream can vote them away again.
+  for (const claim of CLAIMS_1936) {
+    const id = cellAtLonLat(ref, idOf, claim.lon, claim.lat);
+    if (id < 0) {
+      console.warn(`  claim for ${claim.why} lands on no province`);
+      continue;
+    }
+    if (cells[id].tag === claim.tag) continue;
+    console.log(`  ${claim.lon.toFixed(2)},${claim.lat.toFixed(2)}: `
+      + `${cells[id].tag} -> ${claim.tag}, ${claim.why}`);
+    cells[id].tag = claim.tag;
   }
 
   rescueErasedUnits(cells, ref, admin, unitAt, painted, idOf);
